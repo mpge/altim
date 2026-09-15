@@ -1,0 +1,55 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+artifacts/
+publish/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider / VS / VS Code
+.idea/
+.vs/
+.vscode/*
+!.vscode/extensions.json
+
+# Test + coverage
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.trx
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+!packages/build/
+
+# Packaging output
+dist/
+*.AppImage
+*.dmg
+*.msi
+*.msix
+*.deb
+*.rpm
+
+# Local runtime data (never commit real usage data)
+*.db
+*.db-shm
+*.db-wal
+local/
+*.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
