@@ -132,8 +132,118 @@ macOS and Linux paths come from upstream source, not local execution: **unverifi
 
 ## Anthropic agentic CLI
 
-Research in progress — this section lands with the same level of evidence before the provider is
-implemented.
+Verified against version `2.1.273` (native install) on Windows 11 with subscription authentication,
+against 2,069 local transcript files.
+
+### Sources
+
+| Metric | Source | Grade |
+|---|---|---|
+| 5-hour and weekly usage %, **with reset timestamps** | status line command stdin JSON → `rate_limits.{five_hour,seven_day,spend_limit}.{used_percentage,resets_at}` | Documented |
+| Live session cost (USD) | status line JSON → `cost.total_cost_usd` | Documented |
+| Context window state | status line JSON → `context_window.*` | Documented |
+| Prompt cache health | status line JSON → `prompt_cache.*` | Documented |
+| Usage summary without an open session | `claude -p --output-format json "/usage"` → human-readable text in `.result` | Best-effort |
+| Per-request tokens, per model, historical | `<config>/projects/**/*.jsonl`, `assistant` lines → `message.usage.*`, `message.model` | Best-effort |
+| Subagent tokens | `<config>/projects/<slug>/<session>/subagents/agent-*.jsonl` (`isSidechain: true`) | Best-effort |
+| Per-session totals with precomputed cost | `cost-state` entries in transcripts | Best-effort, rare (7 of 2,069 files) |
+| Rate-limit rejection events | `quotaLimits` on an `assistant` line → `{status, resetsAt, rateLimitType, …}` | Best-effort, event-only (4 of 2,069 files) |
+| Live token/cost stream per model and query source | OpenTelemetry: `CLAUDE_CODE_ENABLE_TELEMETRY=1` with the `console` or `prometheus` exporter | Documented |
+| Running sessions | `claude agents --json` → `[{pid, cwd, kind, startedAt, sessionId, name, status}]` | Documented |
+| Account tier | `~/.claude.json` → `oauthAccount.{userRateLimitTier, …}` | Best-effort |
+| Long-horizon aggregates | `<config>/stats-cache.json` | Unreliable — see below |
+| Per-user usage API | — the Admin API is organisation-only and explicitly unavailable for individual accounts | Unavailable |
+| Pricing table | — no prices ship locally; a price snapshot must be bundled | Unavailable |
+
+There is no `claude usage` or `claude cost` subcommand, and `/status` refuses to run headless.
+
+### Tier 1: the status line
+
+Claude Code invokes a user-configured status line command and passes it a JSON document on stdin
+containing exactly what Altim needs, including reset times:
+
+```json
+"rate_limits": {
+  "five_hour":  { "used_percentage": 53, "resets_at": 1789515600 },
+  "seven_day":  { "used_percentage": 85, "resets_at": 1789549200 }
+}
+```
+
+This is the only documented local source for reset timestamps, and it costs nothing. It comes with
+obligations Altim must honour:
+
+- **It requires writing to the user's `settings.json`.** Altim asks first, **merges** rather than
+  overwrites, never clobbers an existing status line, and offers a one-click revert.
+- The command must return in well under 100ms — Claude Code debounces at 300ms and cancels an
+  in-flight script when a newer update arrives. Altim's helper writes a small state file and exits.
+- Windows are dropped from the payload once their `resets_at` passes, so a missing window means
+  "no data", not "zero used".
+- A known defect has returned an epoch timestamp in place of a percentage before a window has data.
+  Altim clamps anything above 101 and treats it as unavailable.
+- Only populated after the first API response of a session, and only for subscription plans.
+
+### Tier 1b: headless usage summary
+
+`claude -p --output-format json "/usage"` runs without a session, reports `num_turns: 0` and
+`total_cost_usd: 0` — it consumes no tokens and costs nothing — and returns the usage summary as
+text inside `.result`, including the Opus-only and Sonnet-only weekly windows that the status line
+does not expose. Altim parses it defensively with anchored patterns and treats any parse failure as
+unavailable. It does reach the network, so it is disabled when the user chooses strict local-only mode.
+
+Altim does **not** call the undocumented `/api/oauth/usage` endpoint, because doing so requires
+reading the user's credential file.
+
+### Tier 2: transcript history
+
+Four traps, all measured, that a naive reader gets wrong:
+
+1. **Content blocks repeat the same usage object.** One transcript had 642 assistant lines but only
+   267 distinct `message.id`; summing lines overcounted output tokens by **3.15×**. Altim
+   de-duplicates on `message.id` with `requestId` and `sessionId`.
+2. **Subagent transcripts live in a separate directory and dominate.** Including `subagents/` took
+   one session from 24.8M to 125.1M cache-read tokens — **5× more**. Repo-wide here: 22 main
+   transcripts against 2,056 subagent transcripts.
+3. **`<synthetic>` model entries** are locally generated placeholders and are excluded from cost.
+   Model ids may carry a `[1m]` long-context suffix with its own pricing.
+4. **Cache creation is split** into `ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens`,
+   and the 1-hour tier — dominant in practice — bills at twice the rate. Pricing the flat
+   `cache_creation_input_tokens` field under-reports.
+
+Transcripts are pruned after ~30 days by default, so lifetime totals are not derivable from them.
+Anthropic explicitly disclaims the transcript format as internal and subject to change between
+versions; Altim treats every field as optional and degrades to unavailable rather than failing.
+
+A full cold scan of 1.30 GB across 2,080 files took 6.7 seconds in plain Python; Altim scans
+incrementally by modification time, so steady-state cost is negligible.
+
+`stats-cache.json` looks authoritative and is not: on the test machine it was seven months stale
+with every cost at zero, and its units have changed across versions. Altim reads it only behind a
+version check, and never as a primary source.
+
+### Paths
+
+| Item | Windows | macOS | Linux |
+|---|---|---|---|
+| Config root | `%USERPROFILE%\.claude\` | `~/.claude/` | `~/.claude/` |
+| Override | `CLAUDE_CONFIG_DIR` (may list several roots) | same | same |
+| Transcripts | `…\projects\<slug>\<session-uuid>.jsonl` | same | same |
+| Subagents | `…\projects\<slug>\<session>\subagents\agent-*.jsonl` | same | same |
+| Session registry | `…\.claude\sessions\<pid>.json` | same | same |
+| Global config | `%USERPROFILE%\.claude.json` | `~/.claude.json` | `~/.claude.json` |
+
+`<slug>` is the working directory with non-alphanumerics replaced by `-`. Altim also checks
+`~/.config/claude`. macOS and Linux behaviour is **unverified** — no such host was available.
+
+### Session detection
+
+`claude agents --json` is authoritative and already resolves liveness: a stale registry file
+claimed an idle session whose process id had been recycled to an unrelated program, and the command
+correctly omitted it. Process enumeration is the fallback, matching the CLI binary and excluding
+helper invocations such as the browser native host.
+
+**Altim never stores process command lines.** Enumerating processes on the test machine exposed a
+third-party tool passing an API key in plaintext in its arguments; a monitor that captured argv
+would ingest other people's secrets. Altim records an executable name and a boolean, nothing more.
 
 ---
 
