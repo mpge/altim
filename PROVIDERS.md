@@ -130,7 +130,7 @@ macOS and Linux paths come from upstream source, not local execution: **unverifi
 
 ---
 
-## Anthropic agentic CLI
+## Claude Code (Anthropic)
 
 Verified against version `2.1.273` (native install) on Windows 11 with subscription authentication,
 against 2,069 local transcript files.

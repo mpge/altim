@@ -26,7 +26,7 @@ with `PublishAot` in Release on Windows first, with the other platforms followin
 ```
 Altim.Core                 models, interfaces, aggregation, reset math, thresholds, scheduler
 Altim.Providers           provider contracts + shared JSONL/process helpers
-Altim.Providers.Anthropic  agentic CLI integration
+Altim.Providers.Claude     Claude Code integration
 Altim.Providers.Codex      OpenAI Codex integration
 Altim.Storage              SQLite: schema, migrations, history, settings
 Altim.UI                   Avalonia views, view models, design system, custom controls
@@ -51,7 +51,7 @@ These signatures are fixed; implementations are written against them.
 ```csharp
 public interface IUsageProvider
 {
-    string Id { get; }                       // "anthropic", "codex"
+    string Id { get; }                       // "claude", "codex"
     string DisplayName { get; }
     ProviderStatus Status { get; }
     ValueTask<ProviderUsage> GetUsageAsync(CancellationToken ct);

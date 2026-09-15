@@ -27,7 +27,7 @@ question: **what are my AI coding tools consuming right now?**
 
 | Provider | Status |
 |---|---|
-| Anthropic (agentic CLI) | in development |
+| Claude / Claude Code | in development |
 | OpenAI Codex | in development |
 | Gemini CLI, Cursor, GitHub Copilot | planned |
 
