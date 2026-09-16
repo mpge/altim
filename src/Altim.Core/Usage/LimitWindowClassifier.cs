@@ -24,6 +24,16 @@ public static class LimitWindowClassifier
     public const double MonthlyMinutes = 43_200d;
 
     /// <summary>
+    /// Shortest length still treated as monthly, in minutes: 28 days. A monthly window
+    /// anchored to a calendar month is 28, 29, 30 or 31 days long, so a single nominal
+    /// length with a tolerance around it would classify most real months as unknown.
+    /// </summary>
+    public const double MonthlyMinimumMinutes = 40_320d;
+
+    /// <summary>Longest length still treated as monthly, in minutes: 31 days.</summary>
+    public const double MonthlyMaximumMinutes = 44_640d;
+
+    /// <summary>
     /// How far a reported length may sit from a nominal one and still match: the greater
     /// of five minutes and one percent of the nominal length.
     /// </summary>
@@ -50,7 +60,7 @@ public static class LimitWindowClassifier
             _ when Matches(minutes, FiveHourMinutes) => LimitWindowKind.FiveHour,
             _ when Matches(minutes, DailyMinutes) => LimitWindowKind.Daily,
             _ when Matches(minutes, WeeklyMinutes) => LimitWindowKind.Weekly,
-            _ when Matches(minutes, MonthlyMinutes) => LimitWindowKind.Monthly,
+            _ when IsMonthly(minutes) => LimitWindowKind.Monthly,
             _ => LimitWindowKind.Other,
         };
     }
@@ -106,6 +116,17 @@ public static class LimitWindowClassifier
 
     private static bool Matches(double minutes, double nominalMinutes) =>
         Math.Abs(minutes - nominalMinutes) <= ToleranceMinutes(nominalMinutes);
+
+    /// <summary>
+    /// True for any length inside the 28 to 31 day band, with the usual tolerance at each
+    /// end. Nothing else Altim classifies sits anywhere near it, so the band costs no
+    /// precision elsewhere.
+    /// </summary>
+    private static bool IsMonthly(double minutes)
+    {
+        double tolerance = ToleranceMinutes(MonthlyMinutes);
+        return minutes >= MonthlyMinimumMinutes - tolerance && minutes <= MonthlyMaximumMinutes + tolerance;
+    }
 
     private static string Describe(TimeSpan length)
     {

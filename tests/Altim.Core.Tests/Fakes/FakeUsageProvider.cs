@@ -11,6 +11,7 @@ public sealed class FakeUsageProvider : IUsageProvider
 {
     private readonly TimeProvider _timeProvider;
     private int _refreshCount;
+    private int _networkCallCount;
     private int _concurrentRefreshes;
     private int _peakConcurrentRefreshes;
 
@@ -37,6 +38,21 @@ public sealed class FakeUsageProvider : IUsageProvider
 
     /// <summary>Awaited inside <see cref="RefreshAsync"/> when set, to hold a refresh open.</summary>
     public Task? RefreshGate { get; set; }
+
+    /// <summary>
+    /// False to model a provider that never looks at the token it was handed, which is
+    /// the provider shutdown has to survive.
+    /// </summary>
+    public bool HonoursCancellation { get; set; } = true;
+
+    /// <summary>
+    /// The gate this provider puts its own network call behind, or <see langword="null"/>
+    /// when it has no network call to make.
+    /// </summary>
+    public IRefreshGate? NetworkGate { get; set; }
+
+    /// <summary>How many times the gated network call actually ran.</summary>
+    public int NetworkCallCount => Volatile.Read(ref _networkCallCount);
 
     /// <summary>Signalled at the moment <see cref="RefreshAsync"/> is entered.</summary>
     public TaskCompletionSource RefreshEntered { get; private set; } =
@@ -74,7 +90,21 @@ public sealed class FakeUsageProvider : IUsageProvider
 
             if (RefreshGate is { } gate)
             {
-                await gate.WaitAsync(ct).ConfigureAwait(false);
+                if (HonoursCancellation)
+                {
+                    await gate.WaitAsync(ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await gate.ConfigureAwait(false);
+                }
+            }
+
+            // Only the network call is gated, never the whole read: the local sources are
+            // free either way.
+            if (NetworkGate is null || NetworkGate.TryAcquire(Id))
+            {
+                _ = Interlocked.Increment(ref _networkCallCount);
             }
 
             if (RefreshFailure is { } failure)
@@ -92,6 +122,9 @@ public sealed class FakeUsageProvider : IUsageProvider
             _ = RefreshCompleted.TrySetResult();
         }
     }
+
+    /// <summary>Raises <see cref="UsageChanged"/> the way a provider watcher would.</summary>
+    public void RaiseUsageChanged() => UsageChanged?.Invoke(this, Usage);
 
     public ValueTask<ProviderUsage> GetUsageAsync(CancellationToken ct)
     {

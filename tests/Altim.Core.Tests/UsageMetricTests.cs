@@ -1,4 +1,5 @@
 using Altim.Core.Models;
+using Altim.Core.Usage;
 using Xunit;
 
 namespace Altim.Core.Tests;
@@ -49,6 +50,31 @@ public sealed class UsageMetricTests
         var metric = new UsageMetric("seven_day", "Weekly", used, Window: null, MetricConfidence.BestEffort);
 
         Assert.False(metric.IsUsedPercentReported);
+    }
+
+    [Fact]
+    public void TheReportedValueIsNeverAbleToRenderMoreThanAFullWindow()
+    {
+        // 101 is accepted as a real reading, one point of slack for rounding at the
+        // provider. What a consumer renders still has to be a percentage of a window.
+        var metric = new UsageMetric("seven_day", "Weekly", 101d, Window: null, MetricConfidence.BestEffort);
+
+        Assert.True(metric.IsUsedPercentReported);
+        Assert.Equal<double?>(100d, metric.ReportedPercent);
+        Assert.Equal(UsagePercent.Normalise(metric.UsedPercent), metric.ReportedPercent);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(-1d)]
+    [InlineData(101.5d)]
+    [InlineData(1_763_000_000d)]
+    public void AnUnreportedPercentHasNoValueToRender(double? used)
+    {
+        var metric = new UsageMetric("seven_day", "Weekly", used, Window: null, MetricConfidence.BestEffort);
+
+        Assert.False(metric.IsUsedPercentReported);
+        Assert.Null(metric.ReportedPercent);
     }
 
     [Fact]

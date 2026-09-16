@@ -1,5 +1,6 @@
 using Altim.Core.Abstractions;
 using Altim.Core.Models;
+using Altim.Core.Usage;
 
 namespace Altim.Core.Monitoring;
 
@@ -10,20 +11,30 @@ namespace Altim.Core.Monitoring;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Four things can start a refresh: the <see cref="PeriodicTimer"/> floor, a debounced
-/// filesystem hint, a resume from sleep, and an explicit call. All four funnel through the
-/// same per-provider path, which holds a per-provider gate, so refreshes of one provider
-/// never overlap no matter which of them fires. A refresh that finds the gate taken is
-/// dropped rather than queued: the next tick is never far away, and a queue would turn a
-/// slow provider into a backlog.
+/// Five things can start a refresh: the <see cref="PeriodicTimer"/> floor, a debounced
+/// filesystem hint, a push from a provider's own watcher, a resume from sleep, and an
+/// explicit call. All five funnel through the same per-provider path, which holds a
+/// per-provider gate, so refreshes of one provider never overlap no matter which of them
+/// fires. A refresh that finds the gate taken is not dropped: it marks the registration
+/// dirty and the in-flight refresh runs once more as it leaves, so a change that landed
+/// while a read was in progress is not hidden until the next relaxed tick.
 /// </para>
 /// <para>
-/// Threading: one long-running loop task owns the periodic timer; hints and resumes start
-/// short background tasks. Nothing marshals to a UI thread, so
+/// The tick queues its refreshes rather than awaiting them. One provider taking a second
+/// to answer must not push every other provider's cadence out behind it, and the loop must
+/// stay free to unwind the moment shutdown asks it to. Each provider call is bounded by
+/// <see cref="MonitorSchedulerOptions.ProviderTimeout"/>: a provider that ignores
+/// cancellation becomes an error reading instead of a gate held for the life of the
+/// process.
+/// </para>
+/// <para>
+/// Threading: one long-running loop task owns the periodic timer; hints, pushes and
+/// resumes start short background tasks. Nothing marshals to a UI thread, so
 /// <see cref="UsageUpdated"/> is raised on whichever thread finished the refresh and
 /// subscribers marshal themselves. Cancellation is one linked source created in
 /// <see cref="Start"/> and cancelled in <see cref="StopAsync"/>; a cancelled refresh
-/// raises no event, so shutdown never looks like a provider failure.
+/// raises no event, so shutdown never looks like a provider failure, and work that finds
+/// no live source bails out rather than running uncancellable.
 /// </para>
 /// </remarks>
 public sealed class MonitorScheduler : IAsyncDisposable
@@ -64,13 +75,9 @@ public sealed class MonitorScheduler : IAsyncDisposable
     }
 
     /// <summary>
-    /// Creates a scheduler and registers every provider in <paramref name="providers"/> as
-    /// local-only.
+    /// Creates a scheduler and registers every provider in <paramref name="providers"/>.
     /// </summary>
-    /// <param name="providers">
-    /// The providers to monitor. A provider that reaches the network registers through
-    /// <see cref="Register"/> instead, so it can be rate limited.
-    /// </param>
+    /// <param name="providers">The providers to monitor.</param>
     /// <param name="timeProvider">The clock. Never <see langword="null"/>.</param>
     /// <param name="options">Cadences, or <see langword="null"/> for the defaults.</param>
     public MonitorScheduler(
@@ -88,20 +95,40 @@ public sealed class MonitorScheduler : IAsyncDisposable
     }
 
     /// <summary>
-    /// Raised after a provider has been refreshed, carrying that provider reading. A
-    /// failed refresh raises it too, with <see cref="ProviderStatus.Error"/> and a detail
-    /// message, which is how a failure reaches the UI without becoming a crash.
+    /// Raised after a provider has been refreshed, carrying that provider reading already
+    /// normalised: percentages clamped, and a metric whose window has reset reported as
+    /// unavailable rather than as a frozen number. A failed refresh raises it too, with
+    /// <see cref="ProviderStatus.Error"/> and the one line the design allows, which is how
+    /// a failure reaches the UI without becoming a crash.
     /// </summary>
     /// <remarks>
-    /// Raised on a background thread. A subscriber that throws is contained: the
-    /// exception is swallowed so one bad handler cannot stop monitoring. Provider owned
-    /// <see cref="IUsageProvider.UsageChanged"/> events are deliberately not forwarded,
-    /// so a reading is announced exactly once per refresh.
+    /// Raised on a background thread. Subscribers are invoked one at a time and a
+    /// subscriber that throws is contained, so one bad handler can neither stop monitoring
+    /// nor starve the handlers behind it. Provider owned
+    /// <see cref="IUsageProvider.UsageChanged"/> events are not forwarded as readings:
+    /// they are taken as hints, so a reading is announced exactly once per refresh.
     /// </remarks>
     public event EventHandler<ProviderUsage>? UsageUpdated;
 
+    /// <summary>
+    /// Raised when a provider refresh fails, carrying the exception for logging. The
+    /// reading raised through <see cref="UsageUpdated"/> for the same failure carries the
+    /// contract copy instead, because exception text names file paths.
+    /// </summary>
+    public event EventHandler<ProviderFailure>? ProviderFailed;
+
     /// <summary>The cadences this scheduler was created with. Never <see langword="null"/>.</summary>
     public MonitorSchedulerOptions Options { get; }
+
+    /// <summary>
+    /// The gate network-touching provider calls run behind, keyed by provider id and
+    /// floored at <see cref="MonitorSchedulerOptions.NetworkMinimumInterval"/>. Hand it to
+    /// providers that make such a call: the scheduler refreshes every provider on every
+    /// tick, and it is the call that reaches the network which is rate limited, never the
+    /// whole read. <see cref="IRefreshGate.TimeUntilAvailable"/> is what lets a "Retry"
+    /// button say when it will work instead of looking dead.
+    /// </summary>
+    public IRefreshGate NetworkGate => _networkLimiter;
 
     /// <summary>
     /// The interval the poll timer currently runs at: the tightened one while a window is
@@ -157,20 +184,19 @@ public sealed class MonitorScheduler : IAsyncDisposable
     private TimeSpan CurrentIntervalLocked => _uiVisible ? Options.TightenedInterval : Options.RelaxedInterval;
 
     /// <summary>
-    /// Adds a provider to the rotation. Safe to call before or after <see cref="Start"/>;
-    /// a provider added while running joins from the next refresh. Registering the same
-    /// provider instance twice is ignored.
+    /// Adds a provider to the rotation and subscribes to its
+    /// <see cref="IUsageProvider.UsageChanged"/> event, which is taken as a hint rather
+    /// than as a reading. Safe to call before or after <see cref="Start"/>; a provider
+    /// added while running joins from the next refresh. Registering the same provider
+    /// instance twice is ignored.
     /// </summary>
     /// <param name="provider">The provider to monitor. Never <see langword="null"/>.</param>
-    /// <param name="touchesNetwork">
-    /// True when refreshing this provider can reach the network, which subjects it to
-    /// <see cref="MonitorSchedulerOptions.NetworkMinimumInterval"/> on top of the cadence.
-    /// </param>
-    public void Register(IUsageProvider provider, bool touchesNetwork = false)
+    public void Register(IUsageProvider provider)
     {
         ArgumentNullException.ThrowIfNull(provider);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        ProviderRegistration registration;
         lock (_gate)
         {
             foreach (ProviderRegistration existing in _registrations)
@@ -181,8 +207,12 @@ public sealed class MonitorScheduler : IAsyncDisposable
                 }
             }
 
-            _registrations.Add(new ProviderRegistration(provider, touchesNetwork));
+            registration = new ProviderRegistration(provider);
+            registration.Push = (_, _) => OnProviderPush(registration);
+            _registrations.Add(registration);
         }
+
+        provider.UsageChanged += registration.Push;
     }
 
     /// <summary>
@@ -235,8 +265,8 @@ public sealed class MonitorScheduler : IAsyncDisposable
     }
 
     /// <summary>
-    /// Records a filesystem hint. Hints are not data: they say something may have changed,
-    /// and several arriving together produce at most one refresh. The first hint opens a
+    /// Records a hint. Hints are not data: they say something may have changed, and
+    /// several arriving together produce at most one refresh. The first hint opens a
     /// <see cref="MonitorSchedulerOptions.HintDebounce"/> window and every hint inside it
     /// is absorbed, so a session writing continuously cannot starve the refresh nor
     /// trigger one per write.
@@ -245,13 +275,17 @@ public sealed class MonitorScheduler : IAsyncDisposable
     /// The provider the hint is about, or <see langword="null"/> when it is not known,
     /// which refreshes every provider.
     /// </param>
+    /// <remarks>
+    /// A hint after disposal does nothing. A filesystem watcher is still delivering events
+    /// while the process closes its windows, and a late event is not a programming error
+    /// worth throwing at a thread-pool thread over. <see cref="Register"/> and
+    /// <see cref="Start"/> still throw, because those are calls nobody makes by accident.
+    /// </remarks>
     public void Hint(string? providerId = null)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
         lock (_gate)
         {
-            if (_suspended)
+            if (_disposed || _suspended)
             {
                 // A suspended machine is not producing real filesystem activity worth
                 // acting on, and Resume refreshes everything anyway.
@@ -264,7 +298,7 @@ public sealed class MonitorScheduler : IAsyncDisposable
             }
             else
             {
-                _hintedProviders.Add(providerId);
+                _ = _hintedProviders.Add(providerId);
             }
 
             if (_hintWindowOpen)
@@ -275,7 +309,7 @@ public sealed class MonitorScheduler : IAsyncDisposable
             _hintTimer ??= _timeProvider.CreateTimer(
                 OnHintWindowElapsed, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
             _hintWindowOpen = true;
-            _hintTimer.Change(Options.HintDebounce, Timeout.InfiniteTimeSpan);
+            _ = _hintTimer.Change(Options.HintDebounce, Timeout.InfiniteTimeSpan);
         }
     }
 
@@ -297,7 +331,9 @@ public sealed class MonitorScheduler : IAsyncDisposable
     /// Resumes scheduling after a wake and, when
     /// <see cref="MonitorSchedulerOptions.RefreshOnResume"/> is set, triggers exactly one
     /// refresh of every provider. Calling it while not suspended does nothing, so a
-    /// platform that reports resume twice does not refresh twice.
+    /// platform that reports resume twice does not refresh twice, and calling it on a
+    /// scheduler that is not running does nothing either: there is no run for that refresh
+    /// to belong to and nothing that could cancel it.
     /// </summary>
     public void Resume()
     {
@@ -310,12 +346,10 @@ public sealed class MonitorScheduler : IAsyncDisposable
             }
 
             _suspended = false;
-            if (_disposed || !Options.RefreshOnResume)
+            if (!Options.RefreshOnResume || !TryGetRunTokenLocked(out token))
             {
                 return;
             }
-
-            token = _cts?.Token ?? CancellationToken.None;
         }
 
         QueueRefresh(null, token);
@@ -350,6 +384,12 @@ public sealed class MonitorScheduler : IAsyncDisposable
     /// Stops the poll timer, cancels in-flight work and waits briefly for it to unwind.
     /// Idempotent, and leaves the scheduler restartable through <see cref="Start"/>.
     /// </summary>
+    /// <remarks>
+    /// Every wait here is bounded by
+    /// <see cref="MonitorSchedulerOptions.ShutdownTimeout"/>. A provider that ignores its
+    /// cancellation token is left running rather than allowed to hold the process open:
+    /// closing a tray utility must never depend on a third-party CLI answering.
+    /// </remarks>
     public async ValueTask StopAsync()
     {
         CancellationTokenSource? cts;
@@ -366,7 +406,7 @@ public sealed class MonitorScheduler : IAsyncDisposable
             _hintWindowOpen = false;
             _hintedProviders.Clear();
             _hintedAll = false;
-            _hintTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            _ = _hintTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         }
 
         if (cts is not null)
@@ -378,11 +418,16 @@ public sealed class MonitorScheduler : IAsyncDisposable
         {
             try
             {
-                await loop.ConfigureAwait(false);
+                await loop.WaitAsync(Options.ShutdownTimeout).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 // Expected: the loop is cancelled, not failed.
+            }
+            catch (TimeoutException)
+            {
+                // The loop is wedged behind something that will not unwind. Shutdown
+                // carries on; the process is going away regardless.
             }
         }
 
@@ -392,7 +437,8 @@ public sealed class MonitorScheduler : IAsyncDisposable
     }
 
     /// <summary>
-    /// Stops the scheduler and releases its timers and gates. Safe to call more than once.
+    /// Stops the scheduler, unsubscribes from every provider and releases its timers and
+    /// gates. Safe to call more than once.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -421,6 +467,11 @@ public sealed class MonitorScheduler : IAsyncDisposable
 
         foreach (ProviderRegistration registration in registrations)
         {
+            if (registration.Push is { } push)
+            {
+                registration.Provider.UsageChanged -= push;
+            }
+
             registration.Gate.Dispose();
         }
     }
@@ -439,7 +490,9 @@ public sealed class MonitorScheduler : IAsyncDisposable
                     }
                 }
 
-                await RefreshSelectionAsync(null, ct).ConfigureAwait(false);
+                // Queued rather than awaited: the loop owns the cadence, not the slowest
+                // provider on it, and shutdown has to be able to unwind this immediately.
+                QueueRefresh(null, ct);
             }
         }
         catch (OperationCanceledException)
@@ -465,12 +518,10 @@ public sealed class MonitorScheduler : IAsyncDisposable
             hinted = [.. _hintedProviders];
             _hintedProviders.Clear();
 
-            if (_suspended || _disposed)
+            if (_suspended || !TryGetRunTokenLocked(out token))
             {
                 return;
             }
-
-            token = _cts?.Token ?? CancellationToken.None;
         }
 
         if (all)
@@ -480,6 +531,46 @@ public sealed class MonitorScheduler : IAsyncDisposable
         else if (hinted.Length > 0)
         {
             QueueRefresh(hinted, token);
+        }
+    }
+
+    /// <summary>
+    /// A provider's own watcher noticed something. It is a hint, not a reading: the
+    /// refresh it triggers is debounced like any other, and it is dropped outright while
+    /// this provider is already being refreshed, because that refresh is about to announce
+    /// the same reading.
+    /// </summary>
+    private void OnProviderPush(ProviderRegistration registration)
+    {
+        if (registration.IsRefreshing)
+        {
+            return;
+        }
+
+        Hint(registration.Provider.Id);
+    }
+
+    /// <summary>
+    /// The token in-flight work runs under, or false when there is no run to attach work
+    /// to. Substituting <see cref="CancellationToken.None"/> here would start work after
+    /// shutdown that nothing could ever cancel. Called under <see cref="_gate"/>.
+    /// </summary>
+    private bool TryGetRunTokenLocked(out CancellationToken token)
+    {
+        token = default;
+        if (_disposed || _cts is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            token = _cts.Token;
+            return true;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
         }
     }
 
@@ -516,40 +607,29 @@ public sealed class MonitorScheduler : IAsyncDisposable
     private async Task RefreshProviderAsync(ProviderRegistration registration, CancellationToken ct)
     {
         // Non-blocking: a refresh already in flight for this provider means this one is
-        // dropped, which is what keeps refreshes of one provider from overlapping.
+        // recorded rather than run, and the one in flight picks it up as it leaves. That
+        // is what keeps refreshes of one provider from overlapping without losing the
+        // change that asked for this one.
         if (!registration.TryEnter())
         {
+            registration.MarkDirty();
             return;
         }
 
+        bool gateHandedOff = false;
         try
         {
-            if (ct.IsCancellationRequested)
+            registration.BeginRefresh();
+            while (true)
             {
-                return;
-            }
+                registration.ClearDirty();
+                gateHandedOff = await RefreshOnceAsync(registration, ct).ConfigureAwait(false);
 
-            if (registration.TouchesNetwork && !_networkLimiter.TryAcquire(registration.Provider.Id))
-            {
-                return;
+                if (gateHandedOff || !registration.IsDirty || ct.IsCancellationRequested || _disposed)
+                {
+                    break;
+                }
             }
-
-            ProviderUsage usage;
-            try
-            {
-                await registration.Provider.RefreshAsync(ct).ConfigureAwait(false);
-                usage = await registration.Provider.GetUsageAsync(ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                usage = Failed(registration.Provider.Id, ex);
-            }
-
-            RaiseUsageUpdated(usage);
         }
         catch (ObjectDisposedException)
         {
@@ -562,17 +642,179 @@ public sealed class MonitorScheduler : IAsyncDisposable
         }
         finally
         {
-            registration.Exit();
+            registration.EndRefresh();
+            if (!gateHandedOff)
+            {
+                registration.Exit();
+            }
         }
     }
 
-    private ProviderUsage Failed(string providerId, Exception ex)
+    /// <summary>
+    /// One read of one provider, bounded by
+    /// <see cref="MonitorSchedulerOptions.ProviderTimeout"/>.
+    /// </summary>
+    /// <returns>
+    /// True when the provider outlasted its budget and the gate was handed to the
+    /// abandoned call, which releases it if and when the provider ever returns. The
+    /// scheduler does not wait for that, and does not call into the provider again while
+    /// it is still inside a call.
+    /// </returns>
+    private async Task<bool> RefreshOnceAsync(ProviderRegistration registration, CancellationToken ct)
     {
-        string detail = string.IsNullOrWhiteSpace(ex.Message) ? "Unable to retrieve usage" : ex.Message;
-        return new ProviderUsage(providerId, ProviderStatus.Error, [], null, _timeProvider.GetUtcNow(), detail);
+        if (ct.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        string providerId = registration.Provider.Id;
+        var timeout = new CancellationTokenSource(Options.ProviderTimeout, _timeProvider);
+        CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+        Task<ProviderUsage> work = ReadAsync(registration.Provider, linked.Token);
+        bool handedOff = false;
+
+        try
+        {
+            ProviderUsage usage;
+            try
+            {
+                usage = await work.WaitAsync(linked.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Shutdown. A cancelled refresh raises no event, so closing the app never
+                // looks like a provider failing, and whatever the abandoned call ends up
+                // throwing is nobody's news.
+                Observe(work);
+                return false;
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                var expired = new TimeoutException(
+                    $"{providerId} did not answer within {Options.ProviderTimeout}.");
+                ReportFailure(providerId, expired);
+                handedOff = true;
+                HandOff(registration, work, linked, timeout);
+                RaiseUsageUpdated(Failed(providerId));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // Including a provider that cancelled for its own reasons: from out here
+                // that is a read which did not produce a number, which is an error
+                // reading like any other.
+                ReportFailure(providerId, ex);
+                usage = Failed(providerId);
+            }
+
+            RaiseUsageUpdated(UsageReadingNormaliser.Normalise(usage, _timeProvider.GetUtcNow()));
+            return false;
+        }
+        finally
+        {
+            if (!handedOff)
+            {
+                linked.Dispose();
+                timeout.Dispose();
+            }
+        }
     }
 
-    private void RaiseUsageUpdated(ProviderUsage usage) => UsageUpdated?.Invoke(this, usage);
+    private static void Observe(Task task) =>
+        _ = task.ContinueWith(
+            static finished => _ = finished.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted,
+            TaskScheduler.Default);
+
+    private static async Task<ProviderUsage> ReadAsync(IUsageProvider provider, CancellationToken ct)
+    {
+        await provider.RefreshAsync(ct).ConfigureAwait(false);
+        return await provider.GetUsageAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Leaves an abandoned provider call holding the gate until it unwinds, and cleans up
+    /// after it whenever that is.
+    /// </summary>
+    private static void HandOff(
+        ProviderRegistration registration,
+        Task<ProviderUsage> work,
+        CancellationTokenSource linked,
+        CancellationTokenSource timeout) =>
+        _ = work.ContinueWith(
+            static (finished, state) =>
+            {
+                // Observed deliberately: the abandoned call's outcome was reported as a
+                // timeout already, and an unobserved fault helps nobody.
+                _ = finished.Exception;
+
+                (ProviderRegistration registration, CancellationTokenSource linked, CancellationTokenSource timeout) =
+                    ((ProviderRegistration, CancellationTokenSource, CancellationTokenSource))state!;
+                registration.Exit();
+                linked.Dispose();
+                timeout.Dispose();
+            },
+            (registration, linked, timeout),
+            CancellationToken.None,
+            TaskContinuationOptions.None,
+            TaskScheduler.Default);
+
+    /// <summary>
+    /// The reading a failed refresh produces. There is no timestamp on it: nothing was
+    /// read, so there is nothing for a "last refreshed" line to be about. The detail is
+    /// the contract copy, never the exception text, which reaches a log through
+    /// <see cref="ProviderFailed"/> instead.
+    /// </summary>
+    private static ProviderUsage Failed(string providerId) =>
+        new(providerId, ProviderStatus.Error, [], null, null, ProviderUsage.UnavailableDetail);
+
+    private void ReportFailure(string providerId, Exception exception)
+    {
+        EventHandler<ProviderFailure>? handlers = ProviderFailed;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        var failure = new ProviderFailure(providerId, exception, _timeProvider.GetUtcNow());
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((EventHandler<ProviderFailure>)handler)(this, failure);
+            }
+            catch (Exception)
+            {
+                // A logger that throws is not allowed to stop monitoring either.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Announces a reading to each subscriber separately, so that one that throws cannot
+    /// starve the subscribers behind it in the invocation list.
+    /// </summary>
+    private void RaiseUsageUpdated(ProviderUsage usage)
+    {
+        EventHandler<ProviderUsage>? handlers = UsageUpdated;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((EventHandler<ProviderUsage>)handler)(this, usage);
+            }
+            catch (Exception)
+            {
+                // Contained: a view model that throws is its own problem.
+            }
+        }
+    }
 
     private ProviderRegistration[] Snapshot(IReadOnlyCollection<string>? providerIds)
     {
@@ -608,24 +850,60 @@ public sealed class MonitorScheduler : IAsyncDisposable
     private async Task WaitForInFlightRefreshesAsync()
     {
         ProviderRegistration[] registrations = Snapshot(null);
-        foreach (ProviderRegistration registration in registrations)
+        if (registrations.Length == 0)
         {
-            // Bounded: shutdown waits for a well-behaved provider to unwind, and gives up
-            // on one that ignores cancellation rather than hanging the process.
-            if (await registration.Gate.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false))
+            return;
+        }
+
+        // Concurrently: shutdown waits once for everything to unwind, not once per
+        // provider, and gives up on anything that ignores cancellation.
+        var waits = new Task<bool>[registrations.Length];
+        for (int i = 0; i < registrations.Length; i++)
+        {
+            waits[i] = registrations[i].WaitForIdleAsync(Options.ShutdownTimeout);
+        }
+
+        bool[] entered = await Task.WhenAll(waits).ConfigureAwait(false);
+        for (int i = 0; i < entered.Length; i++)
+        {
+            if (entered[i])
             {
-                registration.Exit();
+                registrations[i].Exit();
             }
         }
     }
 
-    private sealed class ProviderRegistration(IUsageProvider provider, bool touchesNetwork)
+    private sealed class ProviderRegistration(IUsageProvider provider)
     {
+        private int _dirty;
+        private int _refreshing;
+
         public IUsageProvider Provider { get; } = provider;
 
-        public bool TouchesNetwork { get; } = touchesNetwork;
-
         public SemaphoreSlim Gate { get; } = new(1, 1);
+
+        /// <summary>
+        /// The handler subscribed to <see cref="IUsageProvider.UsageChanged"/>, kept so it
+        /// can be unsubscribed on disposal.
+        /// </summary>
+        public EventHandler<ProviderUsage>? Push { get; set; }
+
+        /// <summary>True while the scheduler is inside a refresh of this provider.</summary>
+        public bool IsRefreshing => Volatile.Read(ref _refreshing) != 0;
+
+        /// <summary>
+        /// True when something asked for a refresh while one was in flight. The refresh in
+        /// flight runs once more rather than leaving that change unseen.
+        /// </summary>
+        public bool IsDirty => Volatile.Read(ref _dirty) != 0;
+
+        public void MarkDirty() => Volatile.Write(ref _dirty, 1);
+
+        public void ClearDirty() => Volatile.Write(ref _dirty, 0);
+
+        public void BeginRefresh() => Volatile.Write(ref _refreshing, 1);
+
+        public void EndRefresh() => Volatile.Write(ref _refreshing, 0);
 
         public bool TryEnter()
         {
@@ -643,11 +921,27 @@ public sealed class MonitorScheduler : IAsyncDisposable
         {
             try
             {
-                Gate.Release();
+                _ = Gate.Release();
             }
             catch (ObjectDisposedException)
             {
                 // Disposed during shutdown; the count no longer matters.
+            }
+            catch (SemaphoreFullException)
+            {
+                // Released twice by a shutdown racing an abandoned call. Harmless.
+            }
+        }
+
+        public async Task<bool> WaitForIdleAsync(TimeSpan timeout)
+        {
+            try
+            {
+                return await Gate.WaitAsync(timeout).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                return false;
             }
         }
     }

@@ -1,3 +1,5 @@
+using Altim.Core.Abstractions;
+
 namespace Altim.Core.Monitoring;
 
 /// <summary>
@@ -5,7 +7,7 @@ namespace Altim.Core.Monitoring;
 /// cadence so that tightening the cadence for an open window cannot make a
 /// network-touching call run faster than its floor. Safe for concurrent use.
 /// </summary>
-public sealed class RefreshRateLimiter
+public sealed class RefreshRateLimiter : IRefreshGate
 {
     private readonly Dictionary<string, DateTimeOffset> _lastAcquired = new(StringComparer.Ordinal);
     private readonly TimeProvider _timeProvider;

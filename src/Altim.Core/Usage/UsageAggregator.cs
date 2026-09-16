@@ -16,11 +16,18 @@ public static class UsageAggregator
     /// <param name="usages">
     /// One reading per provider. An empty set produces <see cref="UsageOverview.Empty"/>.
     /// </param>
+    /// <param name="displayName">
+    /// Resolves a provider id to the name to put in the status line, or
+    /// <see langword="null"/> to use the ids. A lookup that does not know an id returns it
+    /// unchanged.
+    /// </param>
     /// <returns>
     /// The overview. Nothing in it is defaulted to zero: a metric nobody reported stays
     /// <see langword="null"/>, and so does a token component nobody reported.
     /// </returns>
-    public static UsageOverview Aggregate(IEnumerable<ProviderUsage> usages)
+    public static UsageOverview Aggregate(
+        IEnumerable<ProviderUsage> usages,
+        Func<string, string>? displayName = null)
     {
         ArgumentNullException.ThrowIfNull(usages);
 
@@ -44,7 +51,7 @@ public static class UsageAggregator
 
         foreach (ProviderUsage usage in readings)
         {
-            if (!statusSeen || Severity(usage.Status) > Severity(overall))
+            if (!statusSeen || DisplayPrecedence(usage.Status) > DisplayPrecedence(overall))
             {
                 overall = usage.Status;
                 statusSeen = true;
@@ -59,7 +66,7 @@ public static class UsageAggregator
 
             foreach (UsageMetric metric in usage.Metrics)
             {
-                if (UsagePercent.Normalise(metric.UsedPercent) is not { } percent)
+                if (metric.ReportedPercent is not { } percent)
                 {
                     continue;
                 }
@@ -89,7 +96,7 @@ public static class UsageAggregator
             worstProviderId,
             worstMetric,
             overall,
-            DescribeStatus(readings),
+            DescribeStatus(readings, displayName),
             totals,
             readings.Count);
     }
@@ -98,8 +105,16 @@ public static class UsageAggregator
     /// The one sentence describing where the integrations stand as a whole.
     /// </summary>
     /// <param name="usages">One reading per provider.</param>
+    /// <param name="displayName">
+    /// Resolves a provider id to the name the sentence should read with, for example
+    /// <c>claude</c> to "Claude Code", or <see langword="null"/> to use the ids. A lookup
+    /// that returns null or blank falls back to the id, so the sentence is never missing
+    /// its subject.
+    /// </param>
     /// <returns>Never empty. Describes the least healthy thing that is true.</returns>
-    public static string DescribeStatus(IEnumerable<ProviderUsage> usages)
+    public static string DescribeStatus(
+        IEnumerable<ProviderUsage> usages,
+        Func<string, string>? displayName = null)
     {
         ArgumentNullException.ThrowIfNull(usages);
 
@@ -109,7 +124,7 @@ public static class UsageAggregator
             return UsageOverview.Empty.StatusLine;
         }
 
-        List<string> failed = Ids(readings, ProviderStatus.Error);
+        List<string> failed = Names(readings, ProviderStatus.Error, displayName);
         if (failed.Count == 1)
         {
             return string.Create(CultureInfo.InvariantCulture, $"{failed[0]} unavailable");
@@ -120,7 +135,7 @@ public static class UsageAggregator
             return string.Create(CultureInfo.InvariantCulture, $"{failed.Count} providers unavailable");
         }
 
-        List<string> missing = Ids(readings, ProviderStatus.NotDetected);
+        List<string> missing = Names(readings, ProviderStatus.NotDetected, displayName);
         if (missing.Count == readings.Count)
         {
             return "No providers detected";
@@ -136,7 +151,7 @@ public static class UsageAggregator
             return string.Create(CultureInfo.InvariantCulture, $"{missing.Count} providers not detected");
         }
 
-        List<string> unknown = Ids(readings, ProviderStatus.Unknown);
+        List<string> unknown = Names(readings, ProviderStatus.Unknown, displayName);
         if (unknown.Count == readings.Count)
         {
             return "Waiting for the first reading";
@@ -148,33 +163,42 @@ public static class UsageAggregator
     }
 
     /// <summary>
-    /// How bad a status is, where a larger number is worse. Used to pick the overall
-    /// status: the worst one present wins.
+    /// Which status a mixed set is shown as, where a larger number wins. This ranks for
+    /// display, not for health: a failure has to be seen, and after that the most alive
+    /// thing present is what the tray should say. A provider that is simply not installed
+    /// is a settled answer and ranks lowest, so one uninstalled provider cannot colour the
+    /// tray as though nothing were running.
     /// </summary>
     /// <param name="status">The status to rank.</param>
-    public static int Severity(ProviderStatus status) => status switch
+    public static int DisplayPrecedence(ProviderStatus status) => status switch
     {
         ProviderStatus.Error => 5,
-        ProviderStatus.NotDetected => 4,
-        ProviderStatus.Unknown => 3,
+        ProviderStatus.Active => 4,
+        ProviderStatus.Idle => 3,
         ProviderStatus.Detected => 2,
-        ProviderStatus.Idle => 1,
-        ProviderStatus.Active => 0,
-        _ => 3,
+        ProviderStatus.Unknown => 1,
+        ProviderStatus.NotDetected => 0,
+        _ => 1,
     };
 
-    private static List<string> Ids(List<ProviderUsage> readings, ProviderStatus status)
+    private static List<string> Names(
+        List<ProviderUsage> readings,
+        ProviderStatus status,
+        Func<string, string>? displayName)
     {
-        List<string> ids = [];
+        List<string> names = [];
         foreach (ProviderUsage usage in readings)
         {
-            if (usage.Status == status)
+            if (usage.Status != status)
             {
-                ids.Add(usage.ProviderId);
+                continue;
             }
+
+            string? resolved = displayName?.Invoke(usage.ProviderId);
+            names.Add(string.IsNullOrWhiteSpace(resolved) ? usage.ProviderId : resolved);
         }
 
-        return ids;
+        return names;
     }
 
     private static long? Add(long? running, long? reported) => (running, reported) switch

@@ -24,6 +24,14 @@ public sealed class LimitWindowClassifierTests
         Assert.Equal(expected, LimitWindowClassifier.Classify(minutes));
 
     [Theory]
+    [InlineData(40_320d)] // 28 days: February
+    [InlineData(41_760d)] // 29 days: February in a leap year
+    [InlineData(43_200d)] // 30 days
+    [InlineData(44_640d)] // 31 days
+    public void RealMonthLengthsClassifyAsMonthly(double minutes) =>
+        Assert.Equal(LimitWindowKind.Monthly, LimitWindowClassifier.Classify(minutes));
+
+    [Theory]
     [InlineData(1d)]
     [InlineData(60d)]
     [InlineData(360d)]

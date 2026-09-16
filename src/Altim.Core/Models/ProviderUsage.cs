@@ -33,4 +33,12 @@ public sealed record ProviderUsage(
     IReadOnlyList<UsageMetric> Metrics,
     TokenTotals? Tokens,
     DateTimeOffset? LastRefreshed,
-    string? StatusDetail);
+    string? StatusDetail)
+{
+    /// <summary>
+    /// The one sentence a failed reading shows, fixed by the design copy so that a
+    /// provider exception never reaches a user. Exception text carries file paths and
+    /// process detail, which belongs in a log and nowhere else.
+    /// </summary>
+    public const string UnavailableDetail = "Unable to retrieve usage";
+}

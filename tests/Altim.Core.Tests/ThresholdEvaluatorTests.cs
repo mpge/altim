@@ -112,7 +112,7 @@ public sealed class ThresholdEvaluatorTests
         ThresholdEvaluation reset = evaluator.Evaluate([Reading("claude", afterReset)], settings, crossed.State);
 
         Notification notification = Assert.Single(reset.Notifications);
-        Assert.Equal("Session limit reset", notification.Title);
+        Assert.Equal("Usage has reset.", notification.Title);
         Assert.Equal("claude:five_hour:reset", notification.Tag);
         Assert.Empty(reset.State.Fired);
 
@@ -137,7 +137,7 @@ public sealed class ThresholdEvaluatorTests
             [Reading("claude", Session(86d, resetsAt: Start.AddHours(7)))], settings, crossed.State);
 
         Assert.Equal(2, next.Notifications.Count);
-        Assert.Equal("Session limit reset", next.Notifications[0].Title);
+        Assert.Equal("Usage has reset.", next.Notifications[0].Title);
         Assert.Equal("Session usage reached 80%", next.Notifications[1].Title);
         Assert.Single(next.State.Fired);
     }
@@ -157,7 +157,7 @@ public sealed class ThresholdEvaluatorTests
         ThresholdEvaluation rolled = evaluator.Evaluate(
             [Reading("claude", Session(3d, resetsAt: Start.AddHours(7)))], settings, crossed.State);
 
-        Assert.Equal("Session limit reset", Assert.Single(rolled.Notifications).Title);
+        Assert.Equal("Usage has reset.", Assert.Single(rolled.Notifications).Title);
         Assert.Empty(rolled.State.Fired);
     }
 
@@ -311,6 +311,255 @@ public sealed class ThresholdEvaluatorTests
         ThresholdEvaluation later = evaluator.Evaluate([Reading("claude", metric)], settings, crossed.State);
         Assert.Empty(later.Notifications);
         Assert.Single(later.State.Fired);
+    }
+
+    [Fact]
+    public void AStaleReadingFiresTheResetOnceAndThenGoesQuiet()
+    {
+        var time = new TestTimeProvider(Start);
+        var evaluator = new ThresholdEvaluator(time);
+        AltimSettings settings = AltimSettings.Default;
+
+        ThresholdState seeded = evaluator.Evaluate(
+            [Reading("claude", Session(10d))], settings, ThresholdState.Initial).State;
+        ThresholdEvaluation crossed = evaluator.Evaluate([Reading("claude", Session(85d))], settings, seeded);
+        Assert.Single(crossed.Notifications);
+
+        // The window has ended and the provider keeps handing back the same snapshot,
+        // because the status line file is only rewritten when the tool next runs.
+        time.Advance(TimeSpan.FromHours(3));
+        ThresholdEvaluation first = evaluator.Evaluate([Reading("claude", Session(85d))], settings, crossed.State);
+
+        Notification reset = Assert.Single(first.Notifications);
+        Assert.Equal("Usage has reset.", reset.Title);
+        Assert.Empty(first.State.Fired);
+
+        // The same stale reading arrives on every poll for as long as the tool stays
+        // closed. Every one of them after the first has to be silent.
+        ThresholdEvaluation second = evaluator.Evaluate([Reading("claude", Session(85d))], settings, first.State);
+        Assert.Empty(second.Notifications);
+        Assert.Empty(second.State.Fired);
+
+        ThresholdEvaluation third = evaluator.Evaluate([Reading("claude", Session(85d))], settings, second.State);
+        Assert.Empty(third.Notifications);
+    }
+
+    [Fact]
+    public void AStaleReadingNeverArmsAThreshold()
+    {
+        var time = new TestTimeProvider(Start);
+        var evaluator = new ThresholdEvaluator(time);
+        AltimSettings settings = AltimSettings.Default;
+
+        ThresholdState seeded = evaluator.Evaluate(
+            [Reading("claude", Session(10d))], settings, ThresholdState.Initial).State;
+
+        time.Advance(TimeSpan.FromHours(3));
+        ThresholdEvaluation result = evaluator.Evaluate([Reading("claude", Session(92d))], settings, seeded);
+
+        Assert.Empty(result.Notifications);
+        Assert.Empty(result.State.Fired);
+    }
+
+    [Fact]
+    public void ForwardDriftInTheResetInstantIsNotARollover()
+    {
+        var time = new TestTimeProvider(Start);
+        var evaluator = new ThresholdEvaluator(time);
+        AltimSettings settings = AltimSettings.Default;
+
+        ThresholdState seeded = evaluator.Evaluate(
+            [Reading("claude", Session(10d))], settings, ThresholdState.Initial).State;
+        ThresholdEvaluation crossed = evaluator.Evaluate([Reading("claude", Session(85d))], settings, seeded);
+        Assert.Single(crossed.Notifications);
+
+        // Derived from a relative "resets in 2h 14m", so it drifts forward a little on
+        // every poll. That is the same window, not a new one.
+        time.Advance(TimeSpan.FromSeconds(30));
+        ThresholdEvaluation drifted = evaluator.Evaluate(
+            [Reading("claude", Session(86d, resetsAt: Start.AddHours(2).AddSeconds(30)))], settings, crossed.State);
+
+        Assert.Empty(drifted.Notifications);
+        Assert.Equal<DateTimeOffset?>(Start.AddHours(2), Assert.Single(drifted.State.Fired).WindowResetsAt);
+    }
+
+    [Fact]
+    public void AResetInstantAtLeastTwoMinutesLaterIsARollover()
+    {
+        var time = new TestTimeProvider(Start);
+        var evaluator = new ThresholdEvaluator(time);
+        AltimSettings settings = AltimSettings.Default;
+
+        ThresholdState seeded = evaluator.Evaluate(
+            [Reading("claude", Session(10d))], settings, ThresholdState.Initial).State;
+        ThresholdEvaluation crossed = evaluator.Evaluate([Reading("claude", Session(85d))], settings, seeded);
+
+        ThresholdEvaluation rolled = evaluator.Evaluate(
+            [Reading("claude", Session(4d, resetsAt: Start.AddHours(2).AddMinutes(2)))], settings, crossed.State);
+
+        Assert.Equal("Usage has reset.", Assert.Single(rolled.Notifications).Title);
+        Assert.Empty(rolled.State.Fired);
+    }
+
+    [Fact]
+    public void RolloverIsComparedAtSecondGranularity()
+    {
+        var time = new TestTimeProvider(Start);
+        var evaluator = new ThresholdEvaluator(time);
+        AltimSettings settings = AltimSettings.Default;
+
+        ThresholdState seeded = evaluator.Evaluate(
+            [Reading("claude", Session(10d))], settings, ThresholdState.Initial).State;
+        ThresholdEvaluation crossed = evaluator.Evaluate([Reading("claude", Session(85d))], settings, seeded);
+        Assert.Single(crossed.Notifications);
+
+        // Sub-second movement cannot survive the unix-seconds column it is persisted in,
+        // so it can never mean a new window.
+        ThresholdEvaluation sameSecond = evaluator.Evaluate(
+            [Reading("claude", Session(86d, resetsAt: Start.AddHours(2).AddMilliseconds(900)))], settings, crossed.State);
+        Assert.Empty(sameSecond.Notifications);
+
+        // Two whole minutes further on is, so the entry expires and the new window is
+        // free to fire its own threshold.
+        ThresholdEvaluation rolled = evaluator.Evaluate(
+            [Reading("claude", Session(86d, resetsAt: Start.AddHours(2).AddSeconds(120).AddMilliseconds(900)))],
+            settings,
+            crossed.State);
+        Assert.Equal(2, rolled.Notifications.Count);
+        Assert.Equal("Usage has reset.", rolled.Notifications[0].Title);
+    }
+
+    [Fact]
+    public void AnEntryWithNoResetInstantAdoptsTheOneTheMetricStartsReporting()
+    {
+        var time = new TestTimeProvider(Start);
+        var evaluator = new ThresholdEvaluator(time);
+        AltimSettings settings = AltimSettings.Default;
+        var unknownReset = new UsageMetric(
+            "five_hour", "Session", 85d, new LimitWindow(TimeSpan.FromMinutes(300), null), MetricConfidence.BestEffort);
+
+        ThresholdState seeded = evaluator.Evaluate(
+            [Reading("claude", Session(10d))], settings, ThresholdState.Initial).State;
+        ThresholdEvaluation crossed = evaluator.Evaluate([Reading("claude", unknownReset)], settings, seeded);
+        Assert.Single(crossed.Notifications);
+        Assert.Null(Assert.Single(crossed.State.Fired).WindowResetsAt);
+
+        // The provider now reports a reset instant for the same metric. Adopting it is
+        // what lets this entry expire; without one it would mute the metric forever.
+        ThresholdEvaluation adopted = evaluator.Evaluate(
+            [Reading("claude", Session(86d, resetsAt: Start.AddHours(4)))], settings, crossed.State);
+        Assert.Empty(adopted.Notifications);
+        Assert.Equal<DateTimeOffset?>(Start.AddHours(4), Assert.Single(adopted.State.Fired).WindowResetsAt);
+
+        time.Advance(TimeSpan.FromHours(5));
+        ThresholdEvaluation next = evaluator.Evaluate(
+            [Reading("claude", Session(87d, resetsAt: Start.AddHours(9)))], settings, adopted.State);
+
+        Assert.Equal(2, next.Notifications.Count);
+        Assert.Equal("Usage has reset.", next.Notifications[0].Title);
+        Assert.Equal("Session usage reached 80%", next.Notifications[1].Title);
+    }
+
+    [Fact]
+    public void EveryProviderGetsItsOwnFirstEvaluationSilence()
+    {
+        var time = new TestTimeProvider(Start);
+        var evaluator = new ThresholdEvaluator(time);
+        AltimSettings settings = AltimSettings.Default;
+
+        ThresholdState state = evaluator.Evaluate(
+            [Reading("claude", Session(10d))], settings, ThresholdState.Initial).State;
+
+        // codex reports for the first time here, already over its threshold. A provider's
+        // first reading seeds state and says nothing, whichever evaluation it arrives in.
+        ThresholdEvaluation firstSeen = evaluator.Evaluate(
+            [Reading("claude", Session(12d)), Reading("codex", Session(95d))], settings, state);
+
+        Assert.Empty(firstSeen.Notifications);
+        Assert.Equal("codex", Assert.Single(firstSeen.State.Fired).ProviderId);
+
+        // claude has been evaluated before, so it is not silenced by codex arriving.
+        ThresholdEvaluation later = evaluator.Evaluate(
+            [Reading("claude", Session(81d)), Reading("codex", Session(96d))], settings, firstSeen.State);
+
+        Assert.Equal("claude", Assert.Single(later.Notifications).ProviderId);
+    }
+
+    [Fact]
+    public void AProviderWhoseFirstReadingFailedIsStillOnItsFirstReadingAfterwards()
+    {
+        var time = new TestTimeProvider(Start);
+        var evaluator = new ThresholdEvaluator(time);
+        AltimSettings settings = AltimSettings.Default;
+        var failed = new ProviderUsage(
+            "codex", ProviderStatus.Error, [], null, null, ProviderUsage.UnavailableDetail);
+
+        ThresholdState state = evaluator.Evaluate([failed], settings, ThresholdState.Initial).State;
+        Assert.False(state.HasEvaluatedProvider("codex"));
+
+        // A reading that failed carried no usage, so the one that follows it is still the
+        // first thing this provider has said about usage: it seeds and stays quiet.
+        ThresholdEvaluation firstReal = evaluator.Evaluate([Reading("codex", Session(95d))], settings, state);
+        Assert.Empty(firstReal.Notifications);
+        Assert.True(firstReal.State.HasEvaluatedProvider("codex"));
+    }
+
+    [Fact]
+    public void LoweringTheThresholdBelowTheCurrentValueFiresOnce()
+    {
+        var time = new TestTimeProvider(Start);
+        var evaluator = new ThresholdEvaluator(time);
+        AltimSettings settings = AltimSettings.Default;
+
+        ThresholdState seeded = evaluator.Evaluate(
+            [Reading("claude", Session(10d))], settings, ThresholdState.Initial).State;
+        ThresholdEvaluation crossed = evaluator.Evaluate([Reading("claude", Session(85d))], settings, seeded);
+        Assert.Equal("Session usage reached 80%", Assert.Single(crossed.Notifications).Title);
+
+        // The documented choice: a threshold the user has just lowered under the current
+        // reading fires once, because a warning they have asked for that never arrives
+        // reads as broken. It then behaves like any other fired threshold.
+        AltimSettings lowered = settings with { SessionThresholdPercent = 70 };
+        ThresholdEvaluation refired = evaluator.Evaluate([Reading("claude", Session(85d))], lowered, crossed.State);
+        Assert.Equal("Session usage reached 70%", Assert.Single(refired.Notifications).Title);
+
+        ThresholdEvaluation quiet = evaluator.Evaluate([Reading("claude", Session(86d))], lowered, refired.State);
+        Assert.Empty(quiet.Notifications);
+    }
+
+    [Fact]
+    public void AFailedReadingStillLetsAnEndedWindowExpire()
+    {
+        var time = new TestTimeProvider(Start);
+        var evaluator = new ThresholdEvaluator(time);
+        AltimSettings settings = AltimSettings.Default;
+
+        ThresholdState seeded = evaluator.Evaluate(
+            [Reading("claude", Session(10d))], settings, ThresholdState.Initial).State;
+        ThresholdEvaluation crossed = evaluator.Evaluate([Reading("claude", Session(85d))], settings, seeded);
+        Assert.Single(crossed.Notifications);
+
+        time.Advance(TimeSpan.FromHours(3));
+        var failed = new ProviderUsage(
+            "claude", ProviderStatus.Error, [], null, null, ProviderUsage.UnavailableDetail);
+        ThresholdEvaluation result = evaluator.Evaluate([failed], settings, crossed.State);
+
+        // Nothing fires: a failed reading carries no metric to label a reset with. The
+        // entry still goes, because the window it fired in is over either way.
+        Assert.Empty(result.Notifications);
+        Assert.Empty(result.State.Fired);
+    }
+
+    [Fact]
+    public void AnUnclassifiedWindowLongerThanADayTakesTheWeeklyThreshold()
+    {
+        AltimSettings settings = AltimSettings.Default;
+
+        Assert.Equal(90, ThresholdEvaluator.ThresholdFor(settings, new LimitWindow(TimeSpan.FromDays(3), null)));
+        Assert.Equal(90, ThresholdEvaluator.ThresholdFor(settings, new LimitWindow(TimeSpan.FromDays(60), null)));
+        Assert.Equal(90, ThresholdEvaluator.ThresholdFor(settings, new LimitWindow(TimeSpan.FromDays(28), null)));
+        Assert.Equal(80, ThresholdEvaluator.ThresholdFor(settings, new LimitWindow(TimeSpan.FromMinutes(45), null)));
+        Assert.Equal(80, ThresholdEvaluator.ThresholdFor(settings, new LimitWindow(TimeSpan.FromHours(6), null)));
     }
 
     private static ProviderUsage Reading(string providerId, UsageMetric metric) =>

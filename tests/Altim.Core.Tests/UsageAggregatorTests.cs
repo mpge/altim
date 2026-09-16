@@ -153,12 +153,15 @@ public sealed class UsageAggregatorTests
     }
 
     [Theory]
-    [InlineData(ProviderStatus.Active, ProviderStatus.Idle, ProviderStatus.Idle, "All providers operational")]
-    [InlineData(ProviderStatus.Active, ProviderStatus.NotDetected, ProviderStatus.NotDetected, "codex not detected")]
-    [InlineData(ProviderStatus.Active, ProviderStatus.Unknown, ProviderStatus.Unknown, "Waiting for codex")]
+    [InlineData(ProviderStatus.Active, ProviderStatus.Idle, ProviderStatus.Active, "All providers operational")]
+    [InlineData(ProviderStatus.Active, ProviderStatus.NotDetected, ProviderStatus.Active, "codex not detected")]
+    [InlineData(ProviderStatus.Active, ProviderStatus.Unknown, ProviderStatus.Active, "Waiting for codex")]
+    [InlineData(ProviderStatus.Idle, ProviderStatus.Unknown, ProviderStatus.Idle, "Waiting for codex")]
     [InlineData(ProviderStatus.Error, ProviderStatus.Error, ProviderStatus.Error, "2 providers unavailable")]
+    [InlineData(ProviderStatus.Error, ProviderStatus.Active, ProviderStatus.Error, "claude unavailable")]
+    [InlineData(ProviderStatus.Unknown, ProviderStatus.NotDetected, ProviderStatus.Unknown, "codex not detected")]
     [InlineData(ProviderStatus.NotDetected, ProviderStatus.NotDetected, ProviderStatus.NotDetected, "No providers detected")]
-    public void TheOverallStatusIsTheLeastHealthyThingPresent(
+    public void TheOverallStatusIsTheOneWorthShowing(
         ProviderStatus first,
         ProviderStatus second,
         ProviderStatus expectedStatus,
@@ -198,6 +201,56 @@ public sealed class UsageAggregatorTests
 
         Assert.Equal("Waiting for the first reading", overview.StatusLine);
     }
+
+    [Fact]
+    public void OneUninstalledProviderDoesNotOutrankAWorkingOne()
+    {
+        // The tray takes its colour from this status. A provider the user never installed
+        // is a settled non-event and must not paint over one that is running right now.
+        UsageOverview overview = UsageAggregator.Aggregate(
+        [
+            Usage("claude", ProviderStatus.Active, [Metric("five_hour", "Session", 20d)]),
+            Usage("codex", ProviderStatus.NotDetected, []),
+        ]);
+
+        Assert.Equal(ProviderStatus.Active, overview.Status);
+        Assert.Equal("codex not detected", overview.StatusLine);
+    }
+
+    [Fact]
+    public void AFailureStillOutranksAWorkingProvider()
+    {
+        UsageOverview overview = UsageAggregator.Aggregate(
+        [
+            Usage("claude", ProviderStatus.Active, []),
+            Usage("codex", ProviderStatus.Error, [], detail: ProviderUsage.UnavailableDetail),
+        ]);
+
+        Assert.Equal(ProviderStatus.Error, overview.Status);
+    }
+
+    [Fact]
+    public void TheStatusLineReadsWithDisplayNamesWhenItIsGivenThem()
+    {
+        ProviderUsage[] failing = [Usage("claude", ProviderStatus.Error, [], detail: ProviderUsage.UnavailableDetail)];
+        ProviderUsage[] missing = [Usage("codex", ProviderStatus.NotDetected, []), Usage("claude", ProviderStatus.Active, [])];
+
+        Assert.Equal("Claude Code unavailable", UsageAggregator.DescribeStatus(failing, DisplayName));
+        Assert.Equal("Codex not detected", UsageAggregator.DescribeStatus(missing, DisplayName));
+        Assert.Equal("Claude Code unavailable", UsageAggregator.Aggregate(failing, DisplayName).StatusLine);
+
+        // Without a lookup, and for an id the lookup does not know, the id is all there is.
+        Assert.Equal("claude unavailable", UsageAggregator.DescribeStatus(failing));
+        Assert.Equal("gemini not detected", UsageAggregator.DescribeStatus(
+            [Usage("gemini", ProviderStatus.NotDetected, []), Usage("claude", ProviderStatus.Active, [])], DisplayName));
+    }
+
+    private static string DisplayName(string providerId) => providerId switch
+    {
+        "claude" => "Claude Code",
+        "codex" => "Codex",
+        _ => providerId,
+    };
 
     private static ProviderUsage Usage(
         string id,

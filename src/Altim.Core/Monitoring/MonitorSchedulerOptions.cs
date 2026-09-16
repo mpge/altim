@@ -34,6 +34,22 @@ public sealed record MonitorSchedulerOptions
     /// </summary>
     public TimeSpan NetworkMinimumInterval { get; init; } = TimeSpan.FromMinutes(1);
 
+    /// <summary>
+    /// How long one provider gets to answer a refresh before the scheduler stops waiting
+    /// and reports an error reading instead. A provider that reaches a CLI or the network
+    /// can hang for as long as that process does, and a refresh nobody is bounding is a
+    /// refresh that holds a gate for the life of the process.
+    /// </summary>
+    public TimeSpan ProviderTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// How long <see cref="MonitorScheduler.StopAsync"/> waits for work to unwind before
+    /// giving up on it. Measured against the wall clock rather than the injected
+    /// <see cref="TimeProvider"/>, because shutting down must not depend on somebody
+    /// advancing a simulated one.
+    /// </summary>
+    public TimeSpan ShutdownTimeout { get; init; } = TimeSpan.FromSeconds(2);
+
     /// <summary>Whether <see cref="MonitorScheduler.Resume"/> triggers one refresh.</summary>
     public bool RefreshOnResume { get; init; } = true;
 

@@ -45,6 +45,22 @@ public sealed class AltimSettingsTests
         Assert.NotEqual(AltimSettings.Default, changed);
     }
 
+    [Theory]
+    [InlineData(140, 100)]
+    [InlineData(101, 100)]
+    [InlineData(100, 100)]
+    [InlineData(1, 1)]
+    [InlineData(0, 1)]
+    [InlineData(-5, 1)]
+    public void NotificationThresholdsAreClampedToAUsablePercentage(int configured, int expected)
+    {
+        AltimSettings session = AltimSettings.Default with { SessionThresholdPercent = configured };
+        AltimSettings weekly = AltimSettings.Default with { WeeklyThresholdPercent = configured };
+
+        Assert.Equal(expected, session.SessionThresholdPercent);
+        Assert.Equal(expected, weekly.WeeklyThresholdPercent);
+    }
+
     [Fact]
     public void SchedulerOptionsFollowTheRefreshSettings()
     {
@@ -61,9 +77,11 @@ public sealed class AltimSettingsTests
         Assert.Equal(TimeSpan.FromSeconds(5), options.TightenedInterval);
         Assert.False(options.RefreshOnResume);
 
-        // The two protections are not user configurable.
+        // The protections are not user configurable.
         Assert.Equal(TimeSpan.FromMilliseconds(750), options.HintDebounce);
         Assert.Equal(TimeSpan.FromMinutes(1), options.NetworkMinimumInterval);
+        Assert.Equal(TimeSpan.FromSeconds(30), options.ProviderTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(2), options.ShutdownTimeout);
     }
 
     [Fact]
@@ -75,6 +93,8 @@ public sealed class AltimSettingsTests
         Assert.Equal(TimeSpan.FromSeconds(10), options.TightenedInterval);
         Assert.Equal(TimeSpan.FromMilliseconds(750), options.HintDebounce);
         Assert.Equal(TimeSpan.FromMinutes(1), options.NetworkMinimumInterval);
+        Assert.Equal(TimeSpan.FromSeconds(30), options.ProviderTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(2), options.ShutdownTimeout);
         Assert.True(options.RefreshOnResume);
     }
 }
