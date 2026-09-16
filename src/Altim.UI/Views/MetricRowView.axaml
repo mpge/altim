@@ -1,0 +1,56 @@
+<!--
+  One metric row, used by the popup, the Overview card and the provider page.
+
+  DESIGN.md's shape exactly: label left, figure right, meter beneath spanning the full width,
+  optional caption under the label. The first metric on a surface carries the large figure.
+
+  A metric with no percentage shows the sentence in place of the figure and hands the meter a
+  null, which draws an outline rather than an empty track. An empty track reads as a zero.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Altim.UI.Controls"
+             xmlns:design="using:Altim.UI.ViewModels.Design"
+             xmlns:vm="using:Altim.UI.ViewModels"
+             x:Class="Altim.UI.Views.MetricRowView"
+             x:DataType="vm:MetricViewModel"
+             Design.DataContext="{x:Static design:DesignData.Metric}">
+
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
+  </UserControl.Styles>
+
+  <StackPanel Spacing="{DynamicResource AltimSpace6}">
+    <Grid ColumnDefinitions="*,Auto">
+      <StackPanel Grid.Column="0"
+                  Spacing="{DynamicResource AltimSpace2}"
+                  VerticalAlignment="Bottom">
+        <TextBlock Theme="{DynamicResource AltimLabelText}"
+                   Classes.warn="{Binding IsAboveThreshold}"
+                   Text="{Binding Label}" />
+        <TextBlock Theme="{DynamicResource AltimCaptionMetricText}"
+                   IsVisible="{Binding HasReset}"
+                   Text="{Binding ResetText}" />
+      </StackPanel>
+
+      <TextBlock Grid.Column="1"
+                 Classes="figure"
+                 Classes.primary="{Binding IsPrimary}"
+                 IsVisible="{Binding IsReported}"
+                 VerticalAlignment="Bottom"
+                 Text="{Binding PercentText}" />
+
+      <TextBlock Grid.Column="1"
+                 Theme="{DynamicResource AltimCaptionText}"
+                 IsVisible="{Binding !IsReported}"
+                 VerticalAlignment="Bottom"
+                 TextAlignment="Right"
+                 TextWrapping="Wrap"
+                 MaxWidth="160"
+                 Text="{Binding UnavailableText}" />
+    </Grid>
+
+    <controls:Meter Value="{Binding Value}" Threshold="{Binding Threshold}" />
+  </StackPanel>
+
+</UserControl>

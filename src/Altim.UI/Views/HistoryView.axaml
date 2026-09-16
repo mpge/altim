@@ -1,0 +1,49 @@
+<!--
+  History: one line per provider over 24 hours, 7 days or 30 days.
+
+  The tape draws itself. All this page does is pick a span and hand over the series, and hand
+  over an empty list when the range holds nothing, which is what makes the tape print the
+  sentence. There is deliberately no fallback chart: a flat line along zero would be a claim
+  that nothing was used, which is not the same as not knowing.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Altim.UI.Controls"
+             xmlns:design="using:Altim.UI.ViewModels.Design"
+             xmlns:vm="using:Altim.UI.ViewModels"
+             x:Class="Altim.UI.Views.HistoryView"
+             x:DataType="vm:HistoryViewModel"
+             Design.DataContext="{x:Static design:DesignData.History}">
+
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
+  </UserControl.Styles>
+
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource AltimInset32}" Spacing="{DynamicResource AltimSpace24}">
+
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Grid.Column="0"
+                   VerticalAlignment="Center"
+                   Theme="{DynamicResource AltimTitleText}"
+                   Text="{Binding Title}" />
+        <ComboBox Grid.Column="1"
+                  MinWidth="140"
+                  ItemsSource="{Binding Ranges}"
+                  SelectedItem="{Binding SelectedRange}">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:HistoryRange">
+              <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+      </Grid>
+
+      <controls:UsageTape Height="240"
+                          Series="{Binding Series}"
+                          EmptyText="{Binding EmptyText}" />
+
+    </StackPanel>
+  </ScrollViewer>
+
+</UserControl>

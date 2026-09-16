@@ -1,0 +1,75 @@
+<!--
+  The dashboard: a 200px sidebar and the page it selects.
+
+  Navigation is a list and nothing more. The selected row takes the Surface colour back off the
+  muted sidebar ground, which is the whole of the selected treatment: no accent bar, no bold, no
+  second colour. The sidebar itself is the AltimSidebarListBox theme, so its width, ground and
+  right border all come from the design system rather than from here.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:design="using:Altim.UI.ViewModels.Design"
+        xmlns:views="using:Altim.UI.Views"
+        xmlns:vm="using:Altim.UI.ViewModels"
+        x:Class="Altim.UI.Views.DashboardWindow"
+        x:DataType="vm:DashboardViewModel"
+        Design.DataContext="{x:Static design:DesignData.Dashboard}"
+        Title="Altim"
+        Width="960"
+        Height="680"
+        MinWidth="720"
+        MinHeight="520"
+        WindowStartupLocation="CenterScreen">
+
+  <Window.Styles>
+    <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
+  </Window.Styles>
+
+  <Grid ColumnDefinitions="Auto,*">
+
+    <ListBox Grid.Column="0"
+             Theme="{DynamicResource AltimSidebarListBox}"
+             ItemsSource="{Binding Sections}"
+             SelectedItem="{Binding SelectedSection}">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:NavigationItemViewModel">
+          <Grid ColumnDefinitions="Auto,*">
+            <!-- The mark's box is always present so provider rows and plain rows line up. -->
+            <Panel Grid.Column="0"
+                   Width="{DynamicResource AltimProviderGlyphSize}"
+                   Height="{DynamicResource AltimProviderGlyphSize}">
+              <Path Classes="glyph"
+                    Classes.anthropic="{Binding IsAnthropic}"
+                    Classes.openai="{Binding IsOpenAI}"
+                    IsVisible="{Binding HasGlyph}"
+                    Data="{Binding Glyph}" />
+            </Panel>
+            <TextBlock Grid.Column="1"
+                       Margin="8,0,0,0"
+                       VerticalAlignment="Center"
+                       Text="{Binding Title}" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <ContentControl Grid.Column="1" Content="{Binding CurrentPage}">
+      <ContentControl.DataTemplates>
+        <DataTemplate DataType="vm:OverviewViewModel">
+          <views:OverviewView />
+        </DataTemplate>
+        <DataTemplate DataType="vm:ProviderPageViewModel">
+          <views:ProviderPageView />
+        </DataTemplate>
+        <DataTemplate DataType="vm:HistoryViewModel">
+          <views:HistoryView />
+        </DataTemplate>
+        <DataTemplate DataType="vm:SettingsViewModel">
+          <views:SettingsView />
+        </DataTemplate>
+      </ContentControl.DataTemplates>
+    </ContentControl>
+
+  </Grid>
+
+</Window>

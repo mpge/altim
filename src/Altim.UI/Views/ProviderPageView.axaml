@@ -1,0 +1,166 @@
+<!--
+  One provider in full: its metrics, its live sessions and what Altim can see of it.
+
+  There is one of these views and one instance per provider. Nothing about Claude or Codex is
+  written here: the page renders whatever metrics, tokens and sessions the provider reports, so
+  a third provider needs no view at all.
+
+  Sessions are rows, not cards: a 1px bottom rule and 12px of vertical padding.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:design="using:Altim.UI.ViewModels.Design"
+             xmlns:views="using:Altim.UI.Views"
+             xmlns:vm="using:Altim.UI.ViewModels"
+             x:Class="Altim.UI.Views.ProviderPageView"
+             x:DataType="vm:ProviderPageViewModel"
+             Design.DataContext="{x:Static design:DesignData.ProviderPage}">
+
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
+  </UserControl.Styles>
+
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource AltimInset32}" Spacing="{DynamicResource AltimSpace24}">
+
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+        <Path Grid.Column="0"
+              Classes="glyph"
+              Classes.anthropic="{Binding Provider.IsAnthropic}"
+              Classes.openai="{Binding Provider.IsOpenAI}"
+              Data="{Binding Provider.Glyph}" />
+        <TextBlock Grid.Column="1"
+                   Margin="12,0,0,0"
+                   VerticalAlignment="Center"
+                   Theme="{DynamicResource AltimTitleText}"
+                   Text="{Binding Provider.DisplayName}" />
+        <Ellipse Grid.Column="2"
+                 Classes="status"
+                 Classes.ok="{Binding Provider.Status.IsOk}"
+                 Classes.error="{Binding Provider.Status.IsError}" />
+        <TextBlock Grid.Column="3"
+                   Margin="6,0,0,0"
+                   VerticalAlignment="Center"
+                   Theme="{DynamicResource AltimLabelText}"
+                   Text="{Binding Provider.Status.Word}" />
+      </Grid>
+
+      <!-- Usage -->
+      <StackPanel Spacing="{DynamicResource AltimSpace16}">
+        <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding UsageHeading}" />
+
+        <StackPanel IsVisible="{Binding Provider.HasError}" Spacing="{DynamicResource AltimSpace8}">
+          <TextBlock Theme="{DynamicResource AltimBodyText}" Text="{Binding Provider.ErrorText}" />
+          <Button HorizontalAlignment="Left"
+                  Content="{Binding Provider.RetryLabel}"
+                  Command="{Binding Provider.RetryCommand}" />
+        </StackPanel>
+
+        <TextBlock IsVisible="{Binding Provider.ShowsNoMetricsNotice}"
+                   Theme="{DynamicResource AltimBodyText}"
+                   Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                   Text="{Binding Provider.NoMetricsText}" />
+
+        <ItemsControl ItemsSource="{Binding Provider.Metrics}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:MetricViewModel">
+              <views:MetricRowView Margin="0,0,0,20" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Grid.Column="0"
+                     IsVisible="{Binding Provider.HasReset}"
+                     Theme="{DynamicResource AltimCaptionMetricText}"
+                     Text="{Binding Provider.ResetText}" />
+          <TextBlock Grid.Column="1"
+                     Theme="{DynamicResource AltimCaptionMetricText}"
+                     Text="{Binding Provider.LastRefreshedText}" />
+        </Grid>
+      </StackPanel>
+
+      <!-- Tokens -->
+      <StackPanel IsVisible="{Binding Provider.HasTokens}" Spacing="{DynamicResource AltimSpace12}">
+        <Separator />
+        <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding TokensHeading}" />
+        <ItemsControl ItemsSource="{Binding Provider.TokenRows}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:TokenRowViewModel">
+              <Grid ColumnDefinitions="*,Auto" MinHeight="{DynamicResource AltimRowMinHeight}">
+                <TextBlock Grid.Column="0"
+                           VerticalAlignment="Center"
+                           Theme="{DynamicResource AltimLabelText}"
+                           Text="{Binding Label}" />
+                <TextBlock Grid.Column="1"
+                           VerticalAlignment="Center"
+                           Theme="{DynamicResource AltimBodyMetricText}"
+                           Text="{Binding ValueText}" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
+      <!-- Activity -->
+      <StackPanel Spacing="{DynamicResource AltimSpace12}">
+        <Separator />
+        <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding ActivityHeading}" />
+
+        <TextBlock IsVisible="{Binding !Provider.HasSessions}"
+                   Theme="{DynamicResource AltimBodyText}"
+                   Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                   Text="{Binding Provider.NoActivityText}" />
+
+        <ItemsControl ItemsSource="{Binding Provider.Sessions}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:AgentSessionViewModel">
+              <Border BorderBrush="{DynamicResource AltimSeparatorBrush}"
+                      BorderThickness="{DynamicResource AltimBorderThicknessBottom}"
+                      Padding="0,12">
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                  <StackPanel Grid.Column="0" Spacing="{DynamicResource AltimSpace2}">
+                    <TextBlock Theme="{DynamicResource AltimBodyText}" Text="{Binding Title}" />
+                    <StackPanel Orientation="Horizontal" Spacing="{DynamicResource AltimSpace8}">
+                      <TextBlock Theme="{DynamicResource AltimCaptionMetricText}" Text="{Binding StartedText}" />
+                      <TextBlock Theme="{DynamicResource AltimCaptionMetricText}" Text="{Binding LastActivityText}" />
+                    </StackPanel>
+                  </StackPanel>
+                  <TextBlock Grid.Column="1"
+                             VerticalAlignment="Center"
+                             IsVisible="{Binding HasTokens}"
+                             Margin="0,0,16,0"
+                             Theme="{DynamicResource AltimCaptionMetricText}"
+                             Text="{Binding TokensText}" />
+                  <TextBlock Grid.Column="2"
+                             VerticalAlignment="Center"
+                             Theme="{DynamicResource AltimLabelText}"
+                             Text="{Binding StatusText}" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
+      <!-- Integration -->
+      <StackPanel Spacing="{DynamicResource AltimSpace12}">
+        <Separator />
+        <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding IntegrationHeading}" />
+        <Grid ColumnDefinitions="*,Auto" MinHeight="{DynamicResource AltimRowMinHeight}">
+          <TextBlock Grid.Column="0"
+                     VerticalAlignment="Center"
+                     Theme="{DynamicResource AltimBodyText}"
+                     TextWrapping="Wrap"
+                     Text="{Binding Provider.IntegrationText}" />
+          <TextBlock Grid.Column="1"
+                     VerticalAlignment="Center"
+                     Theme="{DynamicResource AltimCaptionMetricText}"
+                     Text="{Binding Provider.LastRefreshedText}" />
+        </Grid>
+      </StackPanel>
+
+    </StackPanel>
+  </ScrollViewer>
+
+</UserControl>

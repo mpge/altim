@@ -1,0 +1,195 @@
+<!--
+  Settings: general, notifications, providers, privacy, about.
+
+  Sections are separated by rules and whitespace, never by boxes. Every control is one the
+  design system already themes, and every change saves itself, so there is no apply button to
+  place and no dialog to design.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:design="using:Altim.UI.ViewModels.Design"
+             xmlns:sys="using:System"
+             xmlns:vm="using:Altim.UI.ViewModels"
+             x:Class="Altim.UI.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel"
+             Design.DataContext="{x:Static design:DesignData.Settings}">
+
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
+  </UserControl.Styles>
+
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource AltimInset32}" Spacing="{DynamicResource AltimSpace24}">
+
+      <TextBlock Theme="{DynamicResource AltimTitleText}" Text="{Binding Title}" />
+
+      <!-- General -->
+      <StackPanel Spacing="{DynamicResource AltimSpace12}">
+        <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding GeneralHeading}" />
+
+        <ToggleSwitch Content="Launch at login" IsChecked="{Binding LaunchAtLogin}" />
+        <ToggleSwitch Content="Start minimised" IsChecked="{Binding StartMinimised}" />
+
+        <Grid ColumnDefinitions="*,Auto" MinHeight="{DynamicResource AltimRowMinHeight}">
+          <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Theme" />
+          <ComboBox Grid.Column="1"
+                    MinWidth="140"
+                    ItemsSource="{Binding Themes}"
+                    SelectedItem="{Binding SelectedTheme}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:ThemeOption">
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </Grid>
+
+        <Grid ColumnDefinitions="*,Auto" MinHeight="{DynamicResource AltimRowMinHeight}">
+          <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Refresh" />
+          <ComboBox Grid.Column="1"
+                    MinWidth="140"
+                    ItemsSource="{Binding RefreshOptions}"
+                    SelectedItem="{Binding SelectedRefresh}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:RefreshOption">
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </Grid>
+
+        <TextBlock IsVisible="{Binding SaveFailed}"
+                   Theme="{DynamicResource AltimCaptionText}"
+                   Foreground="{DynamicResource AltimStatusErrorBrush}"
+                   Text="{Binding SaveFailedText}" />
+      </StackPanel>
+
+      <Separator />
+
+      <!-- Notifications -->
+      <StackPanel Spacing="{DynamicResource AltimSpace12}">
+        <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding NotificationsHeading}" />
+
+        <ToggleSwitch Content="Enable notifications" IsChecked="{Binding NotificationsEnabled}" />
+
+        <Grid ColumnDefinitions="*,Auto" MinHeight="{DynamicResource AltimRowMinHeight}">
+          <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Session threshold" />
+          <ComboBox Grid.Column="1"
+                    MinWidth="140"
+                    IsEnabled="{Binding NotificationsEnabled}"
+                    ItemsSource="{Binding ThresholdOptions}"
+                    SelectedItem="{Binding SelectedSessionThreshold}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:ThresholdOption">
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </Grid>
+
+        <Grid ColumnDefinitions="*,Auto" MinHeight="{DynamicResource AltimRowMinHeight}">
+          <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="Weekly threshold" />
+          <ComboBox Grid.Column="1"
+                    MinWidth="140"
+                    IsEnabled="{Binding NotificationsEnabled}"
+                    ItemsSource="{Binding ThresholdOptions}"
+                    SelectedItem="{Binding SelectedWeeklyThreshold}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:ThresholdOption">
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </Grid>
+
+        <ToggleSwitch Content="Reset alerts"
+                      IsEnabled="{Binding NotificationsEnabled}"
+                      IsChecked="{Binding ResetAlertsEnabled}" />
+      </StackPanel>
+
+      <Separator />
+
+      <!-- Providers -->
+      <StackPanel Spacing="{DynamicResource AltimSpace12}">
+        <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding ProvidersHeading}" />
+
+        <ItemsControl ItemsSource="{Binding Providers}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:ProviderViewModel">
+              <Border BorderBrush="{DynamicResource AltimSeparatorBrush}"
+                      BorderThickness="{DynamicResource AltimBorderThicknessBottom}"
+                      Padding="0,12">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                  <Path Grid.Column="0"
+                        Classes="glyph"
+                        Classes.anthropic="{Binding IsAnthropic}"
+                        Classes.openai="{Binding IsOpenAI}"
+                        Data="{Binding Glyph}" />
+                  <StackPanel Grid.Column="1" Margin="8,0,0,0" Spacing="{DynamicResource AltimSpace2}">
+                    <TextBlock Theme="{DynamicResource AltimBodyText}" Text="{Binding DisplayName}" />
+                    <TextBlock Theme="{DynamicResource AltimCaptionText}"
+                               TextWrapping="Wrap"
+                               Text="{Binding IntegrationText}" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="2"
+                             VerticalAlignment="Center"
+                             Margin="16,0,0,0"
+                             Theme="{DynamicResource AltimCaptionMetricText}"
+                             Text="{Binding LastRefreshedText}" />
+                  <StackPanel Grid.Column="3"
+                              Orientation="Horizontal"
+                              Margin="16,0,0,0"
+                              Spacing="{DynamicResource AltimSpace6}"
+                              VerticalAlignment="Center">
+                    <Ellipse Classes="status"
+                             Classes.ok="{Binding Status.IsOk}"
+                             Classes.error="{Binding Status.IsError}" />
+                    <TextBlock Theme="{DynamicResource AltimLabelText}" Text="{Binding Status.Word}" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
+      <Separator />
+
+      <!-- Privacy -->
+      <StackPanel Spacing="{DynamicResource AltimSpace12}">
+        <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding PrivacyHeading}" />
+
+        <ItemsControl ItemsSource="{Binding PrivacyLines}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="sys:String">
+              <TextBlock Theme="{DynamicResource AltimBodyText}"
+                         Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                         TextWrapping="Wrap"
+                         Margin="0,0,0,4"
+                         Text="{Binding}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <Button HorizontalAlignment="Left"
+                Theme="{DynamicResource AltimDestructiveButton}"
+                Content="{Binding ClearHistoryLabel}"
+                Command="{Binding ClearHistoryCommand}" />
+
+        <TextBlock Theme="{DynamicResource AltimCaptionText}" Text="{Binding ClearHistoryResult}" />
+      </StackPanel>
+
+      <Separator />
+
+      <!-- About -->
+      <StackPanel Spacing="{DynamicResource AltimSpace4}">
+        <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding AboutHeading}" />
+        <TextBlock Theme="{DynamicResource AltimBodyText}" Text="{Binding AppName}" />
+        <TextBlock Theme="{DynamicResource AltimCaptionMetricText}" Text="{Binding VersionText}" />
+        <TextBlock Theme="{DynamicResource AltimCaptionText}" Text="{Binding Website}" />
+      </StackPanel>
+
+    </StackPanel>
+  </ScrollViewer>
+
+</UserControl>

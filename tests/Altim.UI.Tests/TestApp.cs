@@ -1,33 +1,29 @@
 using Avalonia;
 using Avalonia.Headless;
-using Avalonia.Themes.Fluent;
+using Avalonia.Themes.Simple;
 
 namespace Altim.UI.Tests;
 
 /// <summary>
-/// The Avalonia application the headless test host starts. Fluent is loaded here, and
-/// only here: the headless host needs a complete control theme to measure and arrange
-/// against, and keeping it in the test assembly leaves the Simple based design system
-/// in <c>Altim.UI</c> untouched by the tests.
+/// The application the headless tests run inside.
 /// </summary>
+/// <remarks>
+/// The base theme only. The Altim dictionary is merged per test through
+/// <see cref="DesignSystem.Ensure"/>, which is also the arrangement the composition root uses:
+/// application resources are searched ahead of application styles, so the Altim control themes
+/// win over the base theme's whatever order the styles were added in.
+/// </remarks>
 public sealed class TestApp : Application
 {
     /// <summary>
-    /// Builds the headless application. Named by convention; the headless xUnit
-    /// integration looks for this method on the type named by
-    /// <c>AvaloniaTestApplicationAttribute</c>.
-    ///
-    /// <c>UseHeadlessDrawing</c> is off so the platform renders through Skia. The stub
-    /// drawing backend measures and arranges but produces no surface, and
-    /// <c>CaptureRenderedFrame</c> returns null against it, so a render assertion would
-    /// assert nothing.
+    /// Builds the headless session. Drawing is real rather than headless, because a captured
+    /// frame is the only way to prove a control painted at all.
     /// </summary>
-    /// <returns>The configured builder.</returns>
-    public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<TestApp>()
-            .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
-            .UseSkia();
+    public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<TestApp>()
+        .UseSkia()
+        .WithInterFont()
+        .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false });
 
     /// <inheritdoc />
-    public override void Initialize() => Styles.Add(new FluentTheme());
+    public override void Initialize() => Styles.Add(new SimpleTheme());
 }

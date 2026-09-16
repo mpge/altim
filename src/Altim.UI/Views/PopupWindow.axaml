@@ -1,0 +1,34 @@
+<!--
+  The tray panel's window.
+
+  Built once at start-up and hidden rather than closed, so the process always has a live top
+  level to read screen geometry from. It carries no positioning and no dismissal logic of its
+  own: where a tray panel opens and what counts as a deactivation are platform questions, and
+  the composition root owns them.
+
+  The shape is entirely the AltimPopupWindow theme's: 320px panel, radius 8, 1px border and the
+  one shadow in the system, with the window itself transparent so the shadow has somewhere to
+  fall. Height follows the content, because a panel with one provider is not as tall as a panel
+  with three.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:design="using:Altim.UI.ViewModels.Design"
+        xmlns:views="using:Altim.UI.Views"
+        xmlns:vm="using:Altim.UI.ViewModels"
+        x:Class="Altim.UI.Views.PopupWindow"
+        x:DataType="vm:PopupViewModel"
+        Design.DataContext="{x:Static design:DesignData.Popup}"
+        Theme="{DynamicResource AltimPopupWindow}"
+        Title="Altim"
+        SizeToContent="Height"
+        CanResize="False"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowDecorations="None"
+        TransparencyLevelHint="Transparent"
+        WindowStartupLocation="Manual">
+
+  <views:PopupView />
+
+</Window>

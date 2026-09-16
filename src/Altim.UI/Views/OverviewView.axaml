@@ -1,0 +1,108 @@
+<!--
+  Overview: the greeting, then one card per provider.
+
+  The card is the only card in the system and it appears only here: 1px border, radius 8,
+  padding 20, no shadow. Inside it, metrics are separated by whitespace and the footer by a
+  single rule, because a card inside a card is what DESIGN.md exists to prevent.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:design="using:Altim.UI.ViewModels.Design"
+             xmlns:views="using:Altim.UI.Views"
+             xmlns:vm="using:Altim.UI.ViewModels"
+             x:Class="Altim.UI.Views.OverviewView"
+             x:DataType="vm:OverviewViewModel"
+             Design.DataContext="{x:Static design:DesignData.Overview}">
+
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
+  </UserControl.Styles>
+
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource AltimInset32}" Spacing="{DynamicResource AltimSpace24}">
+
+      <StackPanel Spacing="{DynamicResource AltimSpace4}">
+        <TextBlock Theme="{DynamicResource AltimTitleText}" Text="{Binding GreetingText}" />
+        <TextBlock Theme="{DynamicResource AltimBodyText}"
+                   Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                   Text="{Binding SubHeading}" />
+      </StackPanel>
+
+      <TextBlock IsVisible="{Binding !HasProviders}"
+                 Theme="{DynamicResource AltimBodyText}"
+                 Text="{Binding NoProvidersText}" />
+
+      <ItemsControl ItemsSource="{Binding Providers}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ProviderViewModel">
+            <Border Theme="{DynamicResource AltimProviderCard}" Margin="0,0,0,16">
+              <StackPanel Spacing="{DynamicResource AltimSpace16}">
+
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                  <Path Grid.Column="0"
+                        Classes="glyph"
+                        Classes.anthropic="{Binding IsAnthropic}"
+                        Classes.openai="{Binding IsOpenAI}"
+                        Data="{Binding Glyph}" />
+                  <TextBlock Grid.Column="1"
+                             Margin="8,0,0,0"
+                             VerticalAlignment="Center"
+                             Theme="{DynamicResource AltimHeadingText}"
+                             Text="{Binding DisplayName}" />
+                  <Ellipse Grid.Column="2"
+                           Classes="status"
+                           Classes.ok="{Binding Status.IsOk}"
+                           Classes.error="{Binding Status.IsError}" />
+                  <TextBlock Grid.Column="3"
+                             Margin="6,0,0,0"
+                             VerticalAlignment="Center"
+                             Theme="{DynamicResource AltimLabelText}"
+                             Text="{Binding Status.Word}" />
+                </Grid>
+
+                <StackPanel IsVisible="{Binding HasError}" Spacing="{DynamicResource AltimSpace8}">
+                  <TextBlock Theme="{DynamicResource AltimBodyText}" Text="{Binding ErrorText}" />
+                  <Button HorizontalAlignment="Left"
+                          Content="{Binding RetryLabel}"
+                          Command="{Binding RetryCommand}" />
+                </StackPanel>
+
+                <TextBlock IsVisible="{Binding ShowsNoMetricsNotice}"
+                           Theme="{DynamicResource AltimBodyText}"
+                           Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                           Text="{Binding NoMetricsText}" />
+
+                <ItemsControl ItemsSource="{Binding Metrics}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:MetricViewModel">
+                      <views:MetricRowView Margin="0,0,0,16" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock IsVisible="{Binding HasTokens}"
+                           Theme="{DynamicResource AltimCaptionMetricText}"
+                           Text="{Binding TokensText}" />
+
+                <Separator />
+
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Grid.Column="0"
+                             IsVisible="{Binding HasReset}"
+                             Theme="{DynamicResource AltimCaptionMetricText}"
+                             Text="{Binding ResetText}" />
+                  <TextBlock Grid.Column="1"
+                             Theme="{DynamicResource AltimCaptionMetricText}"
+                             Text="{Binding LastRefreshedText}" />
+                </Grid>
+
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+    </StackPanel>
+  </ScrollViewer>
+
+</UserControl>

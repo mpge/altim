@@ -1,0 +1,142 @@
+<!--
+  The tray panel's contents.
+
+  Four sections split by 1px rules, in DESIGN.md's order: providers, resets, status, actions.
+  The rules are full bleed, so the padding belongs to each section rather than to the panel.
+
+  Nothing here is a card. The panel is one surface; whitespace and the rules do the separating.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:design="using:Altim.UI.ViewModels.Design"
+             xmlns:views="using:Altim.UI.Views"
+             xmlns:vm="using:Altim.UI.ViewModels"
+             x:Class="Altim.UI.Views.PopupView"
+             x:DataType="vm:PopupViewModel"
+             Design.DataContext="{x:Static design:DesignData.Popup}">
+
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
+  </UserControl.Styles>
+
+  <StackPanel>
+
+    <!-- Providers -->
+    <TextBlock IsVisible="{Binding !HasProviders}"
+               Margin="{DynamicResource AltimInset16}"
+               Theme="{DynamicResource AltimBodyText}"
+               Text="{Binding NoProvidersText}" />
+
+    <ItemsControl IsVisible="{Binding HasProviders}"
+                  Margin="{DynamicResource AltimInset16}"
+                  ItemsSource="{Binding Providers}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:ProviderViewModel">
+          <StackPanel Spacing="{DynamicResource AltimSpace12}" Margin="0,0,0,16">
+
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto"
+                  MinHeight="{DynamicResource AltimRowMinHeight}">
+              <Path Grid.Column="0"
+                    Classes="glyph"
+                    Classes.anthropic="{Binding IsAnthropic}"
+                    Classes.openai="{Binding IsOpenAI}"
+                    Data="{Binding Glyph}" />
+              <TextBlock Grid.Column="1"
+                         Margin="8,0,0,0"
+                         VerticalAlignment="Center"
+                         Theme="{DynamicResource AltimHeadingText}"
+                         Text="{Binding DisplayName}" />
+              <Ellipse Grid.Column="2"
+                       Classes="status"
+                       Classes.ok="{Binding Status.IsOk}"
+                       Classes.error="{Binding Status.IsError}" />
+              <TextBlock Grid.Column="3"
+                         Margin="6,0,0,0"
+                         VerticalAlignment="Center"
+                         Theme="{DynamicResource AltimLabelText}"
+                         Text="{Binding Status.Word}" />
+            </Grid>
+
+            <!-- A failed reading: the sentence and the one action that can change it. -->
+            <StackPanel IsVisible="{Binding HasError}" Spacing="{DynamicResource AltimSpace8}">
+              <TextBlock Theme="{DynamicResource AltimBodyText}" Text="{Binding ErrorText}" />
+              <Button HorizontalAlignment="Left"
+                      Content="{Binding RetryLabel}"
+                      Command="{Binding RetryCommand}" />
+            </StackPanel>
+
+            <!-- A reading that carried no metric at all says so, rather than showing nothing. -->
+            <TextBlock IsVisible="{Binding ShowsNoMetricsNotice}"
+                       Theme="{DynamicResource AltimBodyText}"
+                       Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                       Text="{Binding NoMetricsText}" />
+
+            <ItemsControl ItemsSource="{Binding Metrics}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:MetricViewModel">
+                  <views:MetricRowView Margin="0,0,0,12" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+          </StackPanel>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <Separator />
+
+    <!-- Resets -->
+    <StackPanel Margin="{DynamicResource AltimInset16}">
+      <TextBlock IsVisible="{Binding !HasResets}"
+                 Theme="{DynamicResource AltimCaptionText}"
+                 Text="{Binding NoResetsText}" />
+
+      <ItemsControl IsVisible="{Binding HasResets}" ItemsSource="{Binding Resets}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ResetRowViewModel">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto" MinHeight="{DynamicResource AltimRowMinHeight}">
+              <TextBlock Grid.Column="0"
+                         VerticalAlignment="Center"
+                         Theme="{DynamicResource AltimLabelText}"
+                         Foreground="{DynamicResource AltimTextPrimaryBrush}"
+                         Text="{Binding MetricLabel}" />
+              <TextBlock Grid.Column="1"
+                         Margin="6,0,0,0"
+                         VerticalAlignment="Center"
+                         Theme="{DynamicResource AltimCaptionText}"
+                         Text="{Binding ProviderName}" />
+              <TextBlock Grid.Column="2"
+                         VerticalAlignment="Center"
+                         Theme="{DynamicResource AltimCaptionMetricText}"
+                         Foreground="{DynamicResource AltimTextPrimaryBrush}"
+                         Text="{Binding RemainingText}" />
+              <TextBlock Grid.Column="3"
+                         Margin="6,0,0,0"
+                         VerticalAlignment="Center"
+                         Theme="{DynamicResource AltimCaptionMetricText}"
+                         Text="{Binding ClockText}" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+
+    <Separator />
+
+    <!-- Status -->
+    <TextBlock Margin="{DynamicResource AltimInset16}"
+               Theme="{DynamicResource AltimBodyText}"
+               Text="{Binding StatusLine}" />
+
+    <Separator />
+
+    <!-- Actions -->
+    <Button Margin="{DynamicResource AltimInset16}"
+            HorizontalAlignment="Stretch"
+            Content="{Binding OpenLabel}"
+            Command="{Binding OpenAltimCommand}" />
+
+  </StackPanel>
+
+</UserControl>

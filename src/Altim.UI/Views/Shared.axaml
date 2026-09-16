@@ -1,0 +1,62 @@
+<!--
+  The handful of styles the views share.
+
+  Most of them exist because a colour cannot be bound: every brush in Altim lives in a theme
+  dictionary and is resolved per variant, so a view model that handed a view a brush would hand
+  it a brush from the wrong theme the moment the system switched. Instead the view model exposes
+  booleans, the view turns them into style classes, and the class picks the brush with
+  DynamicResource, which keeps following the variant.
+
+  Nothing here restyles a control. Every ControlTheme still comes from Themes/.
+-->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- The 16px provider mark. Default is the neutral face; the accent classes are the only
+       place a provider accent appears, and it never fills anything larger than this. -->
+  <Style Selector="Path.glyph">
+    <Setter Property="Width" Value="{DynamicResource AltimProviderGlyphSize}" />
+    <Setter Property="Height" Value="{DynamicResource AltimProviderGlyphSize}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Fill" Value="{DynamicResource AltimTextSecondaryBrush}" />
+  </Style>
+
+  <Style Selector="Path.glyph.anthropic">
+    <Setter Property="Fill" Value="{DynamicResource AltimAccentAnthropicBrush}" />
+  </Style>
+
+  <Style Selector="Path.glyph.openai">
+    <Setter Property="Fill" Value="{DynamicResource AltimAccentOpenAIBrush}" />
+  </Style>
+
+  <!-- The 6px status dot. Neutral by default: DESIGN.md gives status three colours, and a
+       state that is neither healthy nor unreachable is not one of them. -->
+  <Style Selector="Ellipse.status">
+    <Setter Property="Theme" Value="{DynamicResource AltimStatusDot}" />
+    <Setter Property="Fill" Value="{DynamicResource AltimTextSecondaryBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status.ok">
+    <Setter Property="Fill" Value="{DynamicResource AltimStatusOkBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status.error">
+    <Setter Property="Fill" Value="{DynamicResource AltimStatusErrorBrush}" />
+  </Style>
+
+  <!-- A metric figure. The first metric on a surface carries the large figure and the rest the
+       small one, so the percentage stays the largest thing on screen without repeating itself. -->
+  <Style Selector="TextBlock.figure">
+    <Setter Property="Theme" Value="{DynamicResource AltimFigureSmallText}" />
+  </Style>
+
+  <Style Selector="TextBlock.figure.primary">
+    <Setter Property="Theme" Value="{DynamicResource AltimFigureText}" />
+  </Style>
+
+  <!-- Above the threshold the label turns, never the meter fill. -->
+  <Style Selector="TextBlock.warn">
+    <Setter Property="Foreground" Value="{DynamicResource AltimStatusWarnBrush}" />
+  </Style>
+
+</Styles>
