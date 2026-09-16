@@ -9,7 +9,7 @@ namespace Altim.Providers.Cli;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Four things are non-negotiable here, and each of them came from a way this goes wrong:
+/// Five things are non-negotiable here, and each of them came from a way this goes wrong:
 /// </para>
 /// <list type="bullet">
 /// <item>
@@ -26,8 +26,14 @@ namespace Altim.Providers.Cli;
 /// spawn helpers, and killing only the parent leaves those running.
 /// </item>
 /// <item>
+/// Both output pipes are drained to end-of-stream even after the capture cap is reached.
+/// A pipe nobody reads fills at about 64 KB and blocks the child's next write, which a
+/// caller sees as a timeout on a command that was working perfectly.
+/// </item>
+/// <item>
 /// A missing binary is an outcome, not an exception. "Not installed" is the normal state
-/// for a provider the user does not use.
+/// for a provider the user does not use. A binary that was found and then would not start
+/// is a <see cref="CliRunOutcome.Failed"/>, because those two mean different things.
 /// </item>
 /// </list>
 /// </remarks>
@@ -39,6 +45,71 @@ public sealed class CliRunner : ICliRunner
     /// memory in a process with an 80 MB working-set budget.
     /// </summary>
     public const int MaxCapturedOutputBytes = 512 * 1024;
+
+    /// <summary>The folder name created under local application data to run provider CLIs in.</summary>
+    private const string WorkingDirectoryName = "cli";
+
+    private static readonly Win32ErrorCode[] MissingFileErrors =
+    [
+        Win32ErrorCode.FileNotFound,
+        Win32ErrorCode.PathNotFound,
+    ];
+
+    private readonly int _capturedOutputLimitBytes;
+
+    /// <summary>
+    /// Creates a runner.
+    /// </summary>
+    /// <param name="capturedOutputLimitBytes">
+    /// How much standard output to keep, defaulting to <see cref="MaxCapturedOutputBytes"/>.
+    /// Output past the limit is read and discarded rather than left in the pipe.
+    /// </param>
+    public CliRunner(int capturedOutputLimitBytes = MaxCapturedOutputBytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capturedOutputLimitBytes);
+        _capturedOutputLimitBytes = capturedOutputLimitBytes;
+    }
+
+    private enum Win32ErrorCode
+    {
+        FileNotFound = 2,
+        PathNotFound = 3,
+    }
+
+    /// <summary>
+    /// The directory provider CLIs are started in.
+    /// </summary>
+    /// <returns>
+    /// A stable per-user directory under local application data, falling back to the
+    /// application's own directory.
+    /// </returns>
+    /// <remarks>
+    /// A provider CLI inherits the working directory otherwise, and that directory is
+    /// whatever the user last had open, which would put a real project path into the CLI's
+    /// own recent-project list. The temp folder is not the answer either: Claude Code
+    /// registers the directory it runs in as a project, so pointing at the temp folder puts
+    /// a temp path in the user's project list. This is a fixed, boring directory that Altim
+    /// owns, so at worst the user sees one entry that is obviously Altim's.
+    /// </remarks>
+    public static string NeutralWorkingDirectory()
+    {
+        try
+        {
+            string root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrEmpty(root))
+            {
+                string directory = Path.Combine(root, "Altim", WorkingDirectoryName);
+                _ = Directory.CreateDirectory(directory);
+                return directory;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or ArgumentException or NotSupportedException)
+        {
+            // Fall through to the application directory, which always exists.
+        }
+
+        return AppContext.BaseDirectory;
+    }
 
     /// <inheritdoc />
     public bool Exists(string command) => ExecutableResolver.TryResolve(command, out _);
@@ -64,9 +135,6 @@ public sealed class CliRunner : ICliRunner
             RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
-
-            // A provider CLI inherits the working directory otherwise, and that directory
-            // is whatever the user last had open. Anchor it somewhere neutral.
             WorkingDirectory = NeutralWorkingDirectory(),
         };
 
@@ -84,10 +152,15 @@ public sealed class CliRunner : ICliRunner
                 return CliRunResult.Failed;
             }
         }
-        catch (Win32Exception)
+        catch (Win32Exception ex)
         {
-            // Resolved a moment ago, gone or not executable now.
-            return CliRunResult.NotDetected;
+            // The resolver found a file a moment ago. If it has since gone the provider is
+            // genuinely not installed; anything else — a bad image format, a denied
+            // execution — is a fault, and reporting it as "not installed" would tell the
+            // user to install software they already have.
+            return Array.IndexOf(MissingFileErrors, (Win32ErrorCode)ex.NativeErrorCode) >= 0
+                ? CliRunResult.NotDetected
+                : CliRunResult.Failed;
         }
         catch (Exception ex) when (ex is InvalidOperationException or PlatformNotSupportedException or IOException)
         {
@@ -103,7 +176,7 @@ public sealed class CliRunner : ICliRunner
             // CLIs block on.
             process.StandardInput.Close();
 
-            Task<string> stdout = ReadCappedAsync(process.StandardOutput, timeoutSource.Token);
+            Task<string> stdout = ReadCappedAsync(process.StandardOutput, _capturedOutputLimitBytes, timeoutSource.Token);
             Task stderr = DrainAsync(process.StandardError, timeoutSource.Token);
 
             await process.WaitForExitAsync(timeoutSource.Token).ConfigureAwait(false);
@@ -124,12 +197,22 @@ public sealed class CliRunner : ICliRunner
         }
     }
 
-    private static async Task<string> ReadCappedAsync(StreamReader reader, CancellationToken ct)
+    /// <summary>
+    /// Reads standard output, keeping at most <paramref name="limit"/> characters and
+    /// discarding the rest.
+    /// </summary>
+    /// <remarks>
+    /// The loop runs to end-of-stream whatever the limit is. Stopping at the limit would
+    /// leave the child blocked on a full pipe, and the caller would then kill it on a
+    /// timeout and report a failure for a command that answered correctly and simply said
+    /// more than Altim keeps.
+    /// </remarks>
+    private static async Task<string> ReadCappedAsync(StreamReader reader, int limit, CancellationToken ct)
     {
         var builder = new StringBuilder();
         char[] buffer = new char[8192];
 
-        while (builder.Length < MaxCapturedOutputBytes)
+        while (true)
         {
             int read = await reader.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false);
             if (read <= 0)
@@ -137,8 +220,11 @@ public sealed class CliRunner : ICliRunner
                 break;
             }
 
-            int room = Math.Min(read, MaxCapturedOutputBytes - builder.Length);
-            _ = builder.Append(buffer, 0, room);
+            int room = Math.Min(read, limit - builder.Length);
+            if (room > 0)
+            {
+                _ = builder.Append(buffer, 0, room);
+            }
         }
 
         return builder.ToString();
@@ -151,19 +237,6 @@ public sealed class CliRunner : ICliRunner
         char[] buffer = new char[4096];
         while (await reader.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false) > 0)
         {
-        }
-    }
-
-    private static string NeutralWorkingDirectory()
-    {
-        try
-        {
-            string temp = Path.GetTempPath();
-            return Directory.Exists(temp) ? temp : AppContext.BaseDirectory;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        {
-            return AppContext.BaseDirectory;
         }
     }
 

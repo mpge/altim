@@ -26,7 +26,26 @@ public sealed record CodexOptions
     /// <summary>
     /// The shortest interval between two live quota calls. Never shorter than a minute.
     /// </summary>
+    /// <remarks>
+    /// This is the fallback floor, used when no <see cref="Core.Abstractions.IRefreshGate"/>
+    /// is supplied. When one is, the gate owns the decision and this value only describes
+    /// how long a live reading is presented as current.
+    /// </remarks>
     public TimeSpan MinimumLiveCallInterval { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// How long a successful live reading stays the answer after the call that produced it.
+    /// </summary>
+    /// <remarks>
+    /// A skipped call is not a missing reading. The floor exists so the CLI is not asked
+    /// more than once a minute, and inside that minute the last live figure is at most
+    /// sixty seconds old — fresher, usually by hours, than the local rollout snapshot.
+    /// Falling back to the local file on every skipped tick made the popup alternate
+    /// between a live reading and a stale one, flip its status line, and write alternating
+    /// rows into the history table. The retention is longer than the floor so that one
+    /// failed or slow call does not immediately demote a good reading.
+    /// </remarks>
+    public TimeSpan LiveSnapshotRetention { get; init; } = TimeSpan.FromMinutes(5);
 
     /// <summary>How long the app-server exchange may take before it is abandoned and killed.</summary>
     public TimeSpan LiveCallTimeout { get; init; } = TimeSpan.FromSeconds(20);

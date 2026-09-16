@@ -42,6 +42,7 @@ public sealed class ParsedResultShapeTests
         typeof(UsageSample),
         typeof(CodexLimitWindow),
         typeof(CodexRateLimitSnapshot),
+        typeof(CodexCredits),
         typeof(CodexRolloutRecord),
         typeof(CodexTokenCounts),
         typeof(CodexAccountUsage),

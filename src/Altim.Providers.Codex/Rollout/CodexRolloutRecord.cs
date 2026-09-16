@@ -29,27 +29,52 @@ namespace Altim.Providers.Codex.Rollout;
 /// <param name="TurnTokens">Tokens attributable to this turn alone, when reported.</param>
 /// <param name="ModelContextWindow">The model's context window in tokens, when reported.</param>
 /// <param name="ModelId">The model the turn ran against, when reported.</param>
+/// <param name="PlanType">
+/// The plan the account was on when the line was written, when reported. It sits inside the
+/// line's rate-limits object rather than beside it.
+/// </param>
+/// <param name="Credits">The credit position the line reported, when it carried one.</param>
 public sealed record CodexRolloutRecord(
     DateTimeOffset? ObservedAt,
     IReadOnlyList<CodexLimitWindow> Windows,
     CodexTokenCounts? CumulativeTokens,
     CodexTokenCounts? TurnTokens,
     long? ModelContextWindow,
-    string? ModelId);
+    string? ModelId,
+    string? PlanType = null,
+    CodexCredits? Credits = null);
 
 /// <summary>
 /// Codex token counts, as reported.
 /// </summary>
 /// <param name="Input">Uncached input tokens.</param>
 /// <param name="CachedInput">Input tokens served from cache.</param>
+/// <param name="CacheWrite">
+/// Input tokens written into the cache. Reported as <c>cache_write_input_tokens</c> in the
+/// rollout dialect and <c>cacheWriteInputTokens</c> in the app-server one, in the same
+/// object as the rest. It is read rather than dropped; a null here means the line did not
+/// carry it, never that the cache went unwritten.
+/// </param>
 /// <param name="Output">Generated output tokens, including reasoning output.</param>
 /// <param name="ReasoningOutput">
 /// The reasoning portion of the output, when reported separately. It is a subset of
 /// <paramref name="Output"/> and is never added to it.
 /// </param>
 /// <param name="Total">The provider's own total, when reported.</param>
-public readonly record struct CodexTokenCounts(long? Input, long? CachedInput, long? Output, long? ReasoningOutput, long? Total)
+public readonly record struct CodexTokenCounts(
+    long? Input,
+    long? CachedInput,
+    long? CacheWrite,
+    long? Output,
+    long? ReasoningOutput,
+    long? Total)
 {
     /// <summary>True when at least one component was reported.</summary>
-    public bool HasAny => Input is not null || CachedInput is not null || Output is not null || Total is not null;
+    public bool HasAny =>
+        Input is not null
+        || CachedInput is not null
+        || CacheWrite is not null
+        || Output is not null
+        || ReasoningOutput is not null
+        || Total is not null;
 }

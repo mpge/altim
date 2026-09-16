@@ -6,6 +6,33 @@ using Altim.Providers.Limits;
 namespace Altim.Providers.Claude.StatusLine;
 
 /// <summary>
+/// Why a read of the status-line state file produced nothing.
+/// </summary>
+/// <remarks>
+/// The three cases mean different things and a caller that cannot tell them apart makes the
+/// wrong choice. A missing file is the ordinary state before the helper has ever run. A file
+/// that could not be opened is transient — the helper writes it every few hundred
+/// milliseconds, and a reader can land exactly on the rewrite — and the right answer is to
+/// keep showing the last good reading. A file that opened and did not parse is neither.
+/// </remarks>
+public enum StatusLineReadOutcome
+{
+    /// <summary>The file was read and parsed.</summary>
+    Read = 0,
+
+    /// <summary>There is no file, or it is empty. The helper has not run.</summary>
+    Missing = 1,
+
+    /// <summary>
+    /// The file exists and could not be opened or read this time. Transient by nature.
+    /// </summary>
+    Unreadable = 2,
+
+    /// <summary>The file was read and is not a status-line payload.</summary>
+    Malformed = 3,
+}
+
+/// <summary>
 /// Reads the status-line state file Altim's helper writes.
 /// </summary>
 /// <remarks>
@@ -14,6 +41,12 @@ namespace Altim.Providers.Claude.StatusLine;
 /// the same parser reads either. Documented property names are used
 /// (<c>rate_limits.five_hour.used_percentage</c>, <c>cost.total_cost_usd</c>,
 /// <c>context_window.*</c>, <c>prompt_cache.*</c>), and each one is optional.
+/// </para>
+/// <para>
+/// The file is opened with sharing that tolerates the writer. Claude Code invokes the
+/// status-line helper on a 300-millisecond debounce, so the helper is rewriting this file
+/// constantly; an open that demanded exclusive read would fail whenever the two coincided,
+/// and the reading would blink out for a tick.
 /// </para>
 /// <para>
 /// A known defect returns an epoch timestamp in place of a percentage before a window has
@@ -36,27 +69,61 @@ public static class ClaudeStatusLineReader
     /// </returns>
     public static ClaudeStatusLineState? Read(string path)
     {
+        _ = TryRead(path, out ClaudeStatusLineState? state);
+        return state;
+    }
+
+    /// <summary>
+    /// Reads the state file and says why it produced nothing when it did.
+    /// </summary>
+    /// <param name="path">The state file.</param>
+    /// <param name="state">The state when the outcome is <see cref="StatusLineReadOutcome.Read"/>.</param>
+    /// <returns>What happened.</returns>
+    public static StatusLineReadOutcome TryRead(string path, out ClaudeStatusLineState? state)
+    {
         ArgumentException.ThrowIfNullOrEmpty(path);
+
+        state = null;
 
         byte[] bytes;
         DateTimeOffset? lastWrite;
         try
         {
             var info = new FileInfo(path);
-            if (!info.Exists || info.Length == 0 || info.Length > MaxStateFileBytes)
+            if (!info.Exists || info.Length == 0)
             {
-                return null;
+                return StatusLineReadOutcome.Missing;
+            }
+
+            if (info.Length > MaxStateFileBytes)
+            {
+                return StatusLineReadOutcome.Malformed;
             }
 
             lastWrite = new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero);
-            bytes = File.ReadAllBytes(path);
+            bytes = ReadAllBytesSharedWithWriter(path);
+        }
+        catch (FileNotFoundException)
+        {
+            return StatusLineReadOutcome.Missing;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return StatusLineReadOutcome.Missing;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            return null;
+            return StatusLineReadOutcome.Unreadable;
         }
 
-        return Parse(bytes, lastWrite);
+        if (bytes.Length == 0)
+        {
+            // Opened mid-rewrite, between the truncate and the write.
+            return StatusLineReadOutcome.Unreadable;
+        }
+
+        state = Parse(bytes, lastWrite);
+        return state is null ? StatusLineReadOutcome.Malformed : StatusLineReadOutcome.Read;
     }
 
     /// <summary>
@@ -71,6 +138,26 @@ public static class ClaudeStatusLineReader
     {
         ArgumentNullException.ThrowIfNull(json);
         return Parse(Encoding.UTF8.GetBytes(json), fallbackWrittenAt);
+    }
+
+    /// <summary>
+    /// Opens the file with sharing that lets the helper keep writing it, and reads it whole.
+    /// </summary>
+    private static byte[] ReadAllBytesSharedWithWriter(string path)
+    {
+        using var stream = new FileStream(
+            path,
+            new FileStreamOptions
+            {
+                Mode = FileMode.Open,
+                Access = FileAccess.Read,
+                Share = FileShare.ReadWrite | FileShare.Delete,
+                Options = FileOptions.SequentialScan,
+            });
+
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
     }
 
     private static ClaudeStatusLineState? Parse(byte[] utf8Json, DateTimeOffset? fallbackWrittenAt)
@@ -93,7 +180,7 @@ public static class ClaudeStatusLineReader
                 return null;
             }
 
-            DateTimeOffset? writtenAt = JsonValues.ReadUnixSeconds(root, "written_at", "writtenAt")
+            DateTimeOffset? writtenAt = JsonValues.ReadUnixTimestamp(root, "written_at", "writtenAt")
                 ?? JsonValues.ReadIso8601(root, "written_at", "writtenAt")
                 ?? fallbackWrittenAt;
 
@@ -174,6 +261,6 @@ public static class ClaudeStatusLineReader
         }
 
         percent = PercentReading.Normalize(JsonValues.ReadDouble(window, "used_percentage", "usedPercentage"));
-        resetsAt = JsonValues.ReadUnixSeconds(window, "resets_at", "resetsAt");
+        resetsAt = JsonValues.ReadUnixTimestamp(window, "resets_at", "resetsAt");
     }
 }

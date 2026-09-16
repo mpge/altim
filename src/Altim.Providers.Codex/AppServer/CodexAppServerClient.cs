@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.Json;
 using Altim.Providers.Cli;
 using Altim.Providers.Codex.Limits;
-using Altim.Providers.Codex.Rollout;
 using Altim.Providers.Io;
 
 namespace Altim.Providers.Codex.AppServer;
@@ -30,13 +29,24 @@ namespace Altim.Providers.Codex.AppServer;
 /// The interface is marked experimental by its vendor, so everything it returns is
 /// best-effort and every field is optional.
 /// </para>
+/// <para>
+/// Standard error is drained for the same reason standard output is: an unread pipe fills
+/// at about 64 KB and blocks the child's next write, and an app-server that logs a warning
+/// would then be killed on a timeout and reported as broken.
+/// </para>
 /// </remarks>
 public sealed class CodexAppServerClient : ICodexAppServerClient
 {
+    /// <summary>The request id used for <c>initialize</c>.</summary>
+    public const int InitializeId = 1;
+
+    /// <summary>The request id used for <c>account/rateLimits/read</c>.</summary>
+    public const int RateLimitsId = 2;
+
+    /// <summary>The request id used for <c>account/usage/read</c>.</summary>
+    public const int UsageId = 3;
+
     private const string DefaultCommand = "codex";
-    private const int InitializeId = 1;
-    private const int RateLimitsId = 2;
-    private const int UsageId = 3;
     private const int MaxLinesToRead = 512;
 
     private static readonly JsonDocumentOptions DocumentOptions = new() { MaxDepth = 64 };
@@ -63,161 +73,34 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <inheritdoc />
     public bool IsAvailable => ExecutableResolver.TryResolve(_command, out _);
 
-    /// <inheritdoc />
-    public async Task<CodexLiveResult> ReadAsync(TimeSpan timeout, CancellationToken ct)
+    /// <summary>
+    /// Performs the JSON-RPC exchange over an already-connected pair of streams.
+    /// </summary>
+    /// <param name="requests">Where requests are written, one JSON document per line.</param>
+    /// <param name="responses">Where responses are read from, one JSON document per line.</param>
+    /// <param name="clientName">The name announced in <c>initialize</c>.</param>
+    /// <param name="clientVersion">The version announced in <c>initialize</c>.</param>
+    /// <param name="ct">Cancels the exchange.</param>
+    /// <returns>The outcome of the exchange.</returns>
+    /// <remarks>
+    /// Separated from the process plumbing so the protocol can be tested against a fake
+    /// stdio pair: the request lines, the id matching, the error handling and the empty
+    /// response are all exercised without a CLI, a network or an account.
+    /// </remarks>
+    public static async Task<CodexLiveResult> ExchangeAsync(
+        TextWriter requests,
+        TextReader responses,
+        string clientName,
+        string clientVersion,
+        CancellationToken ct)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
+        ArgumentNullException.ThrowIfNull(requests);
+        ArgumentNullException.ThrowIfNull(responses);
 
-        if (!ExecutableResolver.TryResolve(_command, out string? executable))
-        {
-            return CodexLiveResult.NotDetected;
-        }
-
-        var startInfo = new ProcessStartInfo(executable)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-            StandardOutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-            StandardErrorEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-        };
-        startInfo.ArgumentList.Add("app-server");
-
-        using var process = new Process { StartInfo = startInfo };
-
-        try
-        {
-            if (!process.Start())
-            {
-                return CodexLiveResult.Failed;
-            }
-        }
-        catch (Win32Exception)
-        {
-            return CodexLiveResult.NotDetected;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or PlatformNotSupportedException or IOException)
-        {
-            return CodexLiveResult.Failed;
-        }
-
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(timeout);
-
-        try
-        {
-            return await ExchangeAsync(process, deadline.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return ct.IsCancellationRequested ? CodexLiveResult.Failed : CodexLiveResult.TimedOut;
-        }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException or JsonException)
-        {
-            return CodexLiveResult.Failed;
-        }
-        finally
-        {
-            KillTree(process);
-        }
-    }
-
-    private static string Request(int id, string method) =>
-        "{\"jsonrpc\":\"2.0\",\"id\":" + JsonValues.FormatInvariant(id) + ",\"method\":\"" + method + "\"}";
-
-    private static CodexRateLimitSnapshot? ReadRateLimits(in JsonElement result)
-    {
-        IReadOnlyList<CodexLimitWindow> windows = CodexRateLimitParser.ReadWindows(result);
-        CodexRateLimitParser.ReadAccountFields(result, out string? planType, out double? credits, out double? resetCredits);
-
-        if (windows.Count == 0 && planType is null && credits is null)
-        {
-            return null;
-        }
-
-        return new CodexRateLimitSnapshot(
-            windows,
-            planType,
-            credits,
-            resetCredits,
-            CodexSnapshotSource.Live,
-            DateTimeOffset.UtcNow);
-    }
-
-    private static CodexAccountUsage? ReadAccountUsage(in JsonElement result)
-    {
-        CodexTokenCounts? lifetime = null;
-        foreach (string name in new[] { "lifetime", "total", "totals", "allTime", "all_time" })
-        {
-            if (JsonValues.TryGetObject(result, name, null, out JsonElement totals))
-            {
-                lifetime = ReadCounts(totals);
-                break;
-            }
-        }
-
-        lifetime ??= ReadCountsOrNull(result);
-
-        long? buckets = null;
-        foreach (string name in new[] { "days", "daily", "buckets", "dailyUsage", "daily_usage" })
-        {
-            if (result.ValueKind is JsonValueKind.Object
-                && result.TryGetProperty(name, out JsonElement array)
-                && array.ValueKind is JsonValueKind.Array)
-            {
-                buckets = array.GetArrayLength();
-                break;
-            }
-        }
-
-        long? current = JsonValues.ReadCount(result, "currentStreak", "current_streak")
-            ?? JsonValues.ReadCount(result, "streak", "streakDays");
-        long? longest = JsonValues.ReadCount(result, "longestStreak", "longest_streak");
-
-        var usage = new CodexAccountUsage(lifetime, buckets, current, longest);
-        return usage.HasAny ? usage : null;
-    }
-
-    private static CodexTokenCounts? ReadCountsOrNull(in JsonElement element)
-    {
-        CodexTokenCounts counts = ReadCounts(element);
-        return counts.HasAny ? counts : null;
-    }
-
-    private static CodexTokenCounts ReadCounts(in JsonElement usage) => new(
-        JsonValues.ReadCount(usage, "input_tokens", "inputTokens"),
-        JsonValues.ReadCount(usage, "cached_input_tokens", "cachedInputTokens"),
-        JsonValues.ReadCount(usage, "output_tokens", "outputTokens"),
-        JsonValues.ReadCount(usage, "reasoning_output_tokens", "reasoningOutputTokens"),
-        JsonValues.ReadCount(usage, "total_tokens", "totalTokens"));
-
-    private static void KillTree(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or Win32Exception or AggregateException)
-        {
-            // Already gone, or the kill was refused.
-        }
-    }
-
-    private async Task<CodexLiveResult> ExchangeAsync(Process process, CancellationToken ct)
-    {
-        StreamWriter input = process.StandardInput;
-        input.AutoFlush = false;
-
-        await WriteLineAsync(input, InitializeRequest(), ct).ConfigureAwait(false);
-        await WriteLineAsync(input, "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":null}", ct).ConfigureAwait(false);
-        await WriteLineAsync(input, Request(RateLimitsId, "account/rateLimits/read"), ct).ConfigureAwait(false);
-        await WriteLineAsync(input, Request(UsageId, "account/usage/read"), ct).ConfigureAwait(false);
+        await WriteLineAsync(requests, InitializeRequest(clientName, clientVersion), ct).ConfigureAwait(false);
+        await WriteLineAsync(requests, "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":null}", ct).ConfigureAwait(false);
+        await WriteLineAsync(requests, Request(RateLimitsId, "account/rateLimits/read"), ct).ConfigureAwait(false);
+        await WriteLineAsync(requests, Request(UsageId, "account/usage/read"), ct).ConfigureAwait(false);
 
         CodexRateLimitSnapshot? rateLimits = null;
         CodexAccountUsage? usage = null;
@@ -225,10 +108,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         bool sawUsageReply = false;
         bool initializeFailed = false;
 
-        StreamReader output = process.StandardOutput;
         for (int line = 0; line < MaxLinesToRead && !(sawRateLimitsReply && sawUsageReply); line++)
         {
-            string? text = await output.ReadLineAsync(ct).ConfigureAwait(false);
+            string? text = await responses.ReadLineAsync(ct).ConfigureAwait(false);
             if (text is null)
             {
                 break;
@@ -308,14 +190,224 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         return new CodexLiveResult(CodexLiveOutcome.Succeeded, rateLimits, usage);
     }
 
-    private static async Task WriteLineAsync(StreamWriter writer, string payload, CancellationToken ct)
+    /// <summary>
+    /// Reads the rate-limit half of the response.
+    /// </summary>
+    /// <param name="result">The JSON-RPC result object.</param>
+    /// <returns>The snapshot, which may legitimately carry no windows.</returns>
+    /// <remarks>
+    /// A result that reports zero windows is a <b>successful</b> reading that says "no
+    /// meters" — it is what an account sees before its first request of a period, and what
+    /// a family that stopped reporting a window produces. Treating it as a failure sent the
+    /// caller back to a stale local snapshot and put a number on screen that the live source
+    /// had just declined to report.
+    /// </remarks>
+    public static CodexRateLimitSnapshot? ReadRateLimits(in JsonElement result)
+    {
+        if (result.ValueKind is not JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        IReadOnlyList<CodexLimitWindow> windows = CodexRateLimitParser.ReadWindows(result);
+        CodexRateLimitParser.ReadAccountFields(result, out string? planType, out CodexCredits? credits, out long? resetCredits);
+
+        return new CodexRateLimitSnapshot(
+            windows,
+            planType,
+            credits,
+            resetCredits,
+            CodexSnapshotSource.Live,
+            DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>
+    /// Reads the account-usage half of the response.
+    /// </summary>
+    /// <param name="result">The JSON-RPC result object.</param>
+    /// <returns>
+    /// The figures, or <see langword="null"/> when nothing recognisable was reported. A
+    /// field whose shape is not the one expected reads as unavailable; none of them is
+    /// defaulted to a number.
+    /// </returns>
+    /// <remarks>
+    /// The documented shape is <c>summary.{lifetimeTokens, currentStreakDays,
+    /// longestStreakDays, peakDailyTokens}</c> with the daily history in
+    /// <c>dailyUsageBuckets</c>. Alternate spellings are tolerated because the interface is
+    /// experimental, and the whole thing is graded best-effort.
+    /// </remarks>
+    public static CodexAccountUsage? ReadAccountUsage(in JsonElement result)
+    {
+        if (result.ValueKind is not JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        JsonElement summary = JsonValues.TryGetObject(result, "summary", "usageSummary", out JsonElement found)
+            ? found
+            : result;
+
+        long? lifetime = JsonValues.ReadCount(summary, "lifetimeTokens", "lifetime_tokens");
+        long? current = JsonValues.ReadCount(summary, "currentStreakDays", "current_streak_days");
+        long? longest = JsonValues.ReadCount(summary, "longestStreakDays", "longest_streak_days");
+        long? peak = JsonValues.ReadCount(summary, "peakDailyTokens", "peak_daily_tokens");
+        long? buckets = CountArray(result, "dailyUsageBuckets", "daily_usage_buckets");
+
+        var usage = new CodexAccountUsage(lifetime, buckets, current, longest, peak);
+        return usage.HasAny ? usage : null;
+    }
+
+    /// <inheritdoc />
+    public async Task<CodexLiveResult> ReadAsync(TimeSpan timeout, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
+
+        if (!ExecutableResolver.TryResolve(_command, out string? executable))
+        {
+            return CodexLiveResult.NotDetected;
+        }
+
+        var startInfo = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            StandardOutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            StandardErrorEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            WorkingDirectory = CliRunner.NeutralWorkingDirectory(),
+        };
+        startInfo.ArgumentList.Add("app-server");
+
+        using var process = new Process { StartInfo = startInfo };
+
+        try
+        {
+            if (!process.Start())
+            {
+                return CodexLiveResult.Failed;
+            }
+        }
+        catch (Win32Exception ex)
+        {
+            // Only a file that has gone missing since the resolve means "not installed".
+            // A bad image format or a refused execution is a fault, and calling it "not
+            // installed" would hide it behind an invitation to install what is already here.
+            return ex.NativeErrorCode is 2 or 3 ? CodexLiveResult.NotDetected : CodexLiveResult.Failed;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or PlatformNotSupportedException or IOException)
+        {
+            return CodexLiveResult.Failed;
+        }
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(timeout);
+
+        // Started before the exchange and never awaited on the failure paths: its only job
+        // is to keep the child's error pipe from filling.
+        Task drain = DrainAsync(process.StandardError, deadline.Token);
+
+        try
+        {
+            process.StandardInput.AutoFlush = false;
+            CodexLiveResult result = await ExchangeAsync(
+                process.StandardInput,
+                process.StandardOutput,
+                _clientName,
+                _clientVersion,
+                deadline.Token).ConfigureAwait(false);
+
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            return ct.IsCancellationRequested ? CodexLiveResult.Failed : CodexLiveResult.TimedOut;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException or JsonException)
+        {
+            return CodexLiveResult.Failed;
+        }
+        finally
+        {
+            KillTree(process);
+            await Observe(drain).ConfigureAwait(false);
+        }
+    }
+
+    private static long? CountArray(in JsonElement parent, string name, string alternateName)
+    {
+        if (parent.ValueKind is not JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (string candidate in new[] { name, alternateName })
+        {
+            if (parent.TryGetProperty(candidate, out JsonElement array) && array.ValueKind is JsonValueKind.Array)
+            {
+                return array.GetArrayLength();
+            }
+        }
+
+        return null;
+    }
+
+    private static string Request(int id, string method) =>
+        "{\"jsonrpc\":\"2.0\",\"id\":" + JsonValues.FormatInvariant(id) + ",\"method\":\"" + method + "\"}";
+
+    private static async Task DrainAsync(TextReader reader, CancellationToken ct)
+    {
+        try
+        {
+            char[] buffer = new char[4096];
+            while (await reader.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false) > 0)
+            {
+            }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            // The pipe closed, or the exchange finished first. Either way there is nothing
+            // to report: this task exists only so the child never blocks on a full pipe.
+        }
+    }
+
+    private static async Task Observe(Task task)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            // Already handled inside the drain; observed here so it is never unobserved.
+        }
+    }
+
+    private static void KillTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or Win32Exception or AggregateException)
+        {
+            // Already gone, or the kill was refused.
+        }
+    }
+
+    private static async Task WriteLineAsync(TextWriter writer, string payload, CancellationToken ct)
     {
         await writer.WriteAsync(payload.AsMemory(), ct).ConfigureAwait(false);
         await writer.WriteAsync("\n".AsMemory(), ct).ConfigureAwait(false);
         await writer.FlushAsync(ct).ConfigureAwait(false);
     }
 
-    private string InitializeRequest()
+    private static string InitializeRequest(string clientName, string clientVersion)
     {
         var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer))
@@ -326,8 +418,8 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             writer.WriteString("method", "initialize");
             writer.WriteStartObject("params");
             writer.WriteStartObject("clientInfo");
-            writer.WriteString("name", _clientName);
-            writer.WriteString("version", _clientVersion);
+            writer.WriteString("name", clientName);
+            writer.WriteString("version", clientVersion);
             writer.WriteEndObject();
             writer.WriteEndObject();
             writer.WriteEndObject();

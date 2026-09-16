@@ -21,8 +21,17 @@ namespace Altim.Providers.Claude;
 /// history and nothing else: they carry no quota figure at all.
 /// </para>
 /// <para>
+/// <b>"Documented" is not the same as "true now."</b> The status line is only written while
+/// a session is running, so a Friday file is still sitting there on Monday. It is preferred
+/// while it is fresh; once it has gone stale a fresher summary reading takes over, and a
+/// stale reading is only shown when there is nothing better, with its age stated. A window
+/// whose reset instant has already passed produces no metric at all — the number was true
+/// of a window that has ended, and an 85 per cent five-hour meter for a window that reset
+/// days ago is worse than no meter.
+/// </para>
+/// <para>
 /// The sources are never blended. A status-line window and a summary window for the same
-/// limit are the same number from two places; the documented one is used and the other is
+/// limit are the same number from two places; one of them is used and the other is
 /// discarded, rather than averaged into something neither source said.
 /// </para>
 /// </remarks>
@@ -33,6 +42,12 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
     private const string SpendLimitKey = "spend_limit";
     private const string SevenDayOpusKey = "seven_day_opus";
     private const string SevenDaySonnetKey = "seven_day_sonnet";
+
+    /// <summary>
+    /// How many sessions' running totals to remember. Past this the least recently seen is
+    /// forgotten, so a long-lived process cannot grow this without bound.
+    /// </summary>
+    private const int MaxRememberedSessions = 512;
 
     private static readonly TimeSpan FiveHourWindow = TimeSpan.FromHours(5);
     private static readonly TimeSpan SevenDayWindow = TimeSpan.FromDays(7);
@@ -47,12 +62,22 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _command;
 
+    /// <summary>
+    /// Running per-session totals. The scanner returns only what the newly appended bytes
+    /// contained, so the figure for a session has to be accumulated here; taking the pass's
+    /// own numbers turned every session total into a per-refresh delta after the first
+    /// refresh, and a session that had used millions of tokens reported a few thousand.
+    /// </summary>
+    private readonly Dictionary<string, ClaudeTokenBucket> _sessionTotals = new(StringComparer.Ordinal);
+    private readonly Queue<string> _sessionOrder = new();
+
     private ProviderUsage _usage;
     private IReadOnlyList<AgentSession> _sessions = [];
     private ClaudeTokenBucket _cumulative;
     private bool _hasCumulative;
     private ClaudeUsageSummary _summary = ClaudeUsageSummary.Empty;
     private DateTimeOffset? _summaryReadAt;
+    private ClaudeStatusLineState? _lastStatusLine;
     private bool _disposed;
 
     /// <summary>
@@ -69,13 +94,21 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
     /// </param>
     /// <param name="timeProvider">The clock. Defaults to the system clock.</param>
     /// <param name="command">The Claude Code command name or path.</param>
+    /// <param name="networkGate">
+    /// The floor for the one call that reaches the network, the headless usage summary. When
+    /// supplied it owns the decision; when not,
+    /// <see cref="ClaudeOptions.MinimumSummaryInterval"/> is enforced here instead. The
+    /// status line and the transcripts are local files and are read on every refresh
+    /// regardless.
+    /// </param>
     public ClaudeUsageProvider(
         ClaudeOptions? options = null,
         ICliRunner? cliRunner = null,
         IProcessMonitor? processMonitor = null,
         IReadOnlyList<string>? configRoots = null,
         TimeProvider? timeProvider = null,
-        string command = "claude")
+        string command = "claude",
+        IRefreshGate? networkGate = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
 
@@ -87,6 +120,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         _processMonitor = processMonitor ?? CreateDefaultProcessScanner();
         _configRoots = configRoots ?? ClaudePaths.ResolveConfigRoots();
         _time = timeProvider ?? TimeProvider.System;
+        NetworkGate = networkGate;
 
         _usage = new ProviderUsage(ClaudeProviderInfo.Id, ProviderStatus.Unknown, [], null, null, null);
     }
@@ -102,6 +136,9 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
 
     /// <inheritdoc />
     public ProviderStatus Status => _usage.Status;
+
+    /// <summary>The gate the headless summary call goes through, when one was supplied.</summary>
+    private IRefreshGate? NetworkGate { get; }
 
     /// <summary>
     /// A process scanner that finds the Claude Code CLI by executable name only.
@@ -182,6 +219,49 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         _gate.Dispose();
     }
 
+    private static ProviderUsage NotDetected() =>
+        new(ClaudeProviderInfo.Id, ProviderStatus.NotDetected, [], null, null, "Claude Code is not installed on this machine");
+
+    /// <summary>
+    /// Adds a metric, unless the source did not report it or the window it describes has
+    /// already ended.
+    /// </summary>
+    /// <remarks>
+    /// A reset instant with no window length is still a reset instant. The spend limit is
+    /// reported that way — a percentage and a reset, with no period attached — and building
+    /// the window only when a length was known threw the reset away, so the one thing the
+    /// user wanted from that row never reached the screen. A zero-length window is the
+    /// honest encoding of "reset known, period not".
+    /// </remarks>
+    private static void AddIfReported(
+        List<UsageMetric> metrics,
+        string key,
+        string label,
+        double? percent,
+        TimeSpan? windowLength,
+        DateTimeOffset? resetsAt,
+        MetricConfidence confidence,
+        DateTimeOffset now)
+    {
+        if (percent is null && resetsAt is null)
+        {
+            return;
+        }
+
+        if (resetsAt is { } instant && instant <= now)
+        {
+            // The window this describes is over. Its percentage was true of a period that
+            // has ended and says nothing about the one running now.
+            return;
+        }
+
+        LimitWindow? window = windowLength is { } length
+            ? new LimitWindow(length, resetsAt)
+            : resetsAt is not null ? new LimitWindow(TimeSpan.Zero, resetsAt) : null;
+
+        metrics.Add(new UsageMetric(key, label, percent, window, confidence));
+    }
+
     private async Task<(ProviderUsage Usage, IReadOnlyList<AgentSession> Sessions)> ReadAsync(CancellationToken ct)
     {
         DateTimeOffset now = _time.GetUtcNow();
@@ -200,15 +280,16 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
 
             await RefreshSummaryAsync(cliPresent, now, ct).ConfigureAwait(false);
 
-            var metrics = new List<UsageMetric>();
             bool statusLineFresh = statusLine?.WrittenAt is { } writtenAt && now - writtenAt <= _options.StatusLineFreshWindow;
 
-            AddStatusLineMetrics(metrics, statusLine);
-            AddSummaryMetrics(metrics, statusLine);
+            var metrics = new List<UsageMetric>();
+            AddStatusLineMetrics(metrics, statusLine, statusLineFresh, now);
+            AddSummaryMetrics(metrics, now);
 
-            IReadOnlyList<AgentSession> sessions = await ReadSessionsAsync(history, cliPresent, now, ct).ConfigureAwait(false);
-            ProviderStatus status = await ResolveStatusAsync(sessions, cliPresent, metrics.Count > 0, ct).ConfigureAwait(false);
-            string? detail = DescribeStatus(statusLine, statusLineFresh, metrics.Count, cliPresent, now);
+            ClaudeAgentsListing listing = await ListAgentsAsync(cliPresent, ct).ConfigureAwait(false);
+            IReadOnlyList<AgentSession> sessions = BuildSessions(listing);
+            ProviderStatus status = await ResolveStatusAsync(listing, metrics.Count > 0, ct).ConfigureAwait(false);
+            string? detail = DescribeStatus(statusLine, statusLineFresh, metrics, cliPresent, now);
 
             return (
                 new ProviderUsage(ClaudeProviderInfo.Id, status, metrics, BuildTotals(), now, detail),
@@ -220,54 +301,57 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
+            // The sentence is the fixed one. Exception text names files and would end up on
+            // screen.
             return (
-                new ProviderUsage(ClaudeProviderInfo.Id, ProviderStatus.Error, [], null, now, "Unable to retrieve usage"),
+                new ProviderUsage(ClaudeProviderInfo.Id, ProviderStatus.Error, [], null, now, ProviderUsage.UnavailableDetail),
                 []);
         }
     }
 
-    private static ProviderUsage NotDetected() =>
-        new(ClaudeProviderInfo.Id, ProviderStatus.NotDetected, [], null, null, "Claude Code is not installed on this machine");
-
-    private static void AddStatusLineMetrics(List<UsageMetric> metrics, ClaudeStatusLineState? statusLine)
+    /// <summary>
+    /// Adds the windows the status line reported, when it is the source in force.
+    /// </summary>
+    /// <remarks>
+    /// A stale status line still supplies a window the summary did not, which is why the
+    /// summary is consulted first and this fills what is left. The documented source wins
+    /// every contest it is fresh for; it does not win one it has been out of for hours.
+    /// </remarks>
+    private void AddStatusLineMetrics(List<UsageMetric> metrics, ClaudeStatusLineState? statusLine, bool isFresh, DateTimeOffset now)
     {
         if (statusLine is null)
         {
             return;
         }
 
-        // A window missing from the payload means no data. It is dropped once its reset
-        // passes, so no metric is emitted and the meter disappears rather than reading zero.
-        AddIfReported(metrics, FiveHourKey, "Session", statusLine.FiveHourUsedPercent, FiveHourWindow, statusLine.FiveHourResetsAt, MetricConfidence.Documented);
-        AddIfReported(metrics, SevenDayKey, "Weekly", statusLine.SevenDayUsedPercent, SevenDayWindow, statusLine.SevenDayResetsAt, MetricConfidence.Documented);
-        AddIfReported(metrics, SpendLimitKey, "Spend limit", statusLine.SpendLimitUsedPercent, null, statusLine.SpendLimitResetsAt, MetricConfidence.Documented);
-    }
+        MetricConfidence confidence = MetricConfidence.Documented;
 
-    private static void AddIfReported(
-        List<UsageMetric> metrics,
-        string key,
-        string label,
-        double? percent,
-        TimeSpan? windowLength,
-        DateTimeOffset? resetsAt,
-        MetricConfidence confidence)
-    {
-        if (percent is null && resetsAt is null)
+        if (isFresh || _summary.SessionUsedPercent is null)
         {
-            return;
+            AddIfReported(metrics, FiveHourKey, "Session", statusLine.FiveHourUsedPercent, FiveHourWindow, statusLine.FiveHourResetsAt, confidence, now);
         }
 
-        LimitWindow? window = windowLength is { } length ? new LimitWindow(length, resetsAt) : null;
-        metrics.Add(new UsageMetric(key, label, percent, window, confidence));
+        if (isFresh || _summary.WeeklyUsedPercent is null)
+        {
+            AddIfReported(metrics, SevenDayKey, "Weekly", statusLine.SevenDayUsedPercent, SevenDayWindow, statusLine.SevenDayResetsAt, confidence, now);
+        }
+
+        // Nothing else reports the spend limit, so a stale reading is the only reading.
+        AddIfReported(metrics, SpendLimitKey, "Spend limit", statusLine.SpendLimitUsedPercent, null, statusLine.SpendLimitResetsAt, confidence, now);
     }
 
-    private void AddSummaryMetrics(List<UsageMetric> metrics, ClaudeStatusLineState? statusLine)
+    /// <summary>
+    /// Adds the windows the headless summary reported, for limits the status line is not
+    /// currently answering for.
+    /// </summary>
+    private void AddSummaryMetrics(List<UsageMetric> metrics, DateTimeOffset now)
     {
-        bool hasFiveHour = statusLine?.FiveHourUsedPercent is not null;
-        bool hasSevenDay = statusLine?.SevenDayUsedPercent is not null;
+        bool hasFiveHour = metrics.Exists(static m => m.Key == FiveHourKey);
+        bool hasSevenDay = metrics.Exists(static m => m.Key == SevenDayKey);
 
-        // The summary's own windows are best-effort: they come out of prose. They fill gaps
-        // the documented source left, and never displace it.
+        // The summary's own windows are best-effort: they come out of prose, and they carry
+        // no reset instant at all, which is why the documented source outranks them while
+        // it is current.
         if (!hasFiveHour && _summary.SessionUsedPercent is { } session)
         {
             metrics.Insert(0, new UsageMetric(FiveHourKey, "Session", session, new LimitWindow(FiveHourWindow, null), MetricConfidence.BestEffort));
@@ -287,15 +371,36 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         {
             metrics.Add(new UsageMetric(SevenDaySonnetKey, "Weekly (Sonnet)", sonnet, new LimitWindow(SevenDayWindow, null), MetricConfidence.BestEffort));
         }
+
+        _ = now;
     }
 
+    /// <summary>
+    /// Reads the newest status-line state file across the config roots.
+    /// </summary>
+    /// <remarks>
+    /// A file that exists and could not be opened is transient: the helper rewrites it on a
+    /// 300-millisecond debounce and a reader lands on the rewrite sooner or later. The last
+    /// good reading is kept for those ticks rather than letting the meters blink out and
+    /// the status line announce that nothing was found.
+    /// </remarks>
     private ClaudeStatusLineState? ReadStatusLine()
     {
         ClaudeStatusLineState? newest = null;
+        bool sawTransientFailure = false;
 
         foreach (string root in _configRoots)
         {
-            ClaudeStatusLineState? state = ClaudeStatusLineReader.Read(ClaudePaths.StatusLineStateFile(root));
+            StatusLineReadOutcome outcome = ClaudeStatusLineReader.TryRead(
+                ClaudePaths.StatusLineStateFile(root),
+                out ClaudeStatusLineState? state);
+
+            if (outcome is StatusLineReadOutcome.Unreadable)
+            {
+                sawTransientFailure = true;
+                continue;
+            }
+
             if (state is null)
             {
                 continue;
@@ -307,26 +412,60 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
             }
         }
 
+        if (newest is null && sawTransientFailure)
+        {
+            return _lastStatusLine;
+        }
+
+        if (newest is not null)
+        {
+            _lastStatusLine = newest;
+        }
+
         return newest;
     }
 
     private void Accumulate(ClaudeTokenHistory history)
     {
+        foreach ((string sessionId, ClaudeTokenBucket delta) in history.BySession)
+        {
+            RememberSession(sessionId, delta);
+        }
+
         if (history.Totals.MessageCount == 0)
         {
             return;
         }
 
-        ClaudeTokenBucket delta = history.Totals;
-        _cumulative = new ClaudeTokenBucket(
-            _cumulative.Input + delta.Input,
-            _cumulative.Output + delta.Output,
-            _cumulative.CacheRead + delta.CacheRead,
-            _cumulative.CacheCreation5m + delta.CacheCreation5m,
-            _cumulative.CacheCreation1h + delta.CacheCreation1h,
-            _cumulative.CacheCreationUnsplit + delta.CacheCreationUnsplit,
-            _cumulative.MessageCount + delta.MessageCount);
+        ClaudeTokenBucket totals = history.Totals;
+        _cumulative = Merge(_cumulative, totals);
         _hasCumulative = true;
+    }
+
+    private static ClaudeTokenBucket Merge(ClaudeTokenBucket running, ClaudeTokenBucket delta) => new(
+        running.Input + delta.Input,
+        running.Output + delta.Output,
+        running.CacheRead + delta.CacheRead,
+        running.CacheCreation5m + delta.CacheCreation5m,
+        running.CacheCreation1h + delta.CacheCreation1h,
+        running.CacheCreationUnsplit + delta.CacheCreationUnsplit,
+        running.MessageCount + delta.MessageCount);
+
+    private void RememberSession(string sessionId, ClaudeTokenBucket delta)
+    {
+        if (_sessionTotals.TryGetValue(sessionId, out ClaudeTokenBucket running))
+        {
+            _sessionTotals[sessionId] = Merge(running, delta);
+            return;
+        }
+
+        _sessionTotals[sessionId] = delta;
+        _sessionOrder.Enqueue(sessionId);
+
+        while (_sessionOrder.Count > MaxRememberedSessions)
+        {
+            _ = _sessionTotals.Remove(_sessionOrder.Dequeue());
+        }
     }
 
     private TokenTotals? BuildTotals()
@@ -353,12 +492,10 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
             return;
         }
 
-        if (_summaryReadAt is { } last && now - last < _options.MinimumSummaryInterval)
+        if (!MayCallNow(now))
         {
             return;
         }
-
-        _summaryReadAt = now;
 
         CliRunResult result = await _runner
             .RunAsync(_command, ["-p", "--output-format", "json", "/usage"], _options.SummaryTimeout, ct)
@@ -379,35 +516,65 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         }
     }
 
-    private async Task<IReadOnlyList<AgentSession>> ReadSessionsAsync(
-        ClaudeTokenHistory history,
-        bool cliPresent,
-        DateTimeOffset now,
-        CancellationToken ct)
+    /// <summary>
+    /// Asks the gate — or, when there is none, the local floor — whether the one call that
+    /// reaches the network may be made now.
+    /// </summary>
+    private bool MayCallNow(DateTimeOffset now)
+    {
+        if (NetworkGate is not null)
+        {
+            return NetworkGate.TryAcquire(Id);
+        }
+
+        if (_summaryReadAt is { } last && now - last < _options.MinimumSummaryInterval)
+        {
+            return false;
+        }
+
+        _summaryReadAt = now;
+        return true;
+    }
+
+    private async Task<ClaudeAgentsListing> ListAgentsAsync(bool cliPresent, CancellationToken ct)
     {
         if (!cliPresent)
         {
-            return [];
+            return ClaudeAgentsListing.NotDetected;
         }
 
-        IReadOnlyList<ClaudeAgentEntry> entries = await _agents.ListAsync(_options.AgentsTimeout, ct).ConfigureAwait(false);
-        var sessions = new List<AgentSession>(entries.Count);
+        return await _agents.ListAsync(_options.AgentsTimeout, ct).ConfigureAwait(false);
+    }
 
-        foreach (ClaudeAgentEntry entry in entries)
+    /// <summary>
+    /// Turns a listing into session rows, each carrying that session's running token total.
+    /// </summary>
+    /// <remarks>
+    /// An entry with no start instant produces no row. The clock is not a start time: an
+    /// entry stamped with "now" on every refresh would show a session that had been running
+    /// for hours as having started seconds ago, and would say so again a minute later. The
+    /// entry still counts towards the provider's status, because the command listing it is
+    /// what says an agent is running.
+    /// </remarks>
+    private IReadOnlyList<AgentSession> BuildSessions(ClaudeAgentsListing listing)
+    {
+        var sessions = new List<AgentSession>(listing.Entries.Count);
+
+        foreach (ClaudeAgentEntry entry in listing.Entries)
         {
-            if (entry.SessionId is not { } sessionId)
+            if (entry.SessionId is not { } sessionId || entry.StartedAt is not { } startedAt)
             {
                 continue;
             }
 
-            TokenTotals? tokens = history.BySession.TryGetValue(sessionId, out ClaudeTokenBucket bucket)
+            TokenTotals? tokens = _sessionTotals.TryGetValue(sessionId, out ClaudeTokenBucket bucket)
                 ? new TokenTotals(bucket.Input, bucket.Output, bucket.CacheRead, bucket.CacheCreationTotal)
                 : null;
 
             sessions.Add(new AgentSession(
                 sessionId,
                 ClaudeProviderInfo.Id,
-                entry.StartedAt ?? now,
+                startedAt,
                 null,
                 tokens,
                 null,
@@ -417,24 +584,24 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         return sessions;
     }
 
-    private async Task<ProviderStatus> ResolveStatusAsync(
-        IReadOnlyList<AgentSession> sessions,
-        bool cliPresent,
-        bool hasMetrics,
-        CancellationToken ct)
+    private async Task<ProviderStatus> ResolveStatusAsync(ClaudeAgentsListing listing, bool hasMetrics, CancellationToken ct)
     {
-        if (sessions.Count > 0)
+        if (listing.Entries.Count > 0)
         {
             return ProviderStatus.Active;
         }
 
-        if (cliPresent)
+        if (listing.IsAuthoritative)
         {
-            // The agents listing is authoritative and said nothing is running. Process
-            // enumeration is only consulted when the listing could not be had at all.
+            // The agents listing answered and said nothing is running. It resolves liveness
+            // itself — it correctly omitted a registry entry whose process id had been
+            // recycled to an unrelated program — so process enumeration does not get to
+            // overrule it.
             return hasMetrics ? ProviderStatus.Idle : ProviderStatus.Detected;
         }
 
+        // The listing could not be had at all. That is not "nothing is running", so the
+        // fallback applies.
         try
         {
             IReadOnlyList<DetectedProcess> processes = await _processMonitor.ScanAsync(ct).ConfigureAwait(false);
@@ -458,11 +625,11 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
     private string? DescribeStatus(
         ClaudeStatusLineState? statusLine,
         bool statusLineFresh,
-        int metricCount,
+        IReadOnlyList<UsageMetric> metrics,
         bool cliPresent,
         DateTimeOffset now)
     {
-        if (metricCount == 0)
+        if (metrics.Count == 0)
         {
             if (statusLine is null)
             {
@@ -474,7 +641,8 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
             return "The status line reported no rate-limit windows";
         }
 
-        if (statusLine is not null && !statusLineFresh)
+        bool showingStatusLine = metrics.Any(static m => m.Confidence is MetricConfidence.Documented);
+        if (statusLine is not null && !statusLineFresh && showingStatusLine)
         {
             return "Showing the last status-line reading from " + UsageReadings.DescribeAge(statusLine.WrittenAt, now);
         }

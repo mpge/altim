@@ -34,11 +34,25 @@ public static class CodexMetricFactory
     /// <see cref="MetricConfidence.BestEffort"/>: the interface is experimental and
     /// undocumented, so it is never presented as a published figure.
     /// </param>
+    /// <param name="now">
+    /// The current instant, used to drop windows that have already rolled over. Pass
+    /// <see langword="null"/> to keep every window, which is what a caller reading a
+    /// snapshot for its own sake wants.
+    /// </param>
     /// <returns>
     /// The metrics, ordered by family and then by window length, with duplicates on the
     /// same key collapsed to the first occurrence.
     /// </returns>
-    public static IReadOnlyList<UsageMetric> Build(IReadOnlyList<CodexLimitWindow> windows, MetricConfidence confidence)
+    /// <remarks>
+    /// A window whose reset instant has passed describes a period that is over. Its
+    /// percentage was true of that period and is not true of the one running now, so no
+    /// metric is emitted: a recovered snapshot from last week must not put an 85 per cent
+    /// meter on screen on Monday morning.
+    /// </remarks>
+    public static IReadOnlyList<UsageMetric> Build(
+        IReadOnlyList<CodexLimitWindow> windows,
+        MetricConfidence confidence,
+        DateTimeOffset? now = null)
     {
         ArgumentNullException.ThrowIfNull(windows);
 
@@ -48,6 +62,11 @@ public static class CodexMetricFactory
         foreach (CodexLimitWindow window in windows.OrderBy(static w => w.LimitId, StringComparer.Ordinal)
                      .ThenBy(static w => LimitWindowClassifier.Normalize(w.WindowMinutes)))
         {
+            if (HasPassed(window.ResetsAt, now))
+            {
+                continue;
+            }
+
             string key = BuildKey(window);
             if (!seen.Add(key))
             {
@@ -64,6 +83,14 @@ public static class CodexMetricFactory
 
         return metrics;
     }
+
+    /// <summary>
+    /// True when a reported reset instant is at or before <paramref name="now"/>.
+    /// </summary>
+    /// <param name="resetsAt">The reported reset instant, or <see langword="null"/>.</param>
+    /// <param name="now">The current instant, or <see langword="null"/> to disable the check.</param>
+    public static bool HasPassed(DateTimeOffset? resetsAt, DateTimeOffset? now) =>
+        resetsAt is { } instant && now is { } current && instant <= current;
 
     /// <summary>
     /// The storage key for a window, for example <c>codex:10080</c>.

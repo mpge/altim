@@ -78,9 +78,9 @@ public static class CodexRolloutReader
 
             return new CodexRateLimitSnapshot(
                 record.Windows,
-                PlanType: null,
-                Credits: null,
-                ResetCredits: null,
+                record.PlanType,
+                record.Credits,
+                ResetCreditsAvailable: null,
                 CodexSnapshotSource.LocalSnapshot,
                 record.ObservedAt ?? fallbackObservedAt);
         }
@@ -164,6 +164,7 @@ public static class CodexRolloutReader
         }
 
         IReadOnlyList<CodexLimitWindow> windows = CodexRateLimitParser.ReadWindows(payload);
+        CodexRateLimitParser.ReadAccountFields(payload, out string? planType, out CodexCredits? credits, out _);
 
         CodexTokenCounts? cumulative = null;
         CodexTokenCounts? turn = null;
@@ -191,7 +192,7 @@ public static class CodexRolloutReader
             return false;
         }
 
-        record = new CodexRolloutRecord(timestamp, windows, cumulative, turn, contextWindow, modelId);
+        record = new CodexRolloutRecord(timestamp, windows, cumulative, turn, contextWindow, modelId, planType, credits);
         return true;
     }
 
@@ -217,6 +218,7 @@ public static class CodexRolloutReader
         }
 
         IReadOnlyList<CodexLimitWindow> windows = CodexRateLimitParser.ReadWindows(payload);
+        CodexRateLimitParser.ReadAccountFields(payload, out string? planType, out CodexCredits? credits, out _);
         string? modelId = JsonValues.ReadIdentifier(payload, "model", "model_id");
         long? contextWindow = JsonValues.ReadCount(payload, "model_context_window", "modelContextWindow");
 
@@ -225,13 +227,23 @@ public static class CodexRolloutReader
             return false;
         }
 
-        record = new CodexRolloutRecord(timestamp, windows, cumulative, turn, contextWindow, modelId);
+        record = new CodexRolloutRecord(timestamp, windows, cumulative, turn, contextWindow, modelId, planType, credits);
         return true;
     }
 
-    private static CodexTokenCounts ReadCounts(in JsonElement usage) => new(
+    /// <summary>
+    /// Reads one token-usage object.
+    /// </summary>
+    /// <remarks>
+    /// Every component is optional and stays null when it is absent. In particular
+    /// <c>cache_write_input_tokens</c> is part of the real schema — it is written on every
+    /// <c>token_count</c> line on the verification machine and is declared on the
+    /// app-server's own token breakdown — so it is read rather than assumed away.
+    /// </remarks>
+    internal static CodexTokenCounts ReadCounts(in JsonElement usage) => new(
         JsonValues.ReadCount(usage, "input_tokens", "inputTokens"),
         JsonValues.ReadCount(usage, "cached_input_tokens", "cachedInputTokens"),
+        JsonValues.ReadCount(usage, "cache_write_input_tokens", "cacheWriteInputTokens"),
         JsonValues.ReadCount(usage, "output_tokens", "outputTokens"),
         JsonValues.ReadCount(usage, "reasoning_output_tokens", "reasoningOutputTokens"),
         JsonValues.ReadCount(usage, "total_tokens", "totalTokens"));

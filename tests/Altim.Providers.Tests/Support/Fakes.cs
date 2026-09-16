@@ -44,11 +44,9 @@ internal sealed class FakeCliRunner : ICliRunner
 /// </summary>
 internal sealed class StubAppServerClient : ICodexAppServerClient
 {
-    private readonly CodexLiveResult _result;
-
     public StubAppServerClient(CodexLiveResult result, bool isAvailable = true)
     {
-        _result = result;
+        Result = result;
         IsAvailable = isAvailable;
     }
 
@@ -56,11 +54,33 @@ internal sealed class StubAppServerClient : ICodexAppServerClient
 
     public int CallCount { get; private set; }
 
+    /// <summary>What the next call answers, so a test can make a working call start failing.</summary>
+    public CodexLiveResult Result { get; set; }
+
     public Task<CodexLiveResult> ReadAsync(TimeSpan timeout, CancellationToken ct)
     {
         CallCount++;
-        return Task.FromResult(_result);
+        return Task.FromResult(Result);
     }
+}
+
+/// <summary>
+/// An <see cref="IRefreshGate"/> a test opens and closes by hand.
+/// </summary>
+internal sealed class SwitchableRefreshGate : IRefreshGate
+{
+    public bool IsOpen { get; set; } = true;
+
+    /// <summary>Every key the gate was asked about, in order.</summary>
+    public List<string> Requested { get; } = [];
+
+    public bool TryAcquire(string key)
+    {
+        Requested.Add(key);
+        return IsOpen;
+    }
+
+    public TimeSpan TimeUntilAvailable(string key) => IsOpen ? TimeSpan.Zero : TimeSpan.FromSeconds(60);
 }
 
 /// <summary>
@@ -77,6 +97,16 @@ internal sealed class FakeProcessMonitor : IProcessMonitor
 }
 
 /// <summary>
+/// An <see cref="IProcessMonitor"/> that fails the way a denied or broken process table
+/// does, so the provider's own failure path can be exercised.
+/// </summary>
+internal sealed class ThrowingProcessMonitor : IProcessMonitor
+{
+    public ValueTask<IReadOnlyList<DetectedProcess>> ScanAsync(CancellationToken ct) =>
+        throw new IOException("the process table could not be read from C:\\Users\\someone\\secret-project");
+}
+
+/// <summary>
 /// A clock that does not move, so staleness assertions are exact.
 /// </summary>
 internal sealed class FixedTimeProvider : TimeProvider
@@ -86,4 +116,18 @@ internal sealed class FixedTimeProvider : TimeProvider
     public FixedTimeProvider(DateTimeOffset now) => _now = now;
 
     public override DateTimeOffset GetUtcNow() => _now;
+}
+
+/// <summary>
+/// A clock a test moves forward on purpose, for behaviour that turns on elapsed time.
+/// </summary>
+internal sealed class MovableTimeProvider : TimeProvider
+{
+    private DateTimeOffset _now;
+
+    public MovableTimeProvider(DateTimeOffset now) => _now = now;
+
+    public override DateTimeOffset GetUtcNow() => _now;
+
+    public void Advance(TimeSpan amount) => _now += amount;
 }

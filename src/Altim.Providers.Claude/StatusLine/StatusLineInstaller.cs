@@ -1,4 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 
 namespace Altim.Providers.Claude.StatusLine;
@@ -28,8 +30,20 @@ namespace Altim.Providers.Claude.StatusLine;
 /// silently taking it over would be indefensible.
 /// </item>
 /// <item>
-/// <b>A backup is written first</b>, and revert removes only an entry Altim recognises as
-/// its own by the marker in the command string.
+/// <b>The file's own formatting survives.</b> The edit is a text edit to the smallest span
+/// that does the job, so comments, indentation, line endings and key order are all the
+/// user's, not this build's. A file whose shape the text editor is not sure of falls back
+/// to being reserialised, which is correct and ugly rather than wrong and pretty.
+/// </item>
+/// <item>
+/// <b>A timestamped backup is written first</b>, and never over an existing one. A single
+/// fixed backup name meant an install followed by a revert wrote the backup twice: the
+/// second write saved the file Altim had just produced over the only copy of what the user
+/// originally had.
+/// </item>
+/// <item>
+/// Revert removes only an entry Altim recognises as its own by the marker in the command
+/// string.
 /// </item>
 /// </list>
 /// <para>
@@ -122,8 +136,8 @@ public sealed class StatusLineInstaller
                 return new StatusLineInstallResult(StatusLineInstallOutcome.WouldInstall, true, settingsPath, null);
             }
 
-            string json = Rewrite(document, missing, includeStatusLine: true);
-            return Commit(settingsPath, json, missing, StatusLineInstallOutcome.Installed);
+            byte[] bytes = Edit(settingsPath, document, missing, includeStatusLine: true);
+            return Commit(settingsPath, bytes, missing, StatusLineInstallOutcome.Installed);
         }
     }
 
@@ -163,8 +177,8 @@ public sealed class StatusLineInstaller
                 return new StatusLineInstallResult(StatusLineInstallOutcome.WouldRevert, true, settingsPath, null);
             }
 
-            string json = Rewrite(document, settingsMissing: false, includeStatusLine: false);
-            return Commit(settingsPath, json, settingsMissing: false, StatusLineInstallOutcome.Reverted);
+            byte[] bytes = Edit(settingsPath, document, settingsMissing: false, includeStatusLine: false);
+            return Commit(settingsPath, bytes, settingsMissing: false, StatusLineInstallOutcome.Reverted);
         }
     }
 
@@ -223,7 +237,7 @@ public sealed class StatusLineInstaller
         return null;
     }
 
-    private static StatusLineInstallResult Commit(string settingsPath, string json, bool settingsMissing, StatusLineInstallOutcome success)
+    private static StatusLineInstallResult Commit(string settingsPath, byte[] bytes, bool settingsMissing, StatusLineInstallOutcome success)
     {
         string? backupPath = null;
         try
@@ -236,14 +250,14 @@ public sealed class StatusLineInstaller
 
             if (!settingsMissing && File.Exists(settingsPath))
             {
-                backupPath = settingsPath + BackupSuffix;
-                File.Copy(settingsPath, backupPath, overwrite: true);
+                backupPath = ReserveBackupPath(settingsPath);
+                File.Copy(settingsPath, backupPath, overwrite: false);
             }
 
             // Write beside the target and move into place, so an interrupted write cannot
             // leave the user with a truncated settings file.
             string temporaryPath = settingsPath + ".altim-tmp";
-            File.WriteAllText(temporaryPath, json);
+            File.WriteAllBytes(temporaryPath, bytes);
             File.Move(temporaryPath, settingsPath, overwrite: true);
 
             return new StatusLineInstallResult(success, false, settingsPath, backupPath);
@@ -252,6 +266,27 @@ public sealed class StatusLineInstaller
         {
             return new StatusLineInstallResult(StatusLineInstallOutcome.WriteFailed, false, settingsPath, backupPath);
         }
+    }
+
+    /// <summary>
+    /// A backup path that does not already exist.
+    /// </summary>
+    /// <remarks>
+    /// Timestamped, and never overwritten. One fixed name turned an install-then-revert
+    /// cycle into a shredder: the install backed up the user's file, and the revert backed
+    /// up Altim's version over it, so the original was gone.
+    /// </remarks>
+    private static string ReserveBackupPath(string settingsPath)
+    {
+        string stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
+        string candidate = settingsPath + BackupSuffix + "-" + stamp;
+
+        for (int attempt = 1; File.Exists(candidate) && attempt < 1000; attempt++)
+        {
+            candidate = settingsPath + BackupSuffix + "-" + stamp + "-" + attempt.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return candidate;
     }
 
     private bool TryResolveSettingsPath([NotNullWhen(true)] out string? settingsPath)
@@ -282,6 +317,57 @@ public sealed class StatusLineInstaller
         }
 
         return ExistingStatusLine.Foreign;
+    }
+
+    /// <summary>
+    /// Produces the new file: a text edit where that is safe, and a reserialisation where it
+    /// is not.
+    /// </summary>
+    private byte[] Edit(string settingsPath, JsonDocument document, bool settingsMissing, bool includeStatusLine)
+    {
+        if (!settingsMissing && TryReadRaw(settingsPath, out byte[] raw))
+        {
+            bool edited = includeStatusLine
+                ? SettingsTextEditor.TryInsert(raw, SettingsProperty, StatusLineValueJson(), out byte[] result)
+                : SettingsTextEditor.TryRemove(raw, SettingsProperty, out result);
+
+            if (edited)
+            {
+                return result;
+            }
+        }
+
+        return Encoding.UTF8.GetBytes(Rewrite(document, settingsMissing, includeStatusLine));
+    }
+
+    private static bool TryReadRaw(string path, out byte[] bytes)
+    {
+        try
+        {
+            bytes = File.ReadAllBytes(path);
+            return bytes.Length > 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            bytes = [];
+            return false;
+        }
+    }
+
+    /// <summary>The status-line object, as JSON, indented from column zero.</summary>
+    private string StatusLineValueJson()
+    {
+        var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = true }))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("type", "command");
+            writer.WriteString("command", _command);
+            writer.WriteNumber("padding", 0);
+            writer.WriteEndObject();
+        }
+
+        return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
     }
 
     private string Rewrite(JsonDocument document, bool settingsMissing, bool includeStatusLine)

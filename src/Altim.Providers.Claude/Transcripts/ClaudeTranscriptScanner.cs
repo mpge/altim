@@ -48,6 +48,12 @@ namespace Altim.Providers.Claude.Transcripts;
 /// </remarks>
 public sealed class ClaudeTranscriptScanner
 {
+    /// <summary>
+    /// The locally generated placeholder that costs nothing and is excluded from totals.
+    /// It is the only value in the model field that means "no request was made".
+    /// </summary>
+    public const string SyntheticModelMarker = "<synthetic>";
+
     private readonly ClaudeOptions _options;
     private readonly IncrementalFileScanner _scanner;
     private readonly HashSet<string> _seenIdentities = new(StringComparer.Ordinal);
@@ -206,29 +212,43 @@ public sealed class ClaudeTranscriptScanner
         _identityOrder.Clear();
     }
 
+    /// <summary>
+    /// Decides what a line's model field means.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only the literal synthetic marker excludes a line. Everything else is a request that
+    /// was made and tokens that were spent, whatever the id looks like.
+    /// </para>
+    /// <para>
+    /// The previous rule — "anything that is not a plain identifier is synthetic" — deleted
+    /// every line from a gateway deployment, because those ids carry characters an
+    /// identifier may not: <c>us.anthropic.claude-…-v1:0</c> on Bedrock and
+    /// <c>publishers/anthropic/models/…</c> on Vertex. That is not a placeholder, it is the
+    /// user's whole usage. The id itself is still not carried out of the reader, because a
+    /// string that failed the identifier test is exactly the kind of free text this reader
+    /// refuses to hold; the tokens are counted against a null model id instead, which
+    /// leaves them in every total and out of the per-model breakdown.
+    /// </para>
+    /// </remarks>
     private static void ReadModel(in JsonElement message, out string? modelId, out bool isSynthetic)
     {
+        modelId = null;
+        isSynthetic = false;
+
         if (!message.TryGetProperty("model", out JsonElement model) || model.ValueKind is not JsonValueKind.String)
         {
-            modelId = null;
-            isSynthetic = false;
             return;
         }
 
         string? raw = model.GetString();
-        if (JsonValues.IsIdentifier(raw))
+        if (string.Equals(raw, SyntheticModelMarker, StringComparison.OrdinalIgnoreCase))
         {
-            modelId = raw;
-            isSynthetic = false;
+            isSynthetic = true;
             return;
         }
 
-        // "<synthetic>" is the documented case, and anything else that is not a model id
-        // gets the same treatment: it did not cost anything, so it is not counted. The
-        // value itself is not retained — an unrecognised model field is exactly the kind of
-        // free text this reader refuses to carry.
-        modelId = null;
-        isSynthetic = true;
+        modelId = JsonValues.IsIdentifier(raw) ? raw : null;
     }
 
     private void Accept(ClaudeUsageLine line, Accumulator accumulator)
@@ -276,10 +296,31 @@ public sealed class ClaudeTranscriptScanner
         return true;
     }
 
+    /// <summary>
+    /// Picks the transcripts this pass will read: the newest files inside the transcript
+    /// window, at most <see cref="ClaudeOptions.MaxTranscriptFiles"/> of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The retained set is kept newest-first <em>while</em> enumerating rather than by
+    /// collecting everything and truncating at the end. A directory enumeration arrives in
+    /// whatever order the filesystem hands it over, so a set that grew to the enumeration
+    /// cap and was then cut would drop files by position rather than by age — and on a
+    /// pathological store the files dropped could be the newest ones, which are the only
+    /// ones that matter.
+    /// </para>
+    /// <para>
+    /// The enumeration cap still bounds the walk itself. What it bounds now is how much of
+    /// the store is inspected, not which of the inspected files survive.
+    /// </para>
+    /// </remarks>
     private IReadOnlyList<string> SelectTranscripts(string projectsDirectory, DateTimeOffset now)
     {
         DateTime cutoff = (now - _options.TranscriptWindow).UtcDateTime;
-        var candidates = new List<(string Path, DateTime Written)>();
+
+        // A min-heap of the newest files seen so far: the oldest is always at the head, so
+        // going over the budget evicts the oldest candidate and never the newest.
+        var newest = new PriorityQueue<string, DateTime>();
 
         try
         {
@@ -312,7 +353,11 @@ public sealed class ClaudeTranscriptScanner
                     continue;
                 }
 
-                candidates.Add((file.FullName, written));
+                newest.Enqueue(file.FullName, written);
+                if (newest.Count > _options.MaxTranscriptFiles)
+                {
+                    _ = newest.Dequeue();
+                }
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
@@ -320,13 +365,14 @@ public sealed class ClaudeTranscriptScanner
             return [];
         }
 
-        candidates.Sort(static (a, b) => b.Written.CompareTo(a.Written));
-        if (candidates.Count > _options.MaxTranscriptFiles)
+        var selected = new List<(string Path, DateTime Written)>(newest.Count);
+        while (newest.TryDequeue(out string? path, out DateTime written))
         {
-            candidates.RemoveRange(_options.MaxTranscriptFiles, candidates.Count - _options.MaxTranscriptFiles);
+            selected.Add((path, written));
         }
 
-        return candidates.Select(static c => c.Path).ToList();
+        selected.Sort(static (a, b) => b.Written.CompareTo(a.Written));
+        return selected.Select(static c => c.Path).ToList();
     }
 
     private sealed class Accumulator

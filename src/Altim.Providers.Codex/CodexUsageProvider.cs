@@ -21,9 +21,24 @@ namespace Altim.Providers.Codex;
 /// screen pretending to be current.
 /// </para>
 /// <para>
+/// <b>A skipped call is not a missing reading.</b> The live call is gated to at most one a
+/// minute, and the last successful live reading is kept with its own observation time and
+/// keeps answering inside that window. Falling back to the local file whenever the gate was
+/// closed made one tick in six live and the rest stale, flipped the status line back and
+/// forth, and wrote alternating rows into the history table.
+/// </para>
+/// <para>
 /// The live call is skipped outright when network calls are switched off, when the CLI
-/// reports API-key authentication (where it hard-errors), and when the last call was less
-/// than a minute ago.
+/// reports API-key authentication (where it hard-errors), and when the refresh gate says
+/// the floor has not elapsed. None of those skips affects the local reads: the rollout tail
+/// and the state database are files on this machine and are read on every refresh.
+/// </para>
+/// <para>
+/// <see cref="ProviderUsage.Tokens"/> is <b>always locally observed</b>. The server reports
+/// a lifetime grand total with no breakdown behind it, and local sums were measured about
+/// 16 per cent away from server accounting, so a field that alternated between the two
+/// would move when nothing had happened. The server figure is published separately, as
+/// <see cref="ServerReportedUsage"/>, where it can be labelled for what it is.
 /// </para>
 /// <para>
 /// Every reading is <see cref="MetricConfidence.BestEffort"/>. There is no documented
@@ -38,6 +53,7 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
     private readonly ICodexAppServerClient _appServer;
     private readonly CodexDoctorReader _doctor;
     private readonly IProcessMonitor _processMonitor;
+    private readonly IRefreshGate? _networkGate;
     private readonly string? _home;
     private readonly TimeProvider _time;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -47,6 +63,7 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
     private CodexAuthMode _authMode = CodexAuthMode.Unknown;
     private DateTimeOffset? _authModeCheckedAt;
     private DateTimeOffset? _lastLiveAttemptAt;
+    private CodexRateLimitSnapshot? _lastLiveSnapshot;
     private bool _disposed;
 
     /// <summary>
@@ -63,13 +80,20 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
     /// The Codex home to read, for tests. Defaults to the resolved location.
     /// </param>
     /// <param name="timeProvider">The clock. Defaults to the system clock.</param>
+    /// <param name="networkGate">
+    /// The floor for the one call that reaches the network. When supplied it owns the
+    /// decision; when not, <see cref="CodexOptions.MinimumLiveCallInterval"/> is enforced
+    /// here instead. <b>Only</b> the app-server call is gated: the rollout tail and the
+    /// state database are local files and are read on every refresh regardless.
+    /// </param>
     public CodexUsageProvider(
         CodexOptions? options = null,
         ICodexAppServerClient? appServer = null,
         ICliRunner? cliRunner = null,
         IProcessMonitor? processMonitor = null,
         string? homeOverride = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IRefreshGate? networkGate = null)
     {
         _options = options ?? CodexOptions.Default;
         _appServer = appServer ?? new CodexAppServerClient();
@@ -77,6 +101,7 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
         _processMonitor = processMonitor ?? CreateDefaultProcessScanner();
         _home = homeOverride ?? CodexPaths.ResolveHome();
         _time = timeProvider ?? TimeProvider.System;
+        _networkGate = networkGate;
 
         _usage = new ProviderUsage(CodexProviderInfo.Id, ProviderStatus.Unknown, [], null, null, null);
     }
@@ -94,6 +119,20 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
     public ProviderStatus Status => _usage.Status;
 
     /// <summary>
+    /// The account figures the server itself reported, when the live call has produced any.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="ProviderUsage.Tokens"/> on purpose. This is a lifetime
+    /// grand total from the provider's own accounting; that is a per-component sum observed
+    /// locally, measured about 16 per cent away from it. Presenting them in one field would
+    /// mean a number whose meaning changed depending on whether the last call succeeded.
+    /// </remarks>
+    public CodexAccountUsage? ServerReportedUsage { get; private set; }
+
+    /// <summary>When <see cref="ServerReportedUsage"/> was read.</summary>
+    public DateTimeOffset? ServerReportedUsageAt { get; private set; }
+
+    /// <summary>
     /// A process scanner that finds the Codex CLI by executable name only.
     /// </summary>
     /// <remarks>
@@ -101,7 +140,8 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
     /// arguments". Altim takes the first half and refuses the second: reading another
     /// process's command line is how a monitor ends up holding someone else's API key,
     /// which was observed on the verification machine. The cost is that a <c>codex</c>
-    /// helper invocation is indistinguishable from a session here.
+    /// helper invocation is indistinguishable from a session here, which is why a detected
+    /// process is reported as process presence and never attached to a particular thread.
     /// </remarks>
     public static ProcessScanner CreateDefaultProcessScanner() =>
         new(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["codex"] = CodexProviderInfo.Id });
@@ -165,55 +205,17 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
         _gate.Dispose();
     }
 
-    private async Task<(ProviderUsage Usage, IReadOnlyList<AgentSession> Sessions)> ReadAsync(CancellationToken ct)
-    {
-        DateTimeOffset now = _time.GetUtcNow();
-
-        try
-        {
-            bool homePresent = _home is not null && Directory.Exists(_home);
-            bool cliPresent = _appServer.IsAvailable;
-
-            if (!homePresent && !cliPresent)
-            {
-                return (NotDetected(), []);
-            }
-
-            CodexLocalScan local = ReadLocal(now);
-            IReadOnlyList<DetectedProcess> processes = await ScanProcessesAsync(ct).ConfigureAwait(false);
-            bool processRunning = ProcessScanner.HasProcess(processes, CodexProviderInfo.Id);
-
-            CodexLiveResult live = await TryLiveAsync(cliPresent, now, ct).ConfigureAwait(false);
-
-            CodexRateLimitSnapshot? snapshot = live.RateLimits ?? local.Snapshot;
-            IReadOnlyList<UsageMetric> metrics = snapshot is null
-                ? []
-                : CodexMetricFactory.Build(snapshot.Windows, MetricConfidence.BestEffort);
-
-            TokenTotals? tokens = ToTotals(live.AccountUsage?.LifetimeTokens ?? local.Tokens);
-            string? detail = DescribeStatus(live, snapshot, now);
-            ProviderStatus status = ResolveStatus(processRunning, local, metrics.Count > 0, now);
-
-            IReadOnlyList<AgentSession> sessions = MarkActive(local.Sessions, processRunning, now);
-            return (new ProviderUsage(CodexProviderInfo.Id, status, metrics, tokens, now, detail), sessions);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            // A provider-level failure is a status, never a crash, and it carries no
-            // metrics: an unavailable reading is not a zero.
-            return (
-                new ProviderUsage(CodexProviderInfo.Id, ProviderStatus.Error, [], null, now, "Unable to retrieve usage"),
-                []);
-        }
-    }
-
     private static ProviderUsage NotDetected() =>
         new(CodexProviderInfo.Id, ProviderStatus.NotDetected, [], null, null, "Codex is not installed on this machine");
 
+    /// <summary>
+    /// Turns locally observed counts into the contract's token totals.
+    /// </summary>
+    /// <remarks>
+    /// <c>cache_write_input_tokens</c> is part of the real rollout schema and is carried
+    /// through. A component the source did not report stays null, because null means "not
+    /// reported" and zero would claim the provider measured it and found nothing.
+    /// </remarks>
     private static TokenTotals? ToTotals(CodexTokenCounts? counts)
     {
         if (counts is not { HasAny: true } value)
@@ -221,239 +223,22 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
             return null;
         }
 
-        // Codex reports no cache-write figure. Null says so; zero would claim the cache was
-        // never written to.
-        return new TokenTotals(value.Input, value.Output, value.CachedInput, null);
+        return new TokenTotals(value.Input, value.Output, value.CachedInput, value.CacheWrite);
     }
 
-    private static IReadOnlyList<AgentSession> MarkActive(IReadOnlyList<AgentSession> sessions, bool processRunning, DateTimeOffset now)
-    {
-        if (!processRunning)
-        {
-            return sessions;
-        }
+    /// <summary>
+    /// Adds an optional component to an optional running sum without inventing a zero.
+    /// </summary>
+    private static long? Accumulate(long? running, long? component) =>
+        component is { } value ? (running ?? 0L) + value : running;
 
-        // A running process cannot be tied to a particular thread without reading its
-        // command line, so the newest recently-touched thread is the one marked active.
-        AgentSession? newest = null;
-        foreach (AgentSession session in sessions)
-        {
-            if (session.LastActivityAt is null)
-            {
-                continue;
-            }
-
-            if (newest?.LastActivityAt is null || session.LastActivityAt > newest.LastActivityAt)
-            {
-                newest = session;
-            }
-        }
-
-        if (newest is null)
-        {
-            return sessions;
-        }
-
-        var marked = new List<AgentSession>(sessions.Count);
-        foreach (AgentSession session in sessions)
-        {
-            marked.Add(ReferenceEquals(session, newest) ? session with { IsActive = true } : session);
-        }
-
-        _ = now;
-        return marked;
-    }
-
-    private async Task<IReadOnlyList<DetectedProcess>> ScanProcessesAsync(CancellationToken ct)
-    {
-        try
-        {
-            return await _processMonitor.ScanAsync(ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (InvalidOperationException)
-        {
-            return [];
-        }
-    }
-
-    private async Task<CodexLiveResult> TryLiveAsync(bool cliPresent, DateTimeOffset now, CancellationToken ct)
-    {
-        if (!cliPresent)
-        {
-            return CodexLiveResult.NotDetected;
-        }
-
-        if (!_options.AllowNetworkCalls)
-        {
-            return CodexLiveResult.Skipped;
-        }
-
-        if (_lastLiveAttemptAt is { } last && now - last < _options.MinimumLiveCallInterval)
-        {
-            return CodexLiveResult.Skipped;
-        }
-
-        await EnsureAuthModeAsync(now, ct).ConfigureAwait(false);
-        if (_authMode is CodexAuthMode.ApiKey or CodexAuthMode.NotAuthenticated)
-        {
-            return CodexLiveResult.Skipped;
-        }
-
-        _lastLiveAttemptAt = now;
-        return await _appServer.ReadAsync(_options.LiveCallTimeout, ct).ConfigureAwait(false);
-    }
-
-    private async Task EnsureAuthModeAsync(DateTimeOffset now, CancellationToken ct)
-    {
-        if (_authModeCheckedAt is { } checkedAt && now - checkedAt < TimeSpan.FromMinutes(10))
-        {
-            return;
-        }
-
-        _authModeCheckedAt = now;
-        _authMode = await _doctor.ReadAuthModeAsync(_options.DoctorTimeout, ct).ConfigureAwait(false);
-    }
-
-    private ProviderStatus ResolveStatus(bool processRunning, CodexLocalScan local, bool hasMetrics, DateTimeOffset now)
-    {
-        if (processRunning)
-        {
-            return ProviderStatus.Active;
-        }
-
-        foreach (AgentSession session in local.Sessions)
-        {
-            if (session.LastActivityAt is { } activity && now - activity <= _options.SessionActivityWindow)
-            {
-                return ProviderStatus.Active;
-            }
-        }
-
-        return hasMetrics || local.Sessions.Count > 0 ? ProviderStatus.Idle : ProviderStatus.Detected;
-    }
-
-    private string? DescribeStatus(CodexLiveResult live, CodexRateLimitSnapshot? snapshot, DateTimeOffset now)
-    {
-        if (live.Outcome is CodexLiveOutcome.Succeeded && snapshot?.Source is CodexSnapshotSource.Live)
-        {
-            return null;
-        }
-
-        if (snapshot is null)
-        {
-            return live.Outcome switch
-            {
-                CodexLiveOutcome.NotDetected => "Codex CLI not found; no local quota snapshot either",
-                CodexLiveOutcome.Skipped when !_options.AllowNetworkCalls => "Network calls are off and no local quota snapshot was found",
-                CodexLiveOutcome.Skipped => "No local quota snapshot found",
-                _ => "Live quota unavailable and no local snapshot was found",
-            };
-        }
-
-        string age = UsageReadings.DescribeAge(snapshot.ObservedAt, now);
-        return live.Outcome switch
-        {
-            CodexLiveOutcome.NotDetected => "Codex CLI not found; showing a local snapshot from " + age,
-            CodexLiveOutcome.Skipped when !_options.AllowNetworkCalls => "Network calls are off; showing a local snapshot from " + age,
-            CodexLiveOutcome.Skipped when _authMode is CodexAuthMode.ApiKey =>
-                "Live quota is unavailable under API-key authentication; showing a local snapshot from " + age,
-            CodexLiveOutcome.Skipped when _authMode is CodexAuthMode.NotAuthenticated =>
-                "Codex is not signed in; showing a local snapshot from " + age,
-            CodexLiveOutcome.Skipped => "Showing a local snapshot from " + age,
-            CodexLiveOutcome.TimedOut => "The live quota call timed out; showing a local snapshot from " + age,
-            _ => "The live quota call failed; showing a local snapshot from " + age,
-        };
-    }
-
-    private CodexLocalScan ReadLocal(DateTimeOffset now)
-    {
-        if (_home is null)
-        {
-            return CodexLocalScan.Empty;
-        }
-
-        IReadOnlyList<CodexThreadRow> rows = [];
-        string? databasePath = CodexPaths.FindStateDatabase(_home);
-        if (databasePath is not null)
-        {
-            rows = new CodexStateDatabase(databasePath).ReadRecent(_options.MaxSessionsToRead);
-        }
-
-        List<string> candidates = rows
-            .Select(static row => row.RolloutPath)
-            .Where(static path => path is not null)
-            .Select(static path => path!)
-            .ToList();
-
-        if (candidates.Count == 0)
-        {
-            // No state database, or a schema this reader does not understand. Fall back to
-            // the newest files by modification time, still bounded and still shallow.
-            candidates = [.. CodexPaths.FindRecentRollouts(_home, _options.MaxSessionsToRead)];
-        }
-
-        CodexRateLimitSnapshot? best = null;
-        long input = 0;
-        long cached = 0;
-        long output = 0;
-        long reasoning = 0;
-        long total = 0;
-        bool sawTokens = false;
-
-        var tokensByIndex = new Dictionary<int, CodexTokenCounts>();
-
-        for (int i = 0; i < candidates.Count; i++)
-        {
-            string path = candidates[i];
-            IReadOnlyList<CodexRolloutRecord> records = CodexRolloutReader.ReadTail(path, _options.RolloutTailBytes);
-            if (records.Count == 0)
-            {
-                continue;
-            }
-
-            CodexRateLimitSnapshot? snapshot = CodexRolloutReader.LatestSnapshot(records, LastWriteOrNull(path));
-            if (snapshot is not null && IsNewer(snapshot, best))
-            {
-                best = snapshot;
-            }
-
-            // Cumulative totals restate the whole session on every line, so exactly one
-            // value per session is taken. Summing the lines would inflate a session by
-            // roughly its turn count.
-            if (CodexRolloutReader.LatestCumulativeTokens(records) is { } counts)
-            {
-                sawTokens = true;
-                tokensByIndex[i] = counts;
-                input += counts.Input ?? 0;
-                cached += counts.CachedInput ?? 0;
-                output += counts.Output ?? 0;
-                reasoning += counts.ReasoningOutput ?? 0;
-                total += counts.Total ?? 0;
-            }
-        }
-
-        var sessions = new List<AgentSession>();
-        for (int i = 0; i < rows.Count; i++)
-        {
-            AgentSession? session = ToSession(rows[i].Summary, tokensByIndex.TryGetValue(i, out CodexTokenCounts counts) ? counts : null);
-            if (session is not null)
-            {
-                sessions.Add(session);
-            }
-        }
-
-        _ = now;
-
-        CodexTokenCounts? summed = sawTokens
-            ? new CodexTokenCounts(input, cached, output, reasoning, total)
-            : null;
-
-        return new CodexLocalScan(best, summed, sessions);
-    }
+    private static CodexTokenCounts Add(CodexTokenCounts running, CodexTokenCounts counts) => new(
+        Accumulate(running.Input, counts.Input),
+        Accumulate(running.CachedInput, counts.CachedInput),
+        Accumulate(running.CacheWrite, counts.CacheWrite),
+        Accumulate(running.Output, counts.Output),
+        Accumulate(running.ReasoningOutput, counts.ReasoningOutput),
+        Accumulate(running.Total, counts.Total));
 
     private static AgentSession? ToSession(CodexThreadSummary summary, CodexTokenCounts? counts)
     {
@@ -462,8 +247,10 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
             return null;
         }
 
-        DateTimeOffset? started = summary.CreatedAt ?? summary.UpdatedAt;
-        if (started is not { } startedAt)
+        // No start instant, no session row. The last-activity instant is not a start time,
+        // and neither is the clock: a row that said "started just now" on every refresh
+        // would be a number Altim made up.
+        if (summary.CreatedAt is not { } startedAt)
         {
             return null;
         }
@@ -506,11 +293,338 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
         }
     }
 
+    private async Task<(ProviderUsage Usage, IReadOnlyList<AgentSession> Sessions)> ReadAsync(CancellationToken ct)
+    {
+        DateTimeOffset now = _time.GetUtcNow();
+
+        try
+        {
+            bool homePresent = _home is not null && Directory.Exists(_home);
+            bool cliPresent = _appServer.IsAvailable;
+
+            if (!homePresent && !cliPresent)
+            {
+                return (NotDetected(), []);
+            }
+
+            CodexLocalScan local = ReadLocal();
+            IReadOnlyList<DetectedProcess> processes = await ScanProcessesAsync(ct).ConfigureAwait(false);
+            bool processRunning = ProcessScanner.HasProcess(processes, CodexProviderInfo.Id);
+
+            CodexLiveResult live = await TryLiveAsync(cliPresent, now, ct).ConfigureAwait(false);
+            RememberLive(live, now);
+
+            CodexRateLimitSnapshot? snapshot = Choose(_lastLiveSnapshot, local.Snapshot, now);
+            IReadOnlyList<UsageMetric> metrics = snapshot is null
+                ? []
+                : CodexMetricFactory.Build(snapshot.Windows, MetricConfidence.BestEffort, now);
+
+            TokenTotals? tokens = ToTotals(local.Tokens);
+            string? detail = DescribeStatus(live, snapshot, now);
+            ProviderStatus status = ResolveStatus(processRunning, local, metrics.Count > 0, now);
+
+            return (new ProviderUsage(CodexProviderInfo.Id, status, metrics, tokens, now, detail), local.Sessions);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // A provider-level failure is a status, never a crash, and it carries no
+            // metrics: an unavailable reading is not a zero. The sentence is the fixed one;
+            // exception text names files and would end up on screen.
+            return (
+                new ProviderUsage(CodexProviderInfo.Id, ProviderStatus.Error, [], null, now, ProviderUsage.UnavailableDetail),
+                []);
+        }
+    }
+
+    private void RememberLive(CodexLiveResult live, DateTimeOffset now)
+    {
+        if (live.Outcome is not CodexLiveOutcome.Succeeded)
+        {
+            return;
+        }
+
+        if (live.RateLimits is { } snapshot)
+        {
+            // Stamped with the caller's clock rather than the client's, so age is measured
+            // against the same instant everything else on this reading is.
+            _lastLiveSnapshot = snapshot with { ObservedAt = snapshot.ObservedAt ?? now };
+        }
+
+        if (live.AccountUsage is { } usage)
+        {
+            ServerReportedUsage = usage;
+            ServerReportedUsageAt = now;
+        }
+    }
+
+    /// <summary>
+    /// Picks between the last live reading and the newest local snapshot.
+    /// </summary>
+    /// <remarks>
+    /// A live reading inside its retention window wins outright: it is what the server said,
+    /// and a skipped call does not make it less true. Past that, whichever reading is
+    /// actually fresher wins, so a skipped call can never demote a live figure in favour of
+    /// an older local one.
+    /// </remarks>
+    private CodexRateLimitSnapshot? Choose(CodexRateLimitSnapshot? live, CodexRateLimitSnapshot? local, DateTimeOffset now)
+    {
+        if (live is null)
+        {
+            return local;
+        }
+
+        if (local is null || Age(live, now) <= _options.LiveSnapshotRetention)
+        {
+            return live;
+        }
+
+        return IsNewer(local, live) ? local : live;
+    }
+
+    private static TimeSpan Age(CodexRateLimitSnapshot snapshot, DateTimeOffset now) =>
+        snapshot.ObservedAt is { } observed && now > observed ? now - observed : TimeSpan.Zero;
+
+    private async Task<IReadOnlyList<DetectedProcess>> ScanProcessesAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await _processMonitor.ScanAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException)
+        {
+            return [];
+        }
+    }
+
+    private async Task<CodexLiveResult> TryLiveAsync(bool cliPresent, DateTimeOffset now, CancellationToken ct)
+    {
+        if (!cliPresent)
+        {
+            return CodexLiveResult.NotDetected;
+        }
+
+        if (!_options.AllowNetworkCalls)
+        {
+            return CodexLiveResult.Skipped;
+        }
+
+        await EnsureAuthModeAsync(now, ct).ConfigureAwait(false);
+        if (_authMode is CodexAuthMode.ApiKey or CodexAuthMode.NotAuthenticated)
+        {
+            return CodexLiveResult.Skipped;
+        }
+
+        if (!MayCallNow(now))
+        {
+            return CodexLiveResult.Skipped;
+        }
+
+        return await _appServer.ReadAsync(_options.LiveCallTimeout, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Asks the gate — or, when there is none, the local floor — whether the one call that
+    /// reaches the network may be made now.
+    /// </summary>
+    private bool MayCallNow(DateTimeOffset now)
+    {
+        if (_networkGate is not null)
+        {
+            return _networkGate.TryAcquire(Id);
+        }
+
+        if (_lastLiveAttemptAt is { } last && now - last < _options.MinimumLiveCallInterval)
+        {
+            return false;
+        }
+
+        _lastLiveAttemptAt = now;
+        return true;
+    }
+
+    private async Task EnsureAuthModeAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        if (_authModeCheckedAt is { } checkedAt && now - checkedAt < TimeSpan.FromMinutes(10))
+        {
+            return;
+        }
+
+        _authModeCheckedAt = now;
+        _authMode = await _doctor.ReadAuthModeAsync(_options.DoctorTimeout, ct).ConfigureAwait(false);
+    }
+
+    private ProviderStatus ResolveStatus(bool processRunning, CodexLocalScan local, bool hasMetrics, DateTimeOffset now)
+    {
+        if (processRunning)
+        {
+            return ProviderStatus.Active;
+        }
+
+        if (local.LastActivityAt is { } activity && now - activity <= _options.SessionActivityWindow)
+        {
+            return ProviderStatus.Active;
+        }
+
+        return hasMetrics || local.Sessions.Count > 0 ? ProviderStatus.Idle : ProviderStatus.Detected;
+    }
+
+    private string? DescribeStatus(CodexLiveResult live, CodexRateLimitSnapshot? snapshot, DateTimeOffset now)
+    {
+        if (snapshot?.Source is CodexSnapshotSource.Live)
+        {
+            // Inside the call floor the last live reading is the current one. Saying so on
+            // one tick and "showing a snapshot from a minute ago" on the next would be a
+            // status line that changed while nothing did.
+            return Age(snapshot, now) <= _options.MinimumLiveCallInterval
+                ? null
+                : "Showing the last live reading from " + UsageReadings.DescribeAge(snapshot.ObservedAt, now);
+        }
+
+        if (snapshot is null)
+        {
+            return live.Outcome switch
+            {
+                CodexLiveOutcome.NotDetected => "Codex CLI not found; no local quota snapshot either",
+                CodexLiveOutcome.Skipped when !_options.AllowNetworkCalls => "Network calls are off and no local quota snapshot was found",
+                CodexLiveOutcome.Skipped => "No local quota snapshot found",
+                _ => "Live quota unavailable and no local snapshot was found",
+            };
+        }
+
+        string age = UsageReadings.DescribeAge(snapshot.ObservedAt, now);
+        return live.Outcome switch
+        {
+            CodexLiveOutcome.NotDetected => "Codex CLI not found; showing a local snapshot from " + age,
+            CodexLiveOutcome.Skipped when !_options.AllowNetworkCalls => "Network calls are off; showing a local snapshot from " + age,
+            CodexLiveOutcome.Skipped when _authMode is CodexAuthMode.ApiKey =>
+                "Live quota is unavailable under API-key authentication; showing a local snapshot from " + age,
+            CodexLiveOutcome.Skipped when _authMode is CodexAuthMode.NotAuthenticated =>
+                "Codex is not signed in; showing a local snapshot from " + age,
+            CodexLiveOutcome.Skipped => "Showing a local snapshot from " + age,
+            CodexLiveOutcome.TimedOut => "The live quota call timed out; showing a local snapshot from " + age,
+            _ => "The live quota call failed; showing a local snapshot from " + age,
+        };
+    }
+
+    /// <summary>
+    /// Reads the local store: the state database for which files to look at, and the tail of
+    /// each of those files for a quota snapshot and the session's cumulative tokens.
+    /// </summary>
+    /// <remarks>
+    /// Token counts are keyed by the rollout file they came from and read back the same way.
+    /// Keying them by position in the candidate list and reading them back by position in
+    /// the thread list is the same thing only while every thread has a rollout path: one row
+    /// without one shifted every later session's tokens onto its neighbour.
+    /// </remarks>
+    private CodexLocalScan ReadLocal()
+    {
+        if (_home is null)
+        {
+            return CodexLocalScan.Empty;
+        }
+
+        IReadOnlyList<CodexThreadRow> rows = [];
+        string? databasePath = CodexPaths.FindStateDatabase(_home);
+        if (databasePath is not null)
+        {
+            rows = new CodexStateDatabase(databasePath).ReadRecent(_options.MaxSessionsToRead);
+        }
+
+        StringComparer pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var candidates = new List<string>(rows.Count);
+        var seen = new HashSet<string>(pathComparer);
+        foreach (CodexThreadRow row in rows)
+        {
+            if (row.RolloutPath is { } path && seen.Add(path))
+            {
+                candidates.Add(path);
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            // No state database, or a schema this reader does not understand. Fall back to
+            // the newest files by modification time, still bounded and still shallow.
+            candidates = [.. CodexPaths.FindRecentRollouts(_home, _options.MaxSessionsToRead)];
+        }
+
+        CodexRateLimitSnapshot? best = null;
+        CodexTokenCounts summed = default;
+        bool sawTokens = false;
+        var tokensByPath = new Dictionary<string, CodexTokenCounts>(pathComparer);
+
+        foreach (string path in candidates)
+        {
+            IReadOnlyList<CodexRolloutRecord> records = CodexRolloutReader.ReadTail(path, _options.RolloutTailBytes);
+            if (records.Count == 0)
+            {
+                continue;
+            }
+
+            CodexRateLimitSnapshot? snapshot = CodexRolloutReader.LatestSnapshot(records, LastWriteOrNull(path));
+            if (snapshot is not null && IsNewer(snapshot, best))
+            {
+                best = snapshot;
+            }
+
+            // Cumulative totals restate the whole session on every line, so exactly one
+            // value per session is taken. Summing the lines would inflate a session by
+            // roughly its turn count.
+            if (CodexRolloutReader.LatestCumulativeTokens(records) is { } counts)
+            {
+                sawTokens = true;
+                tokensByPath[path] = counts;
+                summed = Add(summed, counts);
+            }
+        }
+
+        var sessions = new List<AgentSession>(rows.Count);
+        DateTimeOffset? lastActivity = null;
+        foreach (CodexThreadRow row in rows)
+        {
+            if (row.Summary.UpdatedAt is { } updated && (lastActivity is null || updated > lastActivity))
+            {
+                lastActivity = updated;
+            }
+
+            CodexTokenCounts? counts = row.RolloutPath is { } path && tokensByPath.TryGetValue(path, out CodexTokenCounts found)
+                ? found
+                : null;
+
+            if (ToSession(row.Summary, counts) is { } session)
+            {
+                sessions.Add(session);
+            }
+        }
+
+        return new CodexLocalScan(best, sawTokens ? summed : null, sessions, lastActivity);
+    }
+
+    /// <summary>
+    /// What one pass over the local store found.
+    /// </summary>
+    /// <param name="Snapshot">The newest quota snapshot recovered from a rollout tail.</param>
+    /// <param name="Tokens">The locally observed token sum across the scanned sessions.</param>
+    /// <param name="Sessions">The sessions that reported enough to be described.</param>
+    /// <param name="LastActivityAt">
+    /// The newest activity instant any thread reported, including threads that carried too
+    /// little to become a session row. Status is a statement about the installation, so it
+    /// is answered from every row rather than only from the ones that made it into the list.
+    /// </param>
     private sealed record CodexLocalScan(
         CodexRateLimitSnapshot? Snapshot,
         CodexTokenCounts? Tokens,
-        IReadOnlyList<AgentSession> Sessions)
+        IReadOnlyList<AgentSession> Sessions,
+        DateTimeOffset? LastActivityAt)
     {
-        public static CodexLocalScan Empty { get; } = new(null, null, []);
+        public static CodexLocalScan Empty { get; } = new(null, null, [], null);
     }
 }

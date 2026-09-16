@@ -147,6 +147,43 @@ public sealed class CodexRolloutReaderTests
     }
 
     [Fact]
+    public void CacheWriteTokensAreReadBecauseTheyAreInTheRealSchema()
+    {
+        // Verbatim shape of a token_count line on the verification machine. Every one of
+        // them carries cache_write_input_tokens; dropping it lost a whole token component
+        // and then claimed the provider did not report one.
+        using var workspace = new TempWorkspace();
+        string path = workspace.WriteLines(
+            "rollout-i.jsonl",
+            SessionMeta,
+            """{"type":"event_msg","timestamp":"2026-09-15T19:40:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":17637,"cached_input_tokens":12288,"cache_write_input_tokens":4096,"output_tokens":5,"reasoning_output_tokens":0,"total_tokens":17642},"last_token_usage":{"input_tokens":17637,"cached_input_tokens":12288,"cache_write_input_tokens":4096,"output_tokens":5,"reasoning_output_tokens":0,"total_tokens":17642},"model_context_window":258400},"rate_limits":{"limit_id":"premium","limit_name":null,"primary":{"used_percent":5.0,"window_minutes":10080,"resets_at":1790105163},"secondary":null,"credits":{"has_credits":false,"unlimited":false,"balance":"0"},"individual_limit":null,"spend_control_reached":null,"plan_type":"prolite","rate_limit_reached_type":null}}}""");
+
+        CodexRolloutRecord record = Assert.Single(CodexRolloutReader.ReadTail(path));
+
+        Assert.Equal(4096L, record.CumulativeTokens?.CacheWrite);
+        Assert.Equal(4096L, record.TurnTokens?.CacheWrite);
+        Assert.Equal(12288L, record.CumulativeTokens?.CachedInput);
+    }
+
+    [Fact]
+    public void TheSnapshotKeepsTheFamilyThePlanAndTheCreditsTheLineReported()
+    {
+        using var workspace = new TempWorkspace();
+        string path = workspace.WriteLines(
+            "rollout-j.jsonl",
+            SessionMeta,
+            """{"type":"event_msg","timestamp":"2026-09-15T19:40:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1,"output_tokens":1}},"rate_limits":{"limit_id":"premium","primary":{"used_percent":5.0,"window_minutes":10080,"resets_at":1790105163},"secondary":null,"credits":{"has_credits":true,"unlimited":false,"balance":"7.25"},"plan_type":"prolite"}}}""");
+
+        CodexRateLimitSnapshot? snapshot = CodexRolloutReader.LatestSnapshot(CodexRolloutReader.ReadTail(path), null);
+
+        Assert.NotNull(snapshot);
+        Assert.Equal("premium", Assert.Single(snapshot.Windows).LimitId);
+        Assert.Equal("prolite", snapshot.PlanType);
+        Assert.Equal(7.25d, snapshot.Credits?.Balance);
+        Assert.True(snapshot.Credits?.HasCredits);
+    }
+
+    [Fact]
     public void ConversationLinesProduceNothing()
     {
         using var workspace = new TempWorkspace();

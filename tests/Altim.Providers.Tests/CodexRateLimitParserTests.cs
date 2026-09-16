@@ -182,16 +182,121 @@ public sealed class CodexRateLimitParserTests
     }
 
     [Fact]
-    public void ReadsPlanAndCreditFields()
+    public void ReadsPlanAndCreditFieldsFromInsideTheRateLimitsObject()
     {
+        // Both dialects put planType and credits inside the rate-limits object. Reading
+        // them from the top level of the response found nothing, every time.
         using JsonDocument document = JsonDocument.Parse(
-            """{"planType":"pro","credits":12.5,"rateLimitResetCredits":40}""");
+            """
+            {
+              "rateLimits": {
+                "limitId": "codex",
+                "planType": "pro",
+                "credits": { "hasCredits": true, "unlimited": false, "balance": "12.5" },
+                "primary": { "usedPercent": 10, "windowDurationMins": 300 }
+              },
+              "rateLimitResetCredits": { "availableCount": 40 }
+            }
+            """);
 
-        CodexRateLimitParser.ReadAccountFields(document.RootElement, out string? plan, out double? credits, out double? reset);
+        CodexRateLimitParser.ReadAccountFields(document.RootElement, out string? plan, out CodexCredits? credits, out long? reset);
 
         Assert.Equal("pro", plan);
-        Assert.Equal(12.5d, credits);
-        Assert.Equal(40d, reset);
+        Assert.NotNull(credits);
+        Assert.True(credits.HasCredits);
+        Assert.False(credits.Unlimited);
+        Assert.Equal(12.5d, credits.Balance);
+        Assert.Equal(40L, reset);
+    }
+
+    [Fact]
+    public void CreditsAreAnObjectAndTheBalanceArrivesAsAString()
+    {
+        // The shape written by the CLI itself, verbatim: credits is never a number, and the
+        // balance inside it is declared as a string.
+        using JsonDocument document = JsonDocument.Parse(
+            """{"rate_limits":{"credits":{"has_credits":false,"unlimited":false,"balance":"0"}}}""");
+
+        CodexRateLimitParser.ReadAccountFields(document.RootElement, out _, out CodexCredits? credits, out _);
+
+        Assert.NotNull(credits);
+        Assert.False(credits.HasCredits);
+        Assert.Equal(0d, credits.Balance);
+    }
+
+    [Fact]
+    public void ABalanceThatIsNotANumberIsUnavailableRatherThanZero()
+    {
+        using JsonDocument document = JsonDocument.Parse(
+            """{"rate_limits":{"credits":{"has_credits":true,"unlimited":true,"balance":null}}}""");
+
+        CodexRateLimitParser.ReadAccountFields(document.RootElement, out _, out CodexCredits? credits, out _);
+
+        Assert.NotNull(credits);
+        Assert.Null(credits.Balance);
+        Assert.True(credits.Unlimited);
+    }
+
+    [Fact]
+    public void NoAccountFieldsAtAllReadsAsUnavailable()
+    {
+        using JsonDocument document = JsonDocument.Parse("""{"rate_limits":{"primary":{"used_percent":1,"window_minutes":300}}}""");
+
+        CodexRateLimitParser.ReadAccountFields(document.RootElement, out string? plan, out CodexCredits? credits, out long? reset);
+
+        Assert.Null(plan);
+        Assert.Null(credits);
+        Assert.Null(reset);
+    }
+
+    [Fact]
+    public void TheFamilyIsReadFromLimitIdRatherThanDefaultedToCodex()
+    {
+        // Local rollout files on the verification machine carry limit_id "premium" on a
+        // fifth of recent sessions. Defaulting them to "codex" keyed a premium meter's
+        // history to the wrong series and relabelled it whenever the source changed.
+        IReadOnlyList<CodexLimitWindow> windows = Parse(
+            """
+            {
+              "rate_limits": {
+                "limit_id": "premium",
+                "limit_name": null,
+                "primary": { "used_percent": 5.0, "window_minutes": 10080, "resets_at": 1790105163 },
+                "secondary": null,
+                "plan_type": "prolite"
+              }
+            }
+            """);
+
+        CodexLimitWindow window = Assert.Single(windows);
+        Assert.Equal("premium", window.LimitId);
+        Assert.Equal("premium:10080", CodexMetricFactory.BuildKey(window));
+    }
+
+    [Fact]
+    public void TheMapKeyStillWinsOverAnInnerLimitIdThatDisagrees()
+    {
+        IReadOnlyList<CodexLimitWindow> windows = Parse(
+            """{"rateLimitsByLimitId":{"codex_bengalfox":{"limitId":"codex","primary":{"usedPercent":22,"windowDurationMins":300}}}}""");
+
+        Assert.Equal("codex_bengalfox", Assert.Single(windows).LimitId);
+    }
+
+    [Fact]
+    public void AWindowWhoseResetHasAlreadyPassedProducesNoMeter()
+    {
+        // Last session Friday, Altim opened on Monday. The snapshot is real and the number
+        // was true of a window that ended days ago.
+        var now = new DateTimeOffset(2026, 9, 15, 16, 0, 0, TimeSpan.Zero);
+        IReadOnlyList<CodexLimitWindow> windows = Parse(
+            """{"rate_limits":{"primary":{"used_percent":85,"window_minutes":300,"resets_at":1789099200}}}""");
+
+        Assert.Single(windows);
+        Assert.Empty(CodexMetricFactory.Build(windows, MetricConfidence.BestEffort, now));
+
+        // Without a clock the caller is reading the snapshot for its own sake, and nothing
+        // is dropped.
+        Assert.Single(CodexMetricFactory.Build(windows, MetricConfidence.BestEffort));
     }
 
     [Fact]

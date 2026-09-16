@@ -39,6 +39,12 @@ public static class JsonValues
     private const long MaxUnixSeconds = 4_102_444_800L;
 
     /// <summary>
+    /// The longest string <see cref="ReadLooseDouble"/> will even attempt to parse. A
+    /// number does not need more, and a longer one is prose that must not be touched.
+    /// </summary>
+    private const int MaxNumericStringLength = 32;
+
+    /// <summary>
     /// Reads a floating-point number from the first of up to two spellings that is present.
     /// </summary>
     /// <param name="parent">The object to read from.</param>
@@ -126,6 +132,85 @@ public static class JsonValues
             JsonValueKind.Number when value.TryGetInt64(out long number) => number != 0,
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Reads a number that a provider may have written as a JSON string.
+    /// </summary>
+    /// <param name="parent">The object to read from.</param>
+    /// <param name="name">The preferred property name.</param>
+    /// <param name="alternateName">The other dialect's spelling, or <see langword="null"/>.</param>
+    /// <returns>
+    /// The value, or <see langword="null"/> when absent or when the string is not entirely
+    /// a number. Nothing but the parsed number leaves this method: a string that does not
+    /// parse is discarded rather than carried.
+    /// </returns>
+    /// <remarks>
+    /// Money-shaped fields arrive as strings. The Codex credit balance is declared as
+    /// <c>string | null</c> and arrives as <c>"0"</c>, so a reader that accepted only JSON
+    /// numbers would report "no credit balance" for every account that has one.
+    /// </remarks>
+    public static double? ReadLooseDouble(in JsonElement parent, string name, string? alternateName = null)
+    {
+        if (!TryGetProperty(parent, name, alternateName, out JsonElement value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind is JsonValueKind.Number && value.TryGetDouble(out double number) && double.IsFinite(number))
+        {
+            return number;
+        }
+
+        if (value.ValueKind is JsonValueKind.String)
+        {
+            string? text = value.GetString();
+            if (text is not null
+                && text.Length <= MaxNumericStringLength
+                && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed)
+                && double.IsFinite(parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reads an instant recorded as a Unix timestamp in either seconds or milliseconds.
+    /// </summary>
+    /// <param name="parent">The object to read from.</param>
+    /// <param name="name">The preferred property name.</param>
+    /// <param name="alternateName">The other dialect's spelling, or <see langword="null"/>.</param>
+    /// <returns>The instant, or <see langword="null"/> when absent or implausible.</returns>
+    /// <remarks>
+    /// The units are decided by magnitude rather than by the property name, because the
+    /// same property name carries both: <c>claude agents --json</c> reports
+    /// <c>startedAt</c> as Unix milliseconds while the status-line payload reports
+    /// <c>resets_at</c> as Unix seconds. A seconds-only reader silently discards every
+    /// millisecond timestamp as "beyond the year 2100", which reads downstream as "the
+    /// provider did not report a start time".
+    /// </remarks>
+    public static DateTimeOffset? ReadUnixTimestamp(in JsonElement parent, string name, string? alternateName = null)
+    {
+        long? raw = ReadInt64(parent, name, alternateName);
+        if (raw is not { } value || value <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return value > MaxUnixSeconds
+                ? DateTimeOffset.FromUnixTimeMilliseconds(value)
+                : DateTimeOffset.FromUnixTimeSeconds(value);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // Milliseconds so large they are not a date either.
+            return null;
+        }
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Altim.Providers.Io;
 using Microsoft.Data.Sqlite;
 
@@ -32,10 +33,20 @@ public sealed class CodexStateDatabase
 {
     private const string ThreadsTable = "threads";
 
+    /// <summary>
+    /// How long a statement waits for another writer before giving up. The Codex CLI is
+    /// very likely writing to this file right now, and without a busy timeout a write
+    /// transaction in flight turns into an immediate "database is locked" and the whole
+    /// offline fallback silently degrades to picking files by modification time. A quarter
+    /// of a second is long enough to ride out a commit and short enough that a background
+    /// refresh never stalls on it.
+    /// </summary>
+    private const int BusyTimeoutMilliseconds = 250;
+
     private static readonly string[] IdColumns = ["id", "thread_id", "uuid"];
     private static readonly string[] ModelColumns = ["model", "model_id", "model_slug"];
     private static readonly string[] TokenColumns = ["tokens_used", "token_count", "total_tokens"];
-    private static readonly string[] UpdatedColumns = ["updated_at_ms", "updated_at", "last_activity_ms"];
+    private static readonly string[] UpdatedColumns = ["updated_at_ms", "updated_at", "last_activity_ms", "recency_at_ms"];
     private static readonly string[] CreatedColumns = ["created_at_ms", "created_at", "started_at_ms"];
     private static readonly string[] RolloutColumns = ["rollout_path", "path", "rollout"];
 
@@ -90,6 +101,7 @@ public sealed class CodexStateDatabase
         {
             using var connection = new SqliteConnection(connectionString);
             connection.Open();
+            SetBusyTimeout(connection);
 
             HashSet<string> columns = ReadColumns(connection);
             if (columns.Count == 0)
@@ -100,26 +112,31 @@ public sealed class CodexStateDatabase
             string? idColumn = Pick(columns, IdColumns);
             string? modelColumn = Pick(columns, ModelColumns);
             string? tokensColumn = Pick(columns, TokenColumns);
-            string? updatedColumn = Pick(columns, UpdatedColumns);
-            string? createdColumn = Pick(columns, CreatedColumns);
             string? rolloutColumn = Pick(columns, RolloutColumns);
+
+            // Every spelling that exists is selected, not just the first. The real schema
+            // carries both updated_at and updated_at_ms, the millisecond columns were added
+            // later and are null on older rows, and a row whose newest column is null still
+            // knows when it was created. Taking only the first spelling dropped those rows.
+            IReadOnlyList<string> updatedColumns = PickAll(columns, UpdatedColumns);
+            IReadOnlyList<string> createdColumns = PickAll(columns, CreatedColumns);
 
             var selected = new List<string>();
             AddIfPresent(selected, idColumn);
             AddIfPresent(selected, modelColumn);
             AddIfPresent(selected, tokensColumn);
-            AddIfPresent(selected, updatedColumn);
-            AddIfPresent(selected, createdColumn);
             AddIfPresent(selected, rolloutColumn);
+            selected.AddRange(updatedColumns);
+            selected.AddRange(createdColumns);
 
             if (selected.Count == 0)
             {
                 return [];
             }
 
-            string order = updatedColumn is null
+            string order = updatedColumns.Count == 0
                 ? string.Empty
-                : " ORDER BY " + Quote(updatedColumn) + " DESC";
+                : " ORDER BY " + string.Join(", ", updatedColumns.Select(static c => Quote(c) + " DESC"));
 
             using SqliteCommand command = connection.CreateCommand();
             command.CommandText =
@@ -133,7 +150,7 @@ public sealed class CodexStateDatabase
             using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read())
             {
-                rows.Add(ReadRow(reader, idColumn, modelColumn, tokensColumn, updatedColumn, createdColumn, rolloutColumn));
+                rows.Add(ReadRow(reader, idColumn, modelColumn, tokensColumn, updatedColumns, createdColumns, rolloutColumn));
             }
 
             return rows;
@@ -146,6 +163,21 @@ public sealed class CodexStateDatabase
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             return [];
+        }
+    }
+
+    private static void SetBusyTimeout(SqliteConnection connection)
+    {
+        try
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "PRAGMA busy_timeout = " + BusyTimeoutMilliseconds.ToString(CultureInfo.InvariantCulture);
+            _ = command.ExecuteNonQuery();
+        }
+        catch (SqliteException)
+        {
+            // An older engine, or a database that will not take a pragma. The read below
+            // still works; it just gives up sooner when the CLI is mid-commit.
         }
     }
 
@@ -162,18 +194,31 @@ public sealed class CodexStateDatabase
         string? idColumn,
         string? modelColumn,
         string? tokensColumn,
-        string? updatedColumn,
-        string? createdColumn,
+        IReadOnlyList<string> updatedColumns,
+        IReadOnlyList<string> createdColumns,
         string? rolloutColumn)
     {
         string? id = idColumn is null ? null : ReadIdentifier(reader, idColumn);
         string? model = modelColumn is null ? null : ReadIdentifier(reader, modelColumn);
         long? tokens = tokensColumn is null ? null : ReadCount(reader, tokensColumn);
-        DateTimeOffset? updated = updatedColumn is null ? null : ReadInstant(reader, updatedColumn);
-        DateTimeOffset? created = createdColumn is null ? null : ReadInstant(reader, createdColumn);
+        DateTimeOffset? updated = ReadFirstInstant(reader, updatedColumns);
+        DateTimeOffset? created = ReadFirstInstant(reader, createdColumns);
         string? rollout = rolloutColumn is null ? null : ReadRawPath(reader, rolloutColumn);
 
         return new CodexThreadRow(new CodexThreadSummary(id, model, tokens, updated, created), rollout);
+    }
+
+    private static DateTimeOffset? ReadFirstInstant(SqliteDataReader reader, IReadOnlyList<string> columns)
+    {
+        foreach (string column in columns)
+        {
+            if (ReadInstant(reader, column) is { } instant)
+            {
+                return instant;
+            }
+        }
+
+        return null;
     }
 
     private static HashSet<string> ReadColumns(SqliteConnection connection)
@@ -207,6 +252,20 @@ public sealed class CodexStateDatabase
         }
 
         return null;
+    }
+
+    private static IReadOnlyList<string> PickAll(HashSet<string> columns, string[] candidates)
+    {
+        var found = new List<string>(candidates.Length);
+        foreach (string candidate in candidates)
+        {
+            if (columns.TryGetValue(candidate, out string? actual))
+            {
+                found.Add(actual);
+            }
+        }
+
+        return found;
     }
 
     private static string Quote(string identifier) =>
