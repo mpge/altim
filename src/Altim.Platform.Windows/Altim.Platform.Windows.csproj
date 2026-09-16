@@ -9,10 +9,10 @@
 
        net10.0-windows10.0.19041.0    the real implementation. Registry,
                                       Shell_NotifyIcon, Microsoft.Win32.SystemEvents
-                                      and (later) the Windows App SDK notification
-                                      APIs all live behind the WINDOWS compilation
-                                      symbol here, so CA1416 is satisfied by the
-                                      target framework instead of by suppressions.
+                                      and the Windows App SDK notification APIs all
+                                      live behind the WINDOWS compilation symbol
+                                      here, so CA1416 is satisfied by the target
+                                      framework instead of by suppressions.
 
        EnableWindowsTargeting (set in Directory.Build.props) makes the Windows
        reference assemblies restore from nuget.org as
@@ -25,12 +25,36 @@
     <SupportedOSPlatformVersion Condition="$(TargetFramework.Contains('-windows'))">10.0.19041.0</SupportedOSPlatformVersion>
   </PropertyGroup>
 
+  <!-- The interop layer is written against pointers rather than marshalled
+       structures: NOTIFYICONDATAW and PROCESSENTRY32W carry fixed-size string
+       buffers, and the window procedure is an UnmanagedCallersOnly function
+       pointer, which is what keeps the whole surface allocation free and Native
+       AOT clean. Both need unsafe, and only the Windows target compiles it. -->
+  <PropertyGroup Condition="$(TargetFramework.Contains('-windows'))">
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Altim.Core\Altim.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="$(TargetFramework.Contains('-windows'))">
     <PackageReference Include="Microsoft.Win32.SystemEvents" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+  </ItemGroup>
+
+  <!-- The tray icon is loaded from a file at run time rather than from an embedded
+       resource, because the shell wants an HICON at exactly the size the current
+       DPI asks for and GDI+ decodes a file directly. The renderings macOS uses are
+       left out; only the dark glyph, the light glyph and the multi-size .ico are
+       needed here. -->
+  <ItemGroup>
+    <None Include="..\..\assets\icons\altim.ico;..\..\assets\icons\altim-*.png"
+          Exclude="..\..\assets\icons\altim-template-*.png">
+      <Link>assets\icons\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
   </ItemGroup>
 
 </Project>
