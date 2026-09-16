@@ -6,6 +6,16 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Altim.Core\Altim.Core.csproj" />
+    <!-- The macOS and Linux platform layers cannot be exercised on the machine that
+         builds them, so the parts of them that do not need the operating system —
+         coordinate flipping, asset selection, bundle detection, desktop entry text,
+         XDG path resolution, /proc parsing and the portal's value shapes — are pure
+         functions, and these are their tests. There is no Altim.Platform.Tests
+         project and this is the only existing test project that binds to portable
+         logic rather than to one subsystem, so they live here. Nothing in these two
+         references is initialised: no tray icon is created, no bus is connected. -->
+    <ProjectReference Include="..\..\src\Altim.Platform.MacOS\Altim.Platform.MacOS.csproj" />
+    <ProjectReference Include="..\..\src\Altim.Platform.Linux\Altim.Platform.Linux.csproj" />
   </ItemGroup>
 
   <ItemGroup>

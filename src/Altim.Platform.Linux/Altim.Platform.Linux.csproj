@@ -1,10 +1,49 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- StatusNotifierItem, org.freedesktop.Notifications and XDG autostart are
-       reached over D-Bus and the filesystem, so plain net10.0 is enough. -->
+  <!-- Plain net10.0, deliberately.
+
+       There is no net10.0-linux target framework in the SDK, so there is no way to
+       do what Altim.Platform.Windows does and hide the platform-specific half behind
+       an inner build. Everything here is therefore compiled into every build of the
+       solution, including the Windows one, and has to be inert off Linux rather than
+       absent: the tray host only creates an Avalonia TrayIcon when asked to, the
+       process monitor finds no /proc, and the D-Bus services find no bus address and
+       report themselves unavailable.
+
+       No SupportedOSPlatform attribute is applied for the same reason as in
+       Altim.Platform.MacOS: Altim.App builds as net10.0-windows10.0.19041.0 on
+       Windows, and a linux-only annotation would make every call site there a CA1416
+       error. -->
 
   <ItemGroup>
     <ProjectReference Include="..\Altim.Core\Altim.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- StatusNotifierItem. Avalonia's own TrayIcon is the implementation on Linux,
+         and unlike Windows and macOS there is nothing a hand-written host could learn
+         that it cannot: the protocol carries no geometry for anybody. Avalonia.Base
+         comes with it, for Dispatcher. -->
+    <PackageReference Include="Avalonia" />
+
+    <!-- org.freedesktop.Notifications, logind's PrepareForSleep, and the appearance
+         portal. Not libnotify: the protocol underneath it is a single well-known
+         method call, and going straight to the bus means no native dependency and no
+         GLib main loop. The version is pinned centrally. -->
+    <PackageReference Include="Tmds.DBus.Protocol" />
+  </ItemGroup>
+
+  <!-- The panel icon is a bitmap handed to the StatusNotifierItem host, so both the
+       dark and the light glyph ship: which one has contrast against the panel is a
+       guess from the desktop's colour scheme, and the user can override it. The
+       macOS-only template renderings are excluded. -->
+  <ItemGroup>
+    <None Include="..\..\assets\icons\altim-*.png"
+          Exclude="..\..\assets\icons\altim-template-*.png">
+      <Link>assets\icons\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
   </ItemGroup>
 
 </Project>

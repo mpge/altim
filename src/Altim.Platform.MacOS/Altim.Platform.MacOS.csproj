@@ -1,10 +1,46 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- NSStatusItem, UNUserNotificationCenter and SMAppService are reached through
-       objc_msgSend, so no macOS-flavoured target framework is required. -->
+  <!-- Plain net10.0, deliberately.
+
+       NSStatusItem, UNUserNotificationCenter and SMAppService are reached through
+       objc_msgSend, so nothing here needs the macOS reference assemblies, and asking
+       for a net10.0-macos target framework would need the macOS workload installed on
+       every machine that builds the solution. Altim.Platform.Windows can multi-target
+       because EnableWindowsTargeting restores the Windows reference pack from
+       nuget.org; there is no equivalent for macOS, and the solution has to keep
+       building on Windows.
+
+       The consequence is that this assembly is compiled into every build, including
+       the Windows one, and its types must therefore be inert off macOS rather than
+       absent. They are: every entry point checks OperatingSystem.IsMacOS() or asks the
+       Objective-C runtime for a class and gets IntPtr.Zero back, and then reports
+       itself unavailable. No SupportedOSPlatform attribute is applied, because
+       Altim.App builds as net10.0-windows10.0.19041.0 on Windows and a macos-only
+       annotation would make every call site there a CA1416 error. -->
+
+  <PropertyGroup>
+    <!-- Two things need it: LibraryImport's generated UTF-8 string marshalling, and
+         the &Method function pointers the Objective-C callbacks are registered with.
+         Both are what keep this layer free of marshalling stubs and rooted delegates,
+         which is what Native AOT wants. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Altim.Core\Altim.Core.csproj" />
+  </ItemGroup>
+
+  <!-- The menu bar icon is a template image: one monochrome glyph that the system
+       tints from the wallpaper behind it. Only that set is copied, because the dark
+       and light renderings the Windows tray picks between have no meaning here. On a
+       Windows build these seven files land in the same assets/icons folder the
+       Windows project writes to; the names do not collide, and nothing reads them. -->
+  <ItemGroup>
+    <None Include="..\..\assets\icons\altim-template-*.png">
+      <Link>assets\icons\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
   </ItemGroup>
 
 </Project>
