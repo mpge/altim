@@ -224,6 +224,20 @@ clicking the tray deactivates the panel and would immediately reopen it, so deac
 while the foreground window is the shell's tray window; Windows 11 hides new tray icons in the
 overflow by default, which first-run onboarding explains rather than tries to defeat.
 
+Two Windows details were established by measurement rather than documentation, and the code depends
+on them:
+
+- **Asking for the icon's rectangle does not fail while the icon sits in the overflow.** On
+  Windows 11 26200 it succeeds and returns the *chevron's* rectangle, which is geometrically
+  indistinguishable from a promoted icon. Altim therefore decides promotion from the shell's own
+  per-icon record plus a hit test against the flyout window, and reports no anchor when the icon is
+  hidden, so the panel falls to the next positioning tier instead of opening next to the chevron.
+- **A broadcast cannot reach a message-only window.** The icon lives on the message-only window as
+  intended, but Explorer's restart notice is a broadcast, so a second never-shown top-level window
+  receives it, owns the native menu (bringing a menu to the foreground needs a top-level owner) and
+  receives power-state notifications. Classic resume events do not cover modern standby, so display
+  state off→on is also treated as a wake, coalesced so one wake raises one event.
+
 Linux uses the X11 backend, including under Wayland via XWayland. Avalonia's Wayland backend is
 experimental and its positioning, topmost and activation calls are no-ops, and Wayland has no
 systray protocol at all.
@@ -258,6 +272,11 @@ on 2-core hosts.
 
 ## Risks
 
+1. **Windows notifications carry a deployment dependency.** The notification API needs the Windows
+   App Runtime. Framework-dependent registration failed on a clean machine because the runtime's
+   main package was absent, and the self-contained payload for the pinned version omits a resource
+   library that registration requires. Packaging must resolve this, and notification failure must
+   degrade to "Altim runs and does not notify", never to a failed start.
 1. **macOS interop is written without a macOS host to test on.** It is isolated behind `ITrayHost`
    with a documented fallback to Avalonia's tray icon plus a native menu, and is marked unverified
    until someone runs it.
