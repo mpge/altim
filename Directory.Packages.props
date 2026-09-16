@@ -27,6 +27,7 @@
   <!-- Windows only -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.Win32.SystemEvents" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
   </ItemGroup>
 
   <!-- Debug only -->
