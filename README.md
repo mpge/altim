@@ -53,3 +53,7 @@ Requirements and build instructions land with the first implementation milestone
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Support
+
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=000)](https://buymeacoffee.com/mpge)
