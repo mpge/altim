@@ -15,6 +15,35 @@ namespace Altim.Storage;
 /// </remarks>
 internal static class SettingTable
 {
+    /// <summary>
+    /// The synchronous sibling of <see cref="ReadAsync"/>, for callers that are already
+    /// running on a worker and would only be pretending by awaiting.
+    /// </summary>
+    internal static string? Read(SqliteConnection connection, string key)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM setting WHERE key = $key";
+        command.Parameters.AddWithValue("$key", key);
+
+        return command.ExecuteScalar() as string;
+    }
+
+    /// <summary>
+    /// The synchronous sibling of <see cref="WriteAsync"/>.
+    /// </summary>
+    internal static void Write(SqliteConnection connection, string key, string value)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO setting (key, value) VALUES ($key, $value)
+            ON CONFLICT (key) DO UPDATE SET value = excluded.value
+            """;
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$value", value);
+
+        _ = command.ExecuteNonQuery();
+    }
+
     internal static async ValueTask<string?> ReadAsync(SqliteConnection connection, string key,
                                                        CancellationToken ct)
     {

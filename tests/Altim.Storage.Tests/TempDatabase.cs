@@ -13,13 +13,14 @@ namespace Altim.Storage.Tests;
 /// </remarks>
 internal sealed class TempDatabase : IDisposable
 {
+    private static readonly string Root = Path.Combine(Path.GetTempPath(), "altim-storage-tests");
+
     private readonly string _directory;
     private AltimDatabase? _open;
 
     public TempDatabase()
     {
-        _directory = Path.Combine(Path.GetTempPath(), "altim-storage-tests",
-                                  Guid.NewGuid().ToString("n"));
+        _directory = Path.Combine(Root, Guid.NewGuid().ToString("n"));
         Directory.CreateDirectory(_directory);
         FilePath = Path.Combine(_directory, AltimDatabase.FileName);
     }
@@ -126,20 +127,54 @@ internal sealed class TempDatabase : IDisposable
     /// </summary>
     public long CountRows(string table) => ScalarInt64($"SELECT count(*) FROM {table}");
 
+    /// <summary>
+    /// Closes the database and deletes its directory.
+    /// </summary>
+    /// <exception cref="IOException">
+    /// The directory could not be removed, which on Windows means something still holds
+    /// a handle to the file. That is a leaked connection in the code under test, and it
+    /// fails the test that leaked it: swallowing it here is how a handle leak survives a
+    /// green suite forever.
+    /// </exception>
     public void Dispose()
     {
         Close();
 
+        Delete(_directory);
+
+        // The shared parent is emptied by whichever test finishes last; the others find
+        // it still occupied, which is not their problem.
         try
         {
-            Directory.Delete(_directory, recursive: true);
+            Directory.Delete(Root);
         }
         catch (IOException)
         {
-            // A temporary directory that outlives one test run is not a test failure.
         }
         catch (UnauthorizedAccessException)
         {
+        }
+    }
+
+    /// <summary>
+    /// Deletes the directory, retrying briefly. Windows releases a closed file handle
+    /// asynchronously often enough that one attempt would be flaky, and a retry loop
+    /// that ends in a throw still fails on a genuine leak.
+    /// </summary>
+    private static void Delete(string directory)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+                return;
+            }
+            catch (Exception error) when (attempt < 10 && error is IOException
+                                          or UnauthorizedAccessException)
+            {
+                Thread.Sleep(50);
+            }
         }
     }
 

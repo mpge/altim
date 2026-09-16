@@ -13,12 +13,20 @@ namespace Altim.Storage;
 /// A reading is stored only when it differs from the last row for that provider and
 /// metric, so an idle machine adds nothing to the file for as long as it stays idle.
 /// That is what keeps the database inside its size budget without a background job.
+/// It also means an empty range is not an empty history: see
+/// <see cref="GetLatestBeforeAsync"/>.
 /// </para>
 /// <para>
 /// Unknown stays unknown: a metric the provider did not report, or reported
 /// implausibly, is written as NULL and read back as <see langword="null"/>, never as
 /// zero. Nothing but numbers, timestamps and the provider and metric identifiers is
 /// written; no project name, prompt, command or path reaches this layer at all.
+/// </para>
+/// <para>
+/// Microsoft.Data.Sqlite runs every statement inline, so an <c>async</c> signature here
+/// buys nothing by itself. The two read methods and their callers can be looking at
+/// thirty days of rows, so they are moved onto a worker; <see cref="RecordAsync"/> is a
+/// handful of single-row statements and stays on the calling thread.
 /// </para>
 /// </remarks>
 public sealed class SqliteUsageHistoryService : IUsageHistoryService
@@ -57,11 +65,25 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// A reading in <see cref="ProviderStatus.Error"/> is not recorded at all. Its
+    /// metrics are unavailable rather than zero or null-because-measured, and writing
+    /// them would turn a transient read failure into a hole in the history that later
+    /// reads cannot tell apart from a genuine drop to nothing. This matches what
+    /// <c>UsageAggregator</c> and <c>ThresholdEvaluator</c> do with the same reading.
+    /// </para>
+    /// <para>
+    /// Runs on the calling thread: one short lookup and at most one insert per metric,
+    /// inside one transaction. It is called from the monitoring scheduler, which is
+    /// already off the UI thread.
+    /// </para>
+    /// </remarks>
     public async ValueTask RecordAsync(ProviderUsage usage, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(usage);
 
-        if (usage.Metrics.Count == 0)
+        if (usage.Status == ProviderStatus.Error || usage.Metrics.Count == 0)
         {
             return;
         }
@@ -75,6 +97,11 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
 
         foreach (UsageMetric metric in usage.Metrics)
         {
+            // Known and deliberately not fixed yet: the token totals belong to the
+            // reading, not to the metric, so an hour in which one metric moves writes the
+            // same token counts onto every metric's row. Revisit once real growth has
+            // been measured against the 5MB/year budget; splitting them into their own
+            // table is a migration, not a tidy-up.
             SampleValues candidate = ToValues(metric, usage.Tokens);
             SampleValues? previous = await ReadLatestAsync(connection, usage.ProviderId, metric.Key, ct)
                 .ConfigureAwait(false);
@@ -95,13 +122,57 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Runs on a worker: a 30-day range is the case this exists for, and the dashboard
+    /// asks for one from the UI thread.
+    /// </remarks>
     public async ValueTask<IReadOnlyList<UsageSample>> GetRangeAsync(
         string providerId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrEmpty(providerId);
 
-        List<UsageSample> samples = [];
+        long fromSeconds = from.ToUnixTimeSeconds();
+        long toSeconds = to.ToUnixTimeSeconds();
 
+        return await Task.Run(() => ReadRange(providerId, fromSeconds, toSeconds, ct), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Runs on a worker. The lookup is one row per metric, but it reaches back past the
+    /// retention boundary on a file that may hold a year of history.
+    /// </remarks>
+    public async ValueTask<IReadOnlyList<UsageSample>> GetLatestBeforeAsync(
+        string providerId, DateTimeOffset at, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(providerId);
+
+        long atSeconds = at.ToUnixTimeSeconds();
+
+        return await Task.Run(() => ReadLatestBefore(providerId, atSeconds, ct), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Runs on the calling thread: one statement, behind the write gate. Reclaiming the
+    /// space it frees is <see cref="UsageRetention.VacuumAsync"/>, which does not.
+    /// </remarks>
+    public async ValueTask ClearAsync(CancellationToken ct)
+    {
+        using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
+
+        using SqliteCommand command = lease.Connection.CreateCommand();
+
+        // History only. Settings and notification state are not history and survive this.
+        command.CommandText = "DELETE FROM usage_sample";
+        _ = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private IReadOnlyList<UsageSample> ReadRange(string providerId, long from, long to,
+                                                 CancellationToken ct)
+    {
         using SqliteConnection connection = _database.OpenRead();
         using SqliteCommand command = connection.CreateCommand();
 
@@ -114,28 +185,51 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
             ORDER BY captured_at, id
             """;
         command.Parameters.AddWithValue("$provider", providerId);
-        command.Parameters.AddWithValue("$from", from.ToUnixTimeSeconds());
-        command.Parameters.AddWithValue("$to", to.ToUnixTimeSeconds());
+        command.Parameters.AddWithValue("$from", from);
+        command.Parameters.AddWithValue("$to", to);
 
-        await using DbDataReader reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        return ReadSamples(command, ct);
+    }
+
+    private IReadOnlyList<UsageSample> ReadLatestBefore(string providerId, long at,
+                                                        CancellationToken ct)
+    {
+        using SqliteConnection connection = _database.OpenRead();
+        using SqliteCommand command = connection.CreateCommand();
+
+        // Strictly before, and one row per metric: the newest row wins, with the larger
+        // id breaking a tie between two rows stamped the same second, which is the same
+        // order the "has this moved?" lookup uses.
+        command.CommandText = $"""
+            SELECT {SampleColumns}
+            FROM (
+                SELECT {SampleColumns},
+                       ROW_NUMBER() OVER (PARTITION BY metric_key
+                                          ORDER BY captured_at DESC, id DESC) AS recency
+                FROM usage_sample
+                WHERE provider_id = $provider AND captured_at < $at
+            )
+            WHERE recency = 1
+            ORDER BY metric_key
+            """;
+        command.Parameters.AddWithValue("$provider", providerId);
+        command.Parameters.AddWithValue("$at", at);
+
+        return ReadSamples(command, ct);
+    }
+
+    private static List<UsageSample> ReadSamples(SqliteCommand command, CancellationToken ct)
+    {
+        List<UsageSample> samples = [];
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
         {
+            ct.ThrowIfCancellationRequested();
             samples.Add(ReadSample(reader));
         }
 
         return samples;
-    }
-
-    /// <inheritdoc />
-    public async ValueTask ClearAsync(CancellationToken ct)
-    {
-        using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
-
-        using SqliteCommand command = lease.Connection.CreateCommand();
-
-        // History only. Settings and notification state are not history and survive this.
-        command.CommandText = "DELETE FROM usage_sample";
-        _ = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     private static SampleValues ToValues(UsageMetric metric, TokenTotals? tokens)

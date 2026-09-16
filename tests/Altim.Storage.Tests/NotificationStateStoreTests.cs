@@ -159,6 +159,58 @@ public sealed class NotificationStateStoreTests
         Assert.Empty((await store.LoadThresholdStateAsync(Ct)).Fired);
     }
 
+    [Fact]
+    public async Task ARowWithAThresholdThatIsNotAPercentageIsIgnoredRatherThanFatal()
+    {
+        using var temp = new TempDatabase();
+        var store = new NotificationStateStore(temp.Open());
+
+        await store.RecordAsync(new NotificationState("claude", "five_hour", 80, Now, Now.AddHours(3)),
+                                Ct);
+
+        // Hand-edited, or written by something that is not Altim. A threshold that is not
+        // a whole percentage cannot have fired, and reading it must not stop the rest of
+        // the table being read — the settings store tolerates nonsense the same way.
+        temp.Execute($"""
+            INSERT INTO notification_state
+                (provider_id, metric_key, threshold, fired_at, window_resets_at)
+            VALUES
+                ('claude', 'seven_day', 'high', {Now.ToUnixTimeSeconds()}, NULL),
+                ('claude', 'seven_day', 10000000000, {Now.ToUnixTimeSeconds()}, NULL),
+                ('codex', 'codex:10080', 0, {Now.ToUnixTimeSeconds()}, NULL),
+                ('codex', 'codex:60', 80, 'yesterday', NULL);
+            """);
+
+        NotificationState usable = Assert.Single(await store.GetAllAsync(Ct));
+
+        Assert.Equal(80, usable.Threshold);
+        Assert.Equal("five_hour", usable.MetricKey);
+        Assert.Empty(await store.GetAsync("claude", "seven_day", Ct));
+
+        // Ignored, not deleted: clearing still reaches them.
+        Assert.Equal(5L, temp.CountRows("notification_state"));
+        Assert.Equal(2, await store.ClearMetricAsync("claude", "seven_day", Ct));
+    }
+
+    [Fact]
+    public async Task ARowWithAnUnusableResetInstantStillLoads()
+    {
+        using var temp = new TempDatabase();
+        var store = new NotificationStateStore(temp.Open());
+
+        temp.Execute($"""
+            INSERT INTO notification_state
+                (provider_id, metric_key, threshold, fired_at, window_resets_at)
+            VALUES ('claude', 'five_hour', 80, {Now.ToUnixTimeSeconds()}, 9223372036854775807);
+            """);
+
+        NotificationState stored = Assert.Single(await store.GetAllAsync(Ct));
+
+        // An instant that cannot exist is not an instant. The firing is still known.
+        Assert.Null(stored.WindowResetsAt);
+        Assert.Equal(Now, stored.FiredAt);
+    }
+
     private static async Task Seed(NotificationStateStore store)
     {
         await store.RecordAsync(new NotificationState("claude", "five_hour", 80, Now, Now.AddHours(3)),

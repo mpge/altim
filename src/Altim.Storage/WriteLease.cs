@@ -9,7 +9,9 @@ namespace Altim.Storage;
 /// <remarks>
 /// The lease does not own the connection and never closes it. Disposing twice is
 /// harmless; never disposing starves the next writer, which is why every use site is a
-/// <c>using</c> declaration.
+/// <c>using</c> declaration. Disposing after the database itself has been disposed is
+/// harmless too: the release is swallowed rather than allowed to throw over whatever
+/// the caller was already dealing with.
 /// </remarks>
 public sealed class WriteLease : IDisposable
 {

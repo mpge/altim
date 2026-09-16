@@ -1,3 +1,4 @@
+using System.Globalization;
 using Xunit;
 
 namespace Altim.Storage.Tests;
@@ -39,7 +40,7 @@ public sealed class UsageRetentionTests
     }
 
     [Fact]
-    public async Task TheHourlyRowKeepsTheHighestPercentageAndTheSummedTokens()
+    public async Task TheHourlyRowKeepsThePeakPercentageAndTheEndOfHourCounters()
     {
         using var temp = new TempDatabase();
         var retention = new UsageRetention(temp.Open());
@@ -49,10 +50,112 @@ public sealed class UsageRetentionTests
 
         string row = $"FROM usage_sample WHERE captured_at = {Bucket} AND metric_key = 'five_hour'";
 
+        // The peak is what old history is for.
         Assert.Equal(55d, temp.ScalarDouble($"SELECT used_percent {row}"));
-        Assert.Equal(6L, temp.ScalarInt64($"SELECT input_tokens {row}"));
+
+        // The tokens are a running total, not the work done since the row before, so the
+        // hour keeps the last reading of the counter. Summing them (1 + 2 + 3 + 4 = 10)
+        // would invent six thousand tokens that were never used.
+        Assert.Equal(4L, temp.ScalarInt64($"SELECT input_tokens {row}"));
+        Assert.Equal(1L, temp.ScalarInt64($"SELECT output_tokens {row}"));
+
+        // The window and its reset come from the same row as the counters, so the reset
+        // instant still belongs to the window the numbers were read in.
         Assert.Equal(300L, temp.ScalarInt64($"SELECT window_minutes {row}"));
         Assert.Equal(Bucket + 7_200, temp.ScalarInt64($"SELECT resets_at {row}"));
+    }
+
+    [Fact]
+    public async Task ACounterThatResetsMidHourKeepsThePostResetValue()
+    {
+        using var temp = new TempDatabase();
+        var retention = new UsageRetention(temp.Open());
+
+        // A limit window rolls over inside the hour: the counter drops back and starts
+        // again. What the user has used at the end of that hour is 120, not the 2_720 a
+        // sum would report.
+        temp.Execute($"""
+            INSERT INTO usage_sample
+                (provider_id, metric_key, captured_at, used_percent, window_minutes, resets_at,
+                 input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+            VALUES
+                ('claude', 'five_hour', {Bucket + 60},  80, 300, {Bucket + 600},   900, 800, NULL, NULL),
+                ('claude', 'five_hour', {Bucket + 300}, 95, 300, {Bucket + 600},   1700, 1500, NULL, NULL),
+                ('claude', 'five_hour', {Bucket + 900}, 5,  300, {Bucket + 18600}, 120, 90, NULL, NULL);
+            """);
+
+        _ = await retention.DownsampleAsync(Now, TimeSpan.FromDays(30), Ct);
+
+        string row = $"FROM usage_sample WHERE captured_at = {Bucket} AND metric_key = 'five_hour'";
+
+        Assert.Equal(95d, temp.ScalarDouble($"SELECT used_percent {row}"));
+        Assert.Equal(120L, temp.ScalarInt64($"SELECT input_tokens {row}"));
+        Assert.Equal(90L, temp.ScalarInt64($"SELECT output_tokens {row}"));
+        Assert.Equal(Bucket + 18_600, temp.ScalarInt64($"SELECT resets_at {row}"));
+    }
+
+    [Fact]
+    public async Task AnHourNobodyReportedAPercentageForCollapsesToNullNotZero()
+    {
+        using var temp = new TempDatabase();
+        var retention = new UsageRetention(temp.Open());
+
+        temp.Execute($"""
+            INSERT INTO usage_sample
+                (provider_id, metric_key, captured_at, used_percent, window_minutes, resets_at,
+                 input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+            VALUES
+                ('codex', 'codex:10080', {Bucket + 60},  NULL, 10080, NULL, 5, NULL, NULL, NULL),
+                ('codex', 'codex:10080', {Bucket + 120}, NULL, 10080, NULL, 8, NULL, NULL, NULL);
+            """);
+
+        _ = await retention.DownsampleAsync(Now, TimeSpan.FromDays(30), Ct);
+
+        Assert.Equal(DBNull.Value, temp.Scalar(
+            $"SELECT used_percent FROM usage_sample WHERE captured_at = {Bucket}"));
+        Assert.Equal(8L, temp.ScalarInt64(
+            $"SELECT input_tokens FROM usage_sample WHERE captured_at = {Bucket}"));
+    }
+
+    [Fact]
+    public async Task AnHourStraddlingTheCutoffCollapsesOnlyTheOldHalf()
+    {
+        using var temp = new TempDatabase();
+        var retention = new UsageRetention(temp.Open());
+
+        // A retention window that does not land on the hour, so one bucket has rows on
+        // both sides of the cutoff. Rows younger than the cutoff are not old history yet.
+        TimeSpan retentionWindow = TimeSpan.FromDays(30) - TimeSpan.FromMinutes(30);
+        long cutoff = Now.Subtract(retentionWindow).ToUnixTimeSeconds();
+        long straddled = cutoff / 3_600 * 3_600;
+
+        temp.Execute($"""
+            INSERT INTO usage_sample
+                (provider_id, metric_key, captured_at, used_percent, window_minutes, resets_at,
+                 input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+            VALUES
+                ('claude', 'five_hour', {straddled + 60},  10, 300, NULL, 1, NULL, NULL, NULL),
+                ('claude', 'five_hour', {straddled + 120}, 20, 300, NULL, 2, NULL, NULL, NULL),
+                ('claude', 'five_hour', {cutoff + 60},     30, 300, NULL, 3, NULL, NULL, NULL),
+                ('claude', 'five_hour', {cutoff + 120},    40, 300, NULL, 4, NULL, NULL, NULL);
+            """);
+
+        RetentionResult result = await retention.DownsampleAsync(Now, retentionWindow, Ct);
+
+        Assert.Equal(2, result.CollapsedRows);
+        Assert.Equal(1, result.RetainedRows);
+
+        // The two rows on the young side of the cutoff are full-resolution history and
+        // are still there, at full resolution.
+        Assert.Equal(20d, temp.ScalarDouble(
+            $"SELECT used_percent FROM usage_sample WHERE captured_at = {straddled}"));
+        Assert.Equal(2L, temp.ScalarInt64(
+            $"SELECT input_tokens FROM usage_sample WHERE captured_at = {straddled}"));
+        Assert.Equal(30d, temp.ScalarDouble(
+            $"SELECT used_percent FROM usage_sample WHERE captured_at = {cutoff + 60}"));
+        Assert.Equal(40d, temp.ScalarDouble(
+            $"SELECT used_percent FROM usage_sample WHERE captured_at = {cutoff + 120}"));
+        Assert.Equal(3L, temp.CountRows("usage_sample"));
     }
 
     [Fact]
@@ -158,6 +261,52 @@ public sealed class UsageRetentionTests
     }
 
     [Fact]
+    public async Task ACompactionMarkerDatedInTheFutureIsReplacedRatherThanTrusted()
+    {
+        using var temp = new TempDatabase();
+        AltimDatabase database = temp.Open();
+        var retention = new UsageRetention(database);
+        var settings = new SqliteSettingsStore(database);
+        TimeSpan interval = TimeSpan.FromDays(30);
+
+        // A clock that was wrong once — a bad system time, a restore from another
+        // machine — must not defer compaction for as long as the marker says.
+        await settings.SetValueAsync(UsageRetention.LastVacuumKey,
+                                     Now.AddYears(5).ToUnixTimeSeconds().ToString(
+                                         CultureInfo.InvariantCulture), Ct);
+
+        Assert.False(await retention.VacuumIfDueAsync(Now, interval, Ct));
+        Assert.Equal("1777636800", await settings.GetValueAsync(UsageRetention.LastVacuumKey, Ct));
+
+        // And the clock it restarted is a real one.
+        Assert.True(await retention.VacuumIfDueAsync(Now.AddDays(31), interval, Ct));
+    }
+
+    [Fact]
+    public async Task MaintenanceDoesNotRunOnTheCallingThread()
+    {
+        using var temp = new TempDatabase();
+        AltimDatabase database = temp.Open();
+        var retention = new UsageRetention(database);
+
+        Arrange(temp);
+
+        // Collapsing a month of history and rewriting the whole file are the two heaviest
+        // things Altim does to its database.
+        ValueTask<RetentionResult> downsampling = retention.DownsampleAsync(Now, Ct);
+        Assert.False(downsampling.IsCompleted);
+        _ = await downsampling;
+
+        ValueTask compacting = retention.VacuumAsync(Ct);
+        Assert.False(compacting.IsCompleted);
+        await compacting;
+
+        ValueTask<bool> due = retention.VacuumIfDueAsync(Now, TimeSpan.FromDays(30), Ct);
+        Assert.False(due.IsCompleted);
+        _ = await due;
+    }
+
+    [Fact]
     public async Task CompactingOnDemandKeepsEveryRow()
     {
         using var temp = new TempDatabase();
@@ -188,7 +337,7 @@ public sealed class UsageRetentionTests
                 ('claude', 'five_hour',  {Bucket + 60},  10,   300, {Bucket + 3600}, 1, 1, NULL, NULL),
                 ('claude', 'five_hour',  {Bucket + 120}, 55,   300, {Bucket + 3600}, 2, 1, NULL, NULL),
                 ('claude', 'five_hour',  {Bucket + 180}, 30,   300, {Bucket + 7200}, 3, 1, NULL, NULL),
-                ('claude', 'five_hour',  {Bucket + 240}, NULL, 300, {Bucket + 7200}, NULL, NULL, NULL, NULL),
+                ('claude', 'five_hour',  {Bucket + 240}, NULL, 300, {Bucket + 7200}, 4, 1, NULL, NULL),
                 ('claude', 'seven_day',  {Bucket + 60},  90,   10080, NULL, 7, NULL, NULL, NULL),
                 ('claude', 'five_hour',  {AlreadyCollapsed}, 5, 300, NULL, 9, NULL, NULL, NULL),
                 ('claude', 'five_hour',  {recent}, 77, 300, NULL, 100, NULL, NULL, NULL);

@@ -114,14 +114,25 @@ public sealed class SqliteSettingsStoreTests
     }
 
     [Fact]
-    public async Task AnOutOfRangeThresholdIsNotWrittenBackEither()
+    public async Task AnOutOfRangeThresholdNeverReachesTheFile()
     {
         using var temp = new TempDatabase();
         var store = new SqliteSettingsStore(temp.Open());
 
-        await store.SaveAsync(AltimSettings.Default with { SessionThresholdPercent = 0 }, Ct);
+        await store.SaveAsync(
+            AltimSettings.Default with { SessionThresholdPercent = 0, WeeklyThresholdPercent = 140 },
+            Ct);
 
-        Assert.Equal("80", await store.GetValueAsync(SqliteSettingsStore.Keys.SessionThreshold, Ct));
+        // Two guards, one outcome: the record clamps into range on the way in and the
+        // store refuses to write anything outside it, so whatever was asked for, the
+        // file holds a percentage that means something.
+        Assert.Equal("1", await store.GetValueAsync(SqliteSettingsStore.Keys.SessionThreshold, Ct));
+        Assert.Equal("100", await store.GetValueAsync(SqliteSettingsStore.Keys.WeeklyThreshold, Ct));
+
+        AltimSettings stored = await store.GetAsync(Ct);
+
+        Assert.Equal(AltimSettings.MinimumThresholdPercent, stored.SessionThresholdPercent);
+        Assert.Equal(AltimSettings.MaximumThresholdPercent, stored.WeeklyThresholdPercent);
     }
 
     [Fact]

@@ -8,4 +8,10 @@
     <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>
 
+  <!-- The migration ladder is internal: one rung cannot prove a ladder climbs in order,
+       so the tests build ladders of their own and run them through the real code. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Altim.Storage.Tests" />
+  </ItemGroup>
+
 </Project>

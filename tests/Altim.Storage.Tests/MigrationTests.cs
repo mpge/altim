@@ -12,6 +12,13 @@ public sealed class MigrationTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    /// <summary>
+    /// The version table a test ladder's first rung has to create, exactly as the real
+    /// first rung does: the ladder records where it has got to inside the database it is
+    /// building, so rung 1 owns that table.
+    /// </summary>
+    private const string VersionTable = "CREATE TABLE schema_version (version INTEGER NOT NULL);";
+
     [Fact]
     public void ACreatedDatabaseIsAtTheCurrentSchemaVersion()
     {
@@ -95,6 +102,202 @@ public sealed class MigrationTests
     }
 
     [Fact]
+    public void ASchemaVersionThatIsNotAWholeNumberIsRefused()
+    {
+        using var temp = new TempDatabase();
+        _ = temp.Open();
+        temp.Close();
+
+        // SQLite stores what it is given: an INTEGER column holds "one" happily, and a
+        // typed read of it comes back as 0, which is what an empty file looks like.
+        temp.Execute("UPDATE schema_version SET version = 'one'");
+
+        AltimSchemaException error = Assert.Throws<AltimSchemaException>(() => temp.Open());
+
+        // Refused means untouched: the nonsense is still there and so are the tables.
+        Assert.Null(error.FoundVersion);
+        Assert.Equal("one", Assert.IsType<string>(temp.Scalar("SELECT version FROM schema_version")));
+        Assert.Equal(1L, temp.ScalarInt64(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'usage_sample'"));
+    }
+
+    [Fact]
+    public void ASchemaVersionOfZeroIsRefusedRatherThanReAppliedOverTheTables()
+    {
+        using var temp = new TempDatabase();
+        _ = temp.Open();
+        temp.Close();
+
+        temp.Execute("UPDATE schema_version SET version = 0");
+
+        _ = Assert.Throws<AltimSchemaException>(() => temp.Open());
+    }
+
+    [Fact]
+    public void ARungAppliedByAnotherInstanceMidOpenIsSkippedRatherThanRepeated()
+    {
+        using var temp = new TempDatabase();
+
+        Migrations.Migration[] ladder =
+        [
+            new Migrations.Migration(1, VersionTable + "CREATE TABLE first (x INTEGER);"),
+            new Migrations.Migration(2, "CREATE TABLE second (x INTEGER);"),
+        ];
+
+        using SqliteConnection slow = OpenRaw(temp.FilePath);
+
+        // The other instance: it climbs the whole ladder in the gap between this one
+        // reading the version and opening its first rung's transaction.
+        bool raced = false;
+        void Race()
+        {
+            if (raced)
+            {
+                return;
+            }
+
+            raced = true;
+
+            using SqliteConnection fast = OpenRaw(temp.FilePath);
+            Assert.Equal(2, Migrations.Apply(fast, ladder));
+        }
+
+        Assert.Equal(2, Migrations.Apply(slow, ladder, Race));
+
+        Assert.True(raced);
+        Assert.Equal(2L, ScalarInt64(slow, "SELECT version FROM schema_version"));
+        Assert.Equal(1L, ScalarInt64(slow, "SELECT count(*) FROM schema_version"));
+    }
+
+    [Fact]
+    public void SeveralInstancesStartingAtOnceAllOpenTheSameDatabase()
+    {
+        using var temp = new TempDatabase();
+
+        const int Instances = 4;
+
+        // Real threads and a barrier: the point is that they are inside Open at the same
+        // moment, which a thread pool is free not to arrange.
+        using var start = new Barrier(Instances);
+        var opened = new AltimDatabase?[Instances];
+        var failed = new Exception?[Instances];
+
+        var instances = new Thread[Instances];
+        for (int index = 0; index < Instances; index++)
+        {
+            int slot = index;
+            instances[slot] = new Thread(() =>
+            {
+                start.SignalAndWait();
+
+                try
+                {
+                    opened[slot] = AltimDatabase.Open(temp.FilePath);
+                }
+                catch (Exception error)
+                {
+                    failed[slot] = error;
+                }
+            })
+            {
+                IsBackground = true,
+                Name = $"altim-instance-{slot}",
+            };
+
+            instances[slot].Start();
+        }
+
+        try
+        {
+            foreach (Thread instance in instances)
+            {
+                Assert.True(instance.Join(TimeSpan.FromSeconds(60)), "an instance never finished");
+            }
+
+            Assert.All(failed, Assert.Null);
+            Assert.All(opened, instance => Assert.Equal(SqliteSchema.CurrentVersion,
+                                                        Assert.IsType<AltimDatabase>(instance)
+                                                              .SchemaVersion));
+
+            Assert.Equal(1L, temp.CountRows("schema_version"));
+            Assert.Equal((long)SqliteSchema.CurrentVersion,
+                         temp.ScalarInt64("SELECT version FROM schema_version"));
+        }
+        finally
+        {
+            foreach (AltimDatabase? instance in opened)
+            {
+                instance?.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public void RungsAtOrBelowTheCurrentVersionAreSkipped()
+    {
+        using var temp = new TempDatabase();
+        using SqliteConnection connection = OpenRaw(temp.FilePath);
+
+        Assert.Equal(1, Migrations.Apply(connection,
+                                         [new Migrations.Migration(1, VersionTable + "CREATE TABLE first (x);")]));
+
+        // Rung 1 would fail outright if it ran again, which is the point: it must not.
+        Migrations.Migration[] longer =
+        [
+            new Migrations.Migration(1, VersionTable + "CREATE TABLE first (x);"),
+            new Migrations.Migration(2, "CREATE TABLE second (x);"),
+        ];
+
+        Assert.Equal(2, Migrations.Apply(connection, longer));
+        Assert.Equal(2, Migrations.ReadVersion(connection));
+    }
+
+    [Fact]
+    public void HigherRungsApplyInOrder()
+    {
+        using var temp = new TempDatabase();
+        using SqliteConnection connection = OpenRaw(temp.FilePath);
+
+        // Rung 2 and rung 3 only work if rung 1, then rung 2, have already run.
+        Migrations.Migration[] ladder =
+        [
+            new Migrations.Migration(1, VersionTable + "CREATE TABLE climbed (step INTEGER);"),
+            new Migrations.Migration(2, "ALTER TABLE climbed ADD COLUMN second TEXT;"),
+            new Migrations.Migration(3, "INSERT INTO climbed (step, second) VALUES (3, 'done');"),
+        ];
+
+        Assert.Equal(3, Migrations.Apply(connection, ladder));
+
+        Assert.Equal(3, Migrations.ReadVersion(connection));
+        Assert.Equal("done", Assert.IsType<string>(
+            Scalar(connection, "SELECT second FROM climbed WHERE step = 3")));
+    }
+
+    [Fact]
+    public void ARungThatFailsAfterItsDdlLeavesTheDatabaseAtThePreviousRung()
+    {
+        using var temp = new TempDatabase();
+        using SqliteConnection connection = OpenRaw(temp.FilePath);
+
+        Migrations.Migration[] ladder =
+        [
+            new Migrations.Migration(1, VersionTable + "CREATE TABLE settled (x INTEGER);"),
+            new Migrations.Migration(2, """
+                CREATE TABLE halfway (x INTEGER NOT NULL);
+                INSERT INTO halfway (x) VALUES (NULL);
+                """),
+        ];
+
+        _ = Assert.Throws<SqliteException>(() => Migrations.Apply(connection, ladder));
+
+        Assert.Equal(1, Migrations.ReadVersion(connection));
+        Assert.Equal(1L, ScalarInt64(connection,
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'settled'"));
+        Assert.Equal(0L, ScalarInt64(connection,
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'halfway'"));
+    }
+
+    [Fact]
     public void AnEmptyFileIsReportedAsVersionZero()
     {
         using var temp = new TempDatabase();
@@ -122,12 +325,22 @@ public sealed class MigrationTests
         Assert.Equal(1L, Assert.IsType<long>(keys.ExecuteScalar()));
     }
 
+    private static object? Scalar(SqliteConnection connection, string sql)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        return command.ExecuteScalar();
+    }
+
+    private static long ScalarInt64(SqliteConnection connection, string sql)
+        => Assert.IsType<long>(Scalar(connection, sql));
+
     private static SqliteConnection OpenRaw(string path)
     {
         var builder = new SqliteConnectionStringBuilder
         {
             DataSource = path,
-            Mode = SqliteOpenMode.ReadWrite,
+            Mode = SqliteOpenMode.ReadWriteCreate,
             Pooling = false,
         };
 

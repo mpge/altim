@@ -17,10 +17,19 @@ namespace Altim.Storage;
 /// rows.
 /// </para>
 /// <para>
-/// In each bucket the percentage kept is the maximum, because the point of old history
-/// is how close to the limit the user came, and token counts are summed, because they
-/// are deltas of work done. The window length and reset instant kept are the largest in
-/// the bucket, which is the latest window the hour saw.
+/// What survives the collapse is chosen per column, because the columns mean different
+/// things. The percentage kept is the <em>maximum</em>, because the point of old history
+/// is how close to the limit the user came. Everything else — the token counters, the
+/// window length and the reset instant — is taken from the <em>last</em> row in the
+/// bucket, the one with the greatest <c>captured_at</c>. Token columns hold a provider's
+/// running total, not the work done since the previous row, so summing them multiplies
+/// the same total by however many times it was observed; taking the last row reads a
+/// counter as its end-of-hour value, survives a counter that resets mid-hour, and keeps
+/// the reset instant attached to the window it was actually reported with.
+/// </para>
+/// <para>
+/// Both operations here rewrite large parts of the file, so both run on a worker rather
+/// than on the thread that asks for them.
 /// </para>
 /// </remarks>
 public sealed class UsageRetention
@@ -74,6 +83,10 @@ public sealed class UsageRetention
     /// <param name="retention">How much full-resolution history to keep.</param>
     /// <param name="ct">Cancels the work.</param>
     /// <returns>What the run changed.</returns>
+    /// <remarks>
+    /// Real work, on a worker: this reads, deletes and rewrites every row older than the
+    /// retention window.
+    /// </remarks>
     public async ValueTask<RetentionResult> DownsampleAsync(DateTimeOffset now, TimeSpan retention,
                                                             CancellationToken ct)
     {
@@ -84,22 +97,7 @@ public sealed class UsageRetention
         using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
         SqliteConnection connection = lease.Connection;
 
-        try
-        {
-            using SqliteTransaction transaction = connection.BeginTransaction();
-
-            await BuildBucketsAsync(connection, cutoff, ct).ConfigureAwait(false);
-            int collapsed = await DeleteCollapsedAsync(connection, cutoff, ct).ConfigureAwait(false);
-            int written = await InsertBucketsAsync(connection, ct).ConfigureAwait(false);
-
-            transaction.Commit();
-
-            return new RetentionResult(collapsed, written);
-        }
-        finally
-        {
-            await DropBucketsAsync(connection, CancellationToken.None).ConfigureAwait(false);
-        }
+        return await Task.Run(() => Downsample(connection, cutoff, ct), ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -112,6 +110,10 @@ public sealed class UsageRetention
     /// True when the file was compacted. The very first call on a database never
     /// compacts: there is nothing to reclaim yet, so it only starts the clock.
     /// </returns>
+    /// <remarks>
+    /// Real work, on a worker, whenever it decides a compaction is due: VACUUM rewrites
+    /// the whole file.
+    /// </remarks>
     public async ValueTask<bool> VacuumIfDueAsync(DateTimeOffset now, TimeSpan minimumInterval,
                                                    CancellationToken ct)
     {
@@ -120,19 +122,68 @@ public sealed class UsageRetention
         using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
         SqliteConnection connection = lease.Connection;
 
-        string? recorded = await SettingTable.ReadAsync(connection, LastVacuumKey, ct)
+        return await Task.Run(() => VacuumIfDue(connection, now, minimumInterval, ct), ct)
             .ConfigureAwait(false);
+    }
 
+    /// <summary>
+    /// Compacts the file now, whatever the schedule says. Offered for the moment after
+    /// the user clears their history, when the reclaimed space is the point.
+    /// </summary>
+    /// <param name="ct">Cancels the work.</param>
+    /// <remarks>
+    /// Real work, on a worker: VACUUM rewrites the whole file.
+    /// </remarks>
+    public async ValueTask VacuumAsync(CancellationToken ct)
+    {
+        using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
+        SqliteConnection connection = lease.Connection;
+
+        await Task.Run(() => Vacuum(connection), ct).ConfigureAwait(false);
+    }
+
+    private static RetentionResult Downsample(SqliteConnection connection, long cutoff,
+                                              CancellationToken ct)
+    {
+        try
+        {
+            using SqliteTransaction transaction = connection.BeginTransaction();
+
+            BuildBuckets(connection, cutoff);
+            ct.ThrowIfCancellationRequested();
+
+            int collapsed = DeleteCollapsed(connection, cutoff);
+            ct.ThrowIfCancellationRequested();
+
+            int written = InsertBuckets(connection);
+
+            transaction.Commit();
+
+            return new RetentionResult(collapsed, written);
+        }
+        finally
+        {
+            DropBuckets(connection);
+        }
+    }
+
+    private static bool VacuumIfDue(SqliteConnection connection, DateTimeOffset now,
+                                    TimeSpan minimumInterval, CancellationToken ct)
+    {
+        string? recorded = SettingTable.Read(connection, LastVacuumKey);
         long nowSeconds = now.ToUnixTimeSeconds();
 
         // No usable marker: a database nobody has compacted yet has nothing to reclaim,
         // so this call only starts the clock. A marker edited into nonsense is treated
-        // the same way rather than triggering a rewrite of the whole file.
+        // the same way rather than triggering a rewrite of the whole file, and so is a
+        // marker dated in the future — a clock that was wrong once must not defer
+        // compaction until it is right again.
         if (recorded is null
             || !long.TryParse(recorded, NumberStyles.Integer, CultureInfo.InvariantCulture,
-                              out long last))
+                              out long last)
+            || last > nowSeconds)
         {
-            await RecordVacuumAsync(connection, nowSeconds, ct).ConfigureAwait(false);
+            RecordVacuum(connection, nowSeconds);
             return false;
         }
 
@@ -143,65 +194,100 @@ public sealed class UsageRetention
             return false;
         }
 
-        await VacuumCoreAsync(connection, ct).ConfigureAwait(false);
-        await RecordVacuumAsync(connection, nowSeconds, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+
+        Vacuum(connection);
+        RecordVacuum(connection, nowSeconds);
         return true;
     }
 
-    /// <summary>
-    /// Compacts the file now, whatever the schedule says. Offered for the moment after
-    /// the user clears their history, when the reclaimed space is the point.
-    /// </summary>
-    /// <param name="ct">Cancels the work.</param>
-    public async ValueTask VacuumAsync(CancellationToken ct)
-    {
-        using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
-        await VacuumCoreAsync(lease.Connection, ct).ConfigureAwait(false);
-    }
+    private static void RecordVacuum(SqliteConnection connection, long nowSeconds)
+        => SettingTable.Write(connection, LastVacuumKey,
+                              nowSeconds.ToString(CultureInfo.InvariantCulture));
 
-    private static ValueTask RecordVacuumAsync(SqliteConnection connection, long nowSeconds,
-                                               CancellationToken ct)
-        => SettingTable.WriteAsync(connection, LastVacuumKey,
-                                   nowSeconds.ToString(CultureInfo.InvariantCulture), ct);
-
-    private static async ValueTask VacuumCoreAsync(SqliteConnection connection, CancellationToken ct)
+    private static void Vacuum(SqliteConnection connection)
     {
         // VACUUM cannot run inside a transaction, so it runs on the bare connection.
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "VACUUM";
-        _ = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        _ = command.ExecuteNonQuery();
     }
 
-    private static async ValueTask BuildBucketsAsync(SqliteConnection connection, long cutoff,
-                                                      CancellationToken ct)
+    private static void BuildBuckets(SqliteConnection connection, long cutoff)
     {
-        await DropBucketsAsync(connection, ct).ConfigureAwait(false);
+        DropBuckets(connection);
 
         using SqliteCommand command = connection.CreateCommand();
+
+        // Two passes over the same rows: "summary" decides which buckets need collapsing
+        // and carries the peak percentage, "ending" picks each bucket's last row. They
+        // are joined rather than merged into one aggregate because SQLite's bare-column
+        // rule only picks a row for you when the query has exactly one min() or max(),
+        // and this one has a max() that must come from a different row.
         command.CommandText = $"""
             CREATE TEMP TABLE altim_downsample AS
-            SELECT provider_id,
-                   metric_key,
-                   (captured_at / {BucketSeconds}) * {BucketSeconds} AS bucket,
-                   MAX(used_percent)        AS used_percent,
-                   MAX(window_minutes)      AS window_minutes,
-                   MAX(resets_at)           AS resets_at,
-                   SUM(input_tokens)        AS input_tokens,
-                   SUM(output_tokens)       AS output_tokens,
-                   SUM(cache_read_tokens)   AS cache_read_tokens,
-                   SUM(cache_write_tokens)  AS cache_write_tokens
-            FROM usage_sample
-            WHERE captured_at < $cutoff
-            GROUP BY provider_id, metric_key, (captured_at / {BucketSeconds}) * {BucketSeconds}
-            HAVING COUNT(*) > 1 OR MIN(captured_at) % {BucketSeconds} <> 0
+            WITH bucketed AS (
+                SELECT id,
+                       provider_id,
+                       metric_key,
+                       captured_at,
+                       (captured_at / {BucketSeconds}) * {BucketSeconds} AS bucket,
+                       used_percent,
+                       window_minutes,
+                       resets_at,
+                       input_tokens,
+                       output_tokens,
+                       cache_read_tokens,
+                       cache_write_tokens
+                FROM usage_sample
+                WHERE captured_at < $cutoff
+            ),
+            summary AS (
+                SELECT provider_id,
+                       metric_key,
+                       bucket,
+                       MAX(used_percent) AS used_percent
+                FROM bucketed
+                GROUP BY provider_id, metric_key, bucket
+                HAVING COUNT(*) > 1 OR MIN(captured_at) % {BucketSeconds} <> 0
+            ),
+            ending AS (
+                SELECT provider_id,
+                       metric_key,
+                       bucket,
+                       window_minutes,
+                       resets_at,
+                       input_tokens,
+                       output_tokens,
+                       cache_read_tokens,
+                       cache_write_tokens,
+                       ROW_NUMBER() OVER (PARTITION BY provider_id, metric_key, bucket
+                                          ORDER BY captured_at DESC, id DESC) AS recency
+                FROM bucketed
+            )
+            SELECT summary.provider_id       AS provider_id,
+                   summary.metric_key        AS metric_key,
+                   summary.bucket            AS bucket,
+                   summary.used_percent      AS used_percent,
+                   ending.window_minutes     AS window_minutes,
+                   ending.resets_at          AS resets_at,
+                   ending.input_tokens       AS input_tokens,
+                   ending.output_tokens      AS output_tokens,
+                   ending.cache_read_tokens  AS cache_read_tokens,
+                   ending.cache_write_tokens AS cache_write_tokens
+            FROM summary
+            JOIN ending
+              ON ending.provider_id = summary.provider_id
+             AND ending.metric_key = summary.metric_key
+             AND ending.bucket = summary.bucket
+             AND ending.recency = 1
             """;
         command.Parameters.AddWithValue("$cutoff", cutoff);
 
-        _ = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        _ = command.ExecuteNonQuery();
     }
 
-    private static async ValueTask<int> DeleteCollapsedAsync(SqliteConnection connection, long cutoff,
-                                                             CancellationToken ct)
+    private static int DeleteCollapsed(SqliteConnection connection, long cutoff)
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"""
@@ -215,11 +301,10 @@ public sealed class UsageRetention
             """;
         command.Parameters.AddWithValue("$cutoff", cutoff);
 
-        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        return command.ExecuteNonQuery();
     }
 
-    private static async ValueTask<int> InsertBucketsAsync(SqliteConnection connection,
-                                                           CancellationToken ct)
+    private static int InsertBuckets(SqliteConnection connection)
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"""
@@ -232,13 +317,13 @@ public sealed class UsageRetention
             FROM {TempTable}
             """;
 
-        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        return command.ExecuteNonQuery();
     }
 
-    private static async ValueTask DropBucketsAsync(SqliteConnection connection, CancellationToken ct)
+    private static void DropBuckets(SqliteConnection connection)
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"DROP TABLE IF EXISTS {TempTable}";
-        _ = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        _ = command.ExecuteNonQuery();
     }
 }

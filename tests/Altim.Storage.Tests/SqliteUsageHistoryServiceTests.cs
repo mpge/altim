@@ -1,6 +1,7 @@
 using Altim.Core.Models;
 using Altim.Core.Notifications;
 using Altim.Core.Settings;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace Altim.Storage.Tests;
@@ -122,6 +123,78 @@ public sealed class SqliteUsageHistoryServiceTests
 
         Assert.Equal(2, samples.Count);
         Assert.Null(samples[1].UsedPercent);
+    }
+
+    [Fact]
+    public async Task AValueBecomingKnownIsAChangeToo()
+    {
+        using var temp = new TempDatabase();
+        var history = new SqliteUsageHistoryService(temp.Open());
+
+        await history.RecordAsync(Usage(Origin, Metric("five_hour", null)), Ct);
+        await history.RecordAsync(Usage(Origin.AddMinutes(1), Metric("five_hour", 41.5)), Ct);
+
+        IReadOnlyList<UsageSample> samples = await Range(history, Origin, Origin.AddHours(1));
+
+        Assert.Equal(2, samples.Count);
+        Assert.Null(samples[0].UsedPercent);
+        Assert.Equal(41.5, samples[1].UsedPercent);
+    }
+
+    [Fact]
+    public async Task AFailedReadingIsNotRecordedAsData()
+    {
+        using var temp = new TempDatabase();
+        var history = new SqliteUsageHistoryService(temp.Open());
+
+        await history.RecordAsync(Usage(Origin, Metric("five_hour", 41.5)), Ct);
+
+        // A read that failed knows nothing. Writing its metrics would put a hole in the
+        // history that later reads cannot tell apart from a measured drop to nothing.
+        await history.RecordAsync(
+            new ProviderUsage("claude", ProviderStatus.Error, [Metric("five_hour", null)], null,
+                              Origin.AddMinutes(1), "Unable to retrieve usage"),
+            Ct);
+
+        UsageSample only = Assert.Single(await Range(history, Origin, Origin.AddHours(1)));
+
+        Assert.Equal(41.5, only.UsedPercent);
+        Assert.Equal(1L, temp.CountRows("usage_sample"));
+    }
+
+    [Fact]
+    public async Task AFailedReadingCarryingNumbersIsStillNotRecorded()
+    {
+        using var temp = new TempDatabase();
+        var history = new SqliteUsageHistoryService(temp.Open());
+
+        await history.RecordAsync(
+            new ProviderUsage("claude", ProviderStatus.Error, [Metric("five_hour", 41.5)],
+                              new TokenTotals(10, 5, null, null), Origin, "Unable to retrieve usage"),
+            Ct);
+
+        Assert.Equal(0L, temp.CountRows("usage_sample"));
+    }
+
+    [Fact]
+    public async Task OneMetricFailingToWriteLeavesNoneOfTheReadingBehind()
+    {
+        using var temp = new TempDatabase();
+        var history = new SqliteUsageHistoryService(temp.Open());
+
+        // Make the second metric's insert fail, in the one way a test can arrange from
+        // outside: the reading is written as one transaction, so all of it or none.
+        temp.Execute("""
+            CREATE TRIGGER refuse_seven_day BEFORE INSERT ON usage_sample
+            WHEN NEW.metric_key = 'seven_day'
+            BEGIN SELECT RAISE(ABORT, 'refused'); END;
+            """);
+
+        _ = await Assert.ThrowsAsync<SqliteException>(async () => await history.RecordAsync(
+            Usage(Origin, Metric("five_hour", 41.5), Metric("seven_day", 12.5)), Ct));
+
+        Assert.Equal(0L, temp.CountRows("usage_sample"));
+        Assert.Empty(await Range(history, Origin, Origin.AddHours(1)));
     }
 
     [Fact]
@@ -261,6 +334,122 @@ public sealed class SqliteUsageHistoryServiceTests
         Assert.False((await settings.GetAsync(Ct)).NotificationsEnabled);
         _ = Assert.Single(await notifications.GetAllAsync(Ct));
         Assert.Equal(1L, temp.CountRows("schema_version"));
+    }
+
+    [Fact]
+    public async Task AQuietDayStillKnowsWhatTheValueWas()
+    {
+        using var temp = new TempDatabase();
+        var history = new SqliteUsageHistoryService(temp.Open());
+
+        // The last change was 25 hours ago, so a 24-hour chart's range is empty. That is
+        // not "no usage recorded yet", it is "nothing moved", and the carry-in says so.
+        await history.RecordAsync(Usage(Origin.AddHours(-25), Metric("five_hour", 41.5)), Ct);
+
+        Assert.Empty(await Range(history, Origin.AddHours(-24), Origin));
+
+        UsageSample carriedIn = Assert.Single(
+            await history.GetLatestBeforeAsync("claude", Origin.AddHours(-24), Ct));
+
+        Assert.Equal(41.5, carriedIn.UsedPercent);
+        Assert.Equal(Origin.AddHours(-25), carriedIn.CapturedAt);
+    }
+
+    [Fact]
+    public async Task TheCarryInIsTheNewestSampleOfEveryMetric()
+    {
+        using var temp = new TempDatabase();
+        var history = new SqliteUsageHistoryService(temp.Open());
+
+        await history.RecordAsync(
+            Usage(Origin, Metric("five_hour", 10), Metric("seven_day", 60)), Ct);
+        await history.RecordAsync(
+            Usage(Origin.AddMinutes(5), Metric("five_hour", 20), Metric("seven_day", 60)), Ct);
+        await history.RecordAsync(
+            Usage(Origin.AddMinutes(9), Metric("five_hour", 30), Metric("seven_day", 61)), Ct);
+
+        IReadOnlyList<UsageSample> carriedIn =
+            await history.GetLatestBeforeAsync("claude", Origin.AddMinutes(10), Ct);
+
+        Assert.Equal(new[] { "five_hour", "seven_day" },
+                     carriedIn.Select(s => s.MetricKey).ToArray());
+        Assert.Equal(30d, carriedIn[0].UsedPercent);
+        Assert.Equal(61d, carriedIn[1].UsedPercent);
+    }
+
+    [Fact]
+    public async Task TheCarryInStopsStrictlyBeforeTheInstantAsked()
+    {
+        using var temp = new TempDatabase();
+        var history = new SqliteUsageHistoryService(temp.Open());
+
+        await history.RecordAsync(Usage(Origin, Metric("five_hour", 10)), Ct);
+        await history.RecordAsync(Usage(Origin.AddMinutes(5), Metric("five_hour", 20)), Ct);
+
+        // The sample sitting exactly on the boundary belongs to the range, not to the
+        // carry-in, so combining the two never draws the same row twice.
+        UsageSample carriedIn = Assert.Single(
+            await history.GetLatestBeforeAsync("claude", Origin.AddMinutes(5), Ct));
+
+        Assert.Equal(10d, carriedIn.UsedPercent);
+
+        UsageSample inRange = Assert.Single(
+            await Range(history, Origin.AddMinutes(5), Origin.AddHours(1)));
+
+        Assert.Equal(20d, inRange.UsedPercent);
+    }
+
+    [Fact]
+    public async Task ThereIsNoCarryInBeforeTheFirstReadingOrForAnotherProvider()
+    {
+        using var temp = new TempDatabase();
+        var history = new SqliteUsageHistoryService(temp.Open());
+
+        await history.RecordAsync(Usage(Origin, Metric("five_hour", 10)), Ct);
+
+        Assert.Empty(await history.GetLatestBeforeAsync("claude", Origin, Ct));
+        Assert.Empty(await history.GetLatestBeforeAsync("codex", Origin.AddHours(1), Ct));
+    }
+
+    [Fact]
+    public async Task TheCarryInRoundTripsEverythingASampleCarries()
+    {
+        using var temp = new TempDatabase();
+        var history = new SqliteUsageHistoryService(temp.Open());
+
+        DateTimeOffset resets = Origin.AddHours(3);
+        await history.RecordAsync(
+            Usage(Origin, new TokenTotals(1_000, 250, null, 40),
+                  Metric("five_hour", 41.5, TimeSpan.FromHours(5), resets)), Ct);
+
+        UsageSample carriedIn = Assert.Single(
+            await history.GetLatestBeforeAsync("claude", Origin.AddMinutes(1), Ct));
+
+        Assert.Equal("claude", carriedIn.ProviderId);
+        Assert.Equal(TimeSpan.FromHours(5), carriedIn.WindowLength);
+        Assert.Equal(resets, carriedIn.ResetsAt);
+        Assert.Equal(1_000L, Assert.IsType<TokenTotals>(carriedIn.Tokens).Input);
+    }
+
+    [Fact]
+    public async Task ReadingHistoryDoesNotRunOnTheCallingThread()
+    {
+        using var temp = new TempDatabase();
+        var history = new SqliteUsageHistoryService(temp.Open());
+
+        await history.RecordAsync(Usage(Origin, Metric("five_hour", 41.5)), Ct);
+
+        // A month of history on the dashboard is the case that matters, and the dashboard
+        // asks from the UI thread.
+        ValueTask<IReadOnlyList<UsageSample>> range =
+            history.GetRangeAsync("claude", Origin.AddDays(-30), Origin.AddDays(1), Ct);
+        Assert.False(range.IsCompleted);
+        _ = Assert.Single(await range);
+
+        ValueTask<IReadOnlyList<UsageSample>> carryIn =
+            history.GetLatestBeforeAsync("claude", Origin.AddDays(1), Ct);
+        Assert.False(carryIn.IsCompleted);
+        _ = Assert.Single(await carryIn);
     }
 
     private static ValueTask<IReadOnlyList<UsageSample>> Range(

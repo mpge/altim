@@ -65,6 +65,11 @@ public interface IUsageHistoryService
     ValueTask RecordAsync(ProviderUsage usage, CancellationToken ct);
     ValueTask<IReadOnlyList<UsageSample>> GetRangeAsync(string providerId, DateTimeOffset from,
                                                         DateTimeOffset to, CancellationToken ct);
+    // Carry-in for a chart's left edge: rows are written only on change, so an empty
+    // range means nothing moved, not that nothing is known.
+    ValueTask<IReadOnlyList<UsageSample>> GetLatestBeforeAsync(string providerId,
+                                                               DateTimeOffset at,
+                                                               CancellationToken ct);
     ValueTask ClearAsync(CancellationToken ct);
 }
 
@@ -159,8 +164,13 @@ CREATE TABLE notification_state (
 ```
 
 No project names, prompts, commands or file paths are stored. Samples are written only when a value
-changes, and are down-sampled after 30 days to hourly rows. Migrations are sequential, forward-only,
-each in its own transaction.
+changes, and are down-sampled after 30 days to hourly rows: each hour keeps its **peak** percentage,
+and takes its token counters, window length and reset instant from the hour's **last** row, because
+token counts are cumulative totals rather than deltas and summing them would multiply the same
+total by however many times it was observed. A reading whose provider is in `Error` is not stored at
+all. Migrations are sequential, forward-only, each in its own transaction, and each re-checks the
+recorded version inside that transaction, so two instances starting at once — autostart plus a
+manual launch — cannot apply the same rung twice.
 
 ## Notifications
 
