@@ -202,6 +202,12 @@ click time, then the working-area corner. Screen coordinates are physical pixels
 is in device-independent units, so all arithmetic uses the *target* screen's scaling — including
 margins — and clamps to the working area. Positioning happens after layout, not before `Show()`.
 
+Two platform caveats the arithmetic has to respect. **macOS screen coordinates start at the bottom
+left**, so a status item's frame is flipped before it reaches the shared placement code. **Linux
+skips the middle tier entirely**: a StatusNotifierItem click arrives over the bus with no
+coordinates at all, so there is no tray rectangle *and* no cursor position, and the panel goes
+straight to the working-area corner.
+
 ## Platform matrix
 
 | Concern | Windows | macOS | Linux |
@@ -209,9 +215,13 @@ margins — and clamps to the working area. Positioning happens after layout, no
 | Tray host | own `Shell_NotifyIcon` message-only window, version 4 (click coordinates), `Shell_NotifyIconGetRect` | own `NSStatusItem` via `objc_msgSend`; anchor from the status button's window frame | Avalonia `TrayIcon` (StatusNotifierItem) |
 | Popup | positioned borderless window | positioned borderless window | working-area corner; no anchor exists in the protocol |
 | Notifications | `Microsoft.WindowsAppSDK` `AppNotificationManager` | `UNUserNotificationCenter` interop | `org.freedesktop.Notifications` over `Tmds.DBus.Protocol` |
-| Autostart | `HKCU\...\Run`, **reporting state from `StartupApproved`** | `SMAppService.mainApp` | `~/.config/autostart/*.desktop`, disable via `Hidden=true` |
-| Power/session | `Microsoft.Win32.SystemEvents` | `NSWorkspace.shared.notificationCenter` (not the default centre) | logind `PrepareForSleep` |
-| Theme | `ColorValuesChanged` | same, plus template tray icon | portal `org.freedesktop.appearance`; may resolve late |
+| Autostart | `HKCU\...\Run`, **reporting state from `StartupApproved`** | `SMAppService` (the selector is `mainAppService`), macOS 13+, bundle required; only *enabled* reports true, "requires approval" does not | `~/.config/autostart/*.desktop`, disable via `Hidden=true` |
+| Power/session | `Microsoft.Win32.SystemEvents` | `NSWorkspace.shared.notificationCenter` (not the default centre) | logind `PrepareForSleep` on the **system** bus |
+| Theme | `ColorValuesChanged` | **`NSDistributedNotificationCenter`** — appearance is *not* posted to the workspace centre | portal `org.freedesktop.appearance` on the **session** bus; may resolve late |
+
+macOS uses **three** notification centres, and picking the wrong one fails silently rather than
+loudly: the workspace centre for sleep and wake, the distributed centre for appearance, and the
+user-notification centre for notifications.
 
 macOS runs as an accessory app: `MacOSPlatformOptions.ShowInDock = false` **and** `LSUIElement` in
 the bundle, because Avalonia sets the activation policy at runtime and overrides the plist alone.
