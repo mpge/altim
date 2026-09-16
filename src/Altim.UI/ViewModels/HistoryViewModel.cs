@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+using System.Globalization;
 using Altim.Core.Abstractions;
 using Altim.Core.Models;
 using Altim.UI.Controls;
@@ -37,6 +39,9 @@ public sealed partial class HistoryViewModel : ObservableObject, IDashboardPage
     private IReadOnlyList<UsageTapeSeries> _series = [];
 
     [ObservableProperty]
+    private IReadOnlyList<string> _axisLabels = [];
+
+    [ObservableProperty]
     private bool _hasSamples;
 
     [ObservableProperty]
@@ -63,8 +68,21 @@ public sealed partial class HistoryViewModel : ObservableObject, IDashboardPage
     /// <inheritdoc />
     public string Title => "History";
 
+    /// <summary>The panel's own heading, wherever the tape is shown inside one.</summary>
+    public string PanelTitle => "Usage history";
+
+    /// <summary>The line under the page title.</summary>
+    public string SubHeading => "How much each provider has used over time.";
+
     /// <summary>The three spans on offer.</summary>
     public IReadOnlyList<HistoryRange> Ranges => HistoryRange.All;
+
+    /// <summary>
+    /// One entry per line on the tape, naming it. The reference names the lines above the
+    /// plot rather than at their ends, which is the arrangement that survives two lines
+    /// finishing at the same level.
+    /// </summary>
+    public ObservableCollection<HistoryLegendItem> Legend { get; } = [];
 
     /// <summary>The sentence shown in place of a chart when the range holds no sample.</summary>
     public string EmptyText => UsageFormat.HistoryEmpty;
@@ -125,6 +143,15 @@ public sealed partial class HistoryViewModel : ObservableObject, IDashboardPage
 
             Series = series;
             HasSamples = series.Count > 0;
+            AxisLabels = series.Count > 0 ? Ticks(from, to, range) : [];
+
+            Legend.Clear();
+            foreach (UsageTapeSeries line in series)
+            {
+                Legend.Add(new HistoryLegendItem(
+                    line.Name,
+                    line.Emphasis == UsageTapeEmphasis.Secondary));
+            }
         }
         finally
         {
@@ -133,6 +160,28 @@ public sealed partial class HistoryViewModel : ObservableObject, IDashboardPage
                 IsLoading = false;
             }
         }
+    }
+
+    /// <summary>
+    /// The dates written along the bottom of the plot, evenly spaced from the left edge to
+    /// the right. They are read in local time, because the span they describe is the user's
+    /// day rather than UTC's.
+    /// </summary>
+    private static IReadOnlyList<string> Ticks(DateTimeOffset from, DateTimeOffset to, HistoryRange range)
+    {
+        if (range.Ticks < 2)
+        {
+            return [];
+        }
+
+        List<string> labels = new(range.Ticks);
+        for (int i = 0; i < range.Ticks; i++)
+        {
+            DateTimeOffset at = from + ((to - from) * i / (range.Ticks - 1));
+            labels.Add(at.ToLocalTime().ToString(range.TickFormat, CultureInfo.CurrentCulture));
+        }
+
+        return labels;
     }
 
     private static async Task<IReadOnlyList<UsageSample>> ReadAsync(

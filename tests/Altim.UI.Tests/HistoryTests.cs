@@ -240,9 +240,9 @@ public sealed class HistoryTests
 
         Assert.Collection(
             page.Ranges,
-            range => Assert.Equal("24 hours", range.Name),
-            range => Assert.Equal("7 days", range.Name),
-            range => Assert.Equal("30 days", range.Name));
+            range => Assert.Equal("Last 24 hours", range.Name),
+            range => Assert.Equal("Last 7 days", range.Name),
+            range => Assert.Equal("Last 30 days", range.Name));
         Assert.Equal(HistoryRange.Day, page.SelectedRange);
     }
 

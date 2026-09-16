@@ -1,15 +1,14 @@
 <!--
   History: one line per provider over 24 hours, 7 days or 30 days.
 
-  The tape draws itself. All this page does is pick a span and hand over the series, and hand
-  over an empty list when the range holds nothing, which is what makes the tape print the
-  sentence. There is deliberately no fallback chart: a flat line along zero would be a claim
-  that nothing was used, which is not the same as not knowing.
+  The page is the heading and the same panel Overview carries, at full width and full height.
+  Two surfaces drawing the same thing two different ways would be two things to learn, so the
+  panel is one view used twice and the page only decides how much room it gets.
 -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:controls="using:Altim.UI.Controls"
              xmlns:design="using:Altim.UI.ViewModels.Design"
+             xmlns:views="using:Altim.UI.Views"
              xmlns:vm="using:Altim.UI.ViewModels"
              x:Class="Altim.UI.Views.HistoryView"
              x:DataType="vm:HistoryViewModel"
@@ -19,31 +18,19 @@
     <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
   </UserControl.Styles>
 
-  <ScrollViewer>
-    <StackPanel Margin="{DynamicResource AltimInset32}" Spacing="{DynamicResource AltimSpace24}">
+  <Grid Margin="{DynamicResource AltimInset32}" RowDefinitions="Auto,*">
 
-      <Grid ColumnDefinitions="*,Auto">
-        <TextBlock Grid.Column="0"
-                   VerticalAlignment="Center"
-                   Theme="{DynamicResource AltimTitleText}"
-                   Text="{Binding Title}" />
-        <ComboBox Grid.Column="1"
-                  MinWidth="140"
-                  ItemsSource="{Binding Ranges}"
-                  SelectedItem="{Binding SelectedRange}">
-          <ComboBox.ItemTemplate>
-            <DataTemplate x:DataType="vm:HistoryRange">
-              <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
-            </DataTemplate>
-          </ComboBox.ItemTemplate>
-        </ComboBox>
-      </Grid>
-
-      <controls:UsageTape Height="240"
-                          Series="{Binding Series}"
-                          EmptyText="{Binding EmptyText}" />
-
+    <StackPanel Grid.Row="0"
+                Margin="0,0,0,24"
+                Spacing="{DynamicResource AltimSpace8}">
+      <TextBlock Theme="{DynamicResource AltimDisplayText}" Text="{Binding Title}" />
+      <TextBlock Theme="{DynamicResource AltimLeadText}"
+                 TextWrapping="Wrap"
+                 Text="{Binding SubHeading}" />
     </StackPanel>
-  </ScrollViewer>
+
+    <views:UsageHistoryPanelView Grid.Row="1" MinHeight="280" />
+
+  </Grid>
 
 </UserControl>

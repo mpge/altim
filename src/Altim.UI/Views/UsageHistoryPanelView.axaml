@@ -1,0 +1,77 @@
+<!--
+  The usage history panel: a heading, the span on offer, the legend, and the tape.
+
+  The tape draws itself. All this does is pick a span and hand over the series, and hand over
+  an empty list when the range holds nothing, which is what makes the tape print the sentence.
+  There is deliberately no fallback chart: a flat line along zero would be a claim that nothing
+  was used, which is not the same as not knowing.
+
+  The lines are named by the legend under the heading rather than at their own right hand ends,
+  which is the reference's arrangement and the one that survives two providers finishing the
+  week at the same level.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Altim.UI.Controls"
+             xmlns:design="using:Altim.UI.ViewModels.Design"
+             xmlns:vm="using:Altim.UI.ViewModels"
+             x:Class="Altim.UI.Views.UsageHistoryPanelView"
+             x:DataType="vm:HistoryViewModel"
+             Design.DataContext="{x:Static design:DesignData.History}">
+
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
+  </UserControl.Styles>
+
+  <Border Theme="{DynamicResource AltimPanel}">
+    <Grid RowDefinitions="Auto,Auto,*">
+
+      <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+        <TextBlock Grid.Column="0"
+                   VerticalAlignment="Center"
+                   Theme="{DynamicResource AltimHeadingText}"
+                   Text="{Binding PanelTitle}" />
+        <ComboBox Grid.Column="1"
+                  MinWidth="132"
+                  ItemsSource="{Binding Ranges}"
+                  SelectedItem="{Binding SelectedRange}">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:HistoryRange">
+              <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+      </Grid>
+
+      <ItemsControl Grid.Row="1"
+                    Margin="0,16,0,0"
+                    IsVisible="{Binding HasSamples}"
+                    ItemsSource="{Binding Legend}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Orientation="Horizontal" Spacing="{DynamicResource AltimSpace16}" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:HistoryLegendItem">
+            <StackPanel Orientation="Horizontal" Spacing="{DynamicResource AltimSpace6}">
+              <Ellipse Classes="legend" Classes.secondary="{Binding IsSecondary}" />
+              <TextBlock VerticalAlignment="Center"
+                         Theme="{DynamicResource AltimLabelText}"
+                         Text="{Binding Name}" />
+            </StackPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <controls:UsageTape Grid.Row="2"
+                          Margin="0,16,0,0"
+                          ShowSeriesNames="False"
+                          Series="{Binding Series}"
+                          AxisLabels="{Binding AxisLabels}"
+                          EmptyText="{Binding EmptyText}" />
+
+    </Grid>
+  </Border>
+
+</UserControl>

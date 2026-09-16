@@ -123,6 +123,31 @@
     </Style>
   </ControlTheme>
 
+  <!-- Icon: a quiet button holding one 16px mark and nothing else, so it drops the label
+       padding a word needs and keeps a square hit target instead. The gear in the panel's
+       header and the disclosure beside a provider's name are both this. -->
+  <ControlTheme x:Key="AltimIconButton"
+                TargetType="Button"
+                BasedOn="{StaticResource AltimQuietButton}">
+    <Setter Property="Padding" Value="{DynamicResource AltimInset6}" />
+    <Setter Property="MinHeight" Value="{DynamicResource AltimRowMinHeight}" />
+    <Setter Property="MinWidth" Value="{DynamicResource AltimRowMinHeight}" />
+  </ControlTheme>
+
+  <!-- Text: an action set as a line of text rather than as a control. The panel's way out
+       to the window is this rather than a filled button across the foot of it, because the
+       panel already has a primary action - the tray icon it was opened from - and a second
+       filled control competing with it is one too many on a surface this small. -->
+  <ControlTheme x:Key="AltimTextButton"
+                TargetType="Button"
+                BasedOn="{StaticResource AltimQuietButton}">
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="Padding" Value="{DynamicResource AltimInset8}" />
+    <Setter Property="MinHeight" Value="{DynamicResource AltimRowMinHeight}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightHeading}" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+  </ControlTheme>
+
   <!-- Destructive: status colour on the outline and the label. Never a red fill. -->
   <ControlTheme x:Key="AltimDestructiveButton"
                 TargetType="Button"

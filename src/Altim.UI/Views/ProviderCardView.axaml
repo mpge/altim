@@ -1,0 +1,161 @@
+<!--
+  One provider, as Overview shows it.
+
+  The card is the panel shape doing the Overview's job: 1px border, radius 12, padding 24, no
+  shadow. Inside it, a header, the metrics the provider reports, and a footer split by a
+  vertical hairline into what happens next and how this window compares with the last one.
+
+  The metrics are all one figure size. The rest of the system gives the first metric on a
+  surface the large figure and the others the small one, so the percentage stays the largest
+  thing on screen; on a card the metrics are a set to be read against one another, and two
+  sizes would say one of them mattered more than the other.
+
+  The card carries no per-metric token line. The reference sets one under each metric, reading
+  used against limit - Altim's providers report tokens per provider rather than per window and
+  no provider reports a token limit at all, so there is no such pair to print. The one token
+  count that is reported sits under the metrics as the card's own caption.
+
+  The footer is pushed to the foot of the card rather than following the metrics, because the
+  cards in a row are arranged at the row's height and a provider that reports two windows
+  would otherwise put its footer half a card higher than the one beside it reporting three.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Altim.UI.Controls"
+             xmlns:design="using:Altim.UI.ViewModels.Design"
+             xmlns:vm="using:Altim.UI.ViewModels"
+             x:Class="Altim.UI.Views.ProviderCardView"
+             x:DataType="vm:ProviderViewModel"
+             Design.DataContext="{x:Static design:DesignData.Provider}">
+
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
+  </UserControl.Styles>
+
+  <Border Theme="{DynamicResource AltimProviderCard}">
+    <Grid RowDefinitions="Auto,*,Auto">
+    <StackPanel Grid.Row="0" Spacing="{DynamicResource AltimSpace16}">
+
+      <!-- Header -->
+      <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
+        <Path Grid.Column="0"
+              Classes="glyph large"
+              Classes.anthropic="{Binding IsAnthropic}"
+              Classes.openai="{Binding IsOpenAI}" />
+        <TextBlock Grid.Column="1"
+                   Margin="12,0,0,0"
+                   VerticalAlignment="Center"
+                   Theme="{DynamicResource AltimSubheadText}"
+                   Text="{Binding DisplayName}" />
+        <Button Grid.Column="2"
+                Margin="2,0,0,0"
+                VerticalAlignment="Center"
+                Theme="{DynamicResource AltimIconButton}"
+                Command="{Binding OpenCommand}">
+          <Path Classes="icon next quiet" />
+        </Button>
+        <Ellipse Grid.Column="4"
+                 Classes="status"
+                 Classes.ok="{Binding Status.IsOk}"
+                 Classes.error="{Binding Status.IsError}" />
+        <TextBlock Grid.Column="5"
+                   Margin="6,0,0,0"
+                   VerticalAlignment="Center"
+                   Theme="{DynamicResource AltimLabelText}"
+                   Text="{Binding Status.Word}" />
+      </Grid>
+
+      <!-- A failed reading: the sentence and the one action that can change it. -->
+      <StackPanel IsVisible="{Binding HasError}" Spacing="{DynamicResource AltimSpace12}">
+        <TextBlock Theme="{DynamicResource AltimBodyText}" Text="{Binding ErrorText}" />
+        <Button HorizontalAlignment="Left"
+                Content="{Binding RetryLabel}"
+                Command="{Binding RetryCommand}" />
+      </StackPanel>
+
+      <!-- A reading that carried no metric at all says so, rather than showing nothing. -->
+      <TextBlock IsVisible="{Binding ShowsNoMetricsNotice}"
+                 Theme="{DynamicResource AltimBodyText}"
+                 Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                 Text="{Binding NoMetricsText}" />
+
+      <ItemsControl ItemsSource="{Binding Metrics}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="{DynamicResource AltimSpace16}" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:MetricViewModel">
+            <StackPanel Spacing="{DynamicResource AltimSpace6}">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0"
+                           VerticalAlignment="Bottom"
+                           Theme="{DynamicResource AltimLeadMediumText}"
+                           Classes.warn="{Binding IsAboveThreshold}"
+                           Text="{Binding Label}" />
+                <TextBlock Grid.Column="1"
+                           Classes="figure primary"
+                           IsVisible="{Binding IsReported}"
+                           VerticalAlignment="Bottom"
+                           Text="{Binding PercentText}" />
+                <TextBlock Grid.Column="1"
+                           Theme="{DynamicResource AltimCaptionText}"
+                           IsVisible="{Binding !IsReported}"
+                           VerticalAlignment="Bottom"
+                           TextAlignment="Right"
+                           TextWrapping="Wrap"
+                           MaxWidth="160"
+                           Text="{Binding UnavailableText}" />
+              </Grid>
+              <controls:Meter Value="{Binding Value}" Threshold="{Binding Threshold}" />
+            </StackPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <TextBlock IsVisible="{Binding HasTokens}"
+                 Theme="{DynamicResource AltimCaptionMetricText}"
+                 Text="{Binding TokensText}" />
+
+    </StackPanel>
+
+    <StackPanel Grid.Row="2" Spacing="{DynamicResource AltimSpace16}" Margin="0,16,0,0">
+
+      <Separator />
+
+      <!-- Footer: what happens next, how this window compares, and when the reading was
+           taken. The hairline between the first two is vertical, and the last sits at the
+           far end of the same row rather than on a line of its own. -->
+      <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto">
+        <StackPanel Grid.Column="0" Spacing="{DynamicResource AltimSpace4}">
+          <TextBlock Theme="{DynamicResource AltimLabelText}" Text="{Binding ResetsLabel}" />
+          <TextBlock Theme="{DynamicResource AltimFigureSmallText}" Text="{Binding ResetRemainingText}" />
+        </StackPanel>
+
+        <Separator Grid.Column="1"
+                   Margin="24,0"
+                   Theme="{DynamicResource AltimVerticalSeparator}" />
+
+        <StackPanel Grid.Column="2" Spacing="{DynamicResource AltimSpace4}">
+          <TextBlock Theme="{DynamicResource AltimLabelText}" Text="{Binding PacingLabel}" />
+          <TextBlock Classes="pacing"
+                     Classes.better="{Binding IsPacingBetter}"
+                     Theme="{DynamicResource AltimFigureSmallText}"
+                     Text="{Binding PacingText}" />
+          <TextBlock Theme="{DynamicResource AltimCaptionText}"
+                     IsVisible="{Binding HasPacingCaption}"
+                     Text="{Binding PacingCaption}" />
+        </StackPanel>
+
+        <TextBlock Grid.Column="4"
+                   VerticalAlignment="Bottom"
+                   Theme="{DynamicResource AltimCaptionMetricText}"
+                   Text="{Binding LastRefreshedText}" />
+      </Grid>
+
+    </StackPanel>
+    </Grid>
+  </Border>
+
+</UserControl>

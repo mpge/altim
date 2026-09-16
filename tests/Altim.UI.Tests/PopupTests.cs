@@ -40,7 +40,11 @@ public sealed class PopupTests
     private static FakeUsageProvider Gemini() =>
         new("gemini", "Gemini CLI", Readings.Healthy("gemini", 12d));
 
-    /// <summary>One provider: a name, a figure, a meter, a reset and the action.</summary>
+    /// <summary>
+    /// One provider: the header, a name, one compact line carrying every window it
+    /// reports, the reset it is next due, and the action. No meters: the panel names the
+    /// windows by their length and puts the figures beside them on one line.
+    /// </summary>
     [AvaloniaFact]
     public void RendersOneProvider()
     {
@@ -48,11 +52,15 @@ public sealed class PopupTests
 
         Surface.Show(new PopupView { DataContext = panel }, window =>
         {
+            Assert.True(Surface.Shows(window, "Altim"));
             Assert.True(Surface.Shows(window, "Claude Code"));
             Assert.True(Surface.Shows(window, "62%"));
-            Assert.True(Surface.Shows(window, "Session"));
+            Assert.True(Surface.Shows(window, "38%"));
+            Assert.True(Surface.Shows(window, "5h"));
+            Assert.True(Surface.Shows(window, "7d"));
+            Assert.True(Surface.Shows(window, "Resets in"));
             Assert.True(Surface.Shows(window, "Open Altim"));
-            Assert.Equal(2, Surface.Visible<Meter>(window).Count);
+            Assert.Empty(Surface.Visible<Meter>(window));
             Assert.False(Surface.Shows(window, UsageFormat.ProviderUnavailable));
         }, width: 320d);
     }
@@ -71,7 +79,10 @@ public sealed class PopupTests
             Assert.True(Surface.Shows(window, "62%"));
             Assert.True(Surface.Shows(window, "41%"));
             Assert.True(Surface.Shows(window, "12%"));
-            Assert.Equal(6, Surface.Visible<Meter>(window).Count);
+            Assert.Empty(Surface.Visible<Meter>(window));
+
+            // One reset line per provider, not one per window.
+            Assert.Equal(3, panel.Resets.Count);
         }, width: 320d, height: 1400d);
     }
 
@@ -98,8 +109,12 @@ public sealed class PopupTests
 
         Surface.Show(new PopupView { DataContext = panel }, window =>
         {
+            // The sentence and the retry carry the failure. The row has no status word of
+            // its own any more: the panel says once, at the foot, where the integrations
+            // stand as a whole, and saying it twice on a 320px surface is saying it twice.
             Assert.True(Surface.Shows(window, UsageFormat.ProviderUnavailable));
-            Assert.True(Surface.Shows(window, "Unavailable"));
+            Assert.Equal("Claude Code unavailable", panel.StatusLine);
+            Assert.True(panel.StatusIsError);
             Assert.Empty(Surface.Visible<Meter>(window));
             Assert.DoesNotContain("0%", Surface.Lines(window));
 
@@ -124,11 +139,13 @@ public sealed class PopupTests
     {
         using PopupViewModel panel = Panel(Claude(), Codex());
 
+        // One line per provider, carrying the soonest window that provider reports.
         Assert.True(panel.HasResets);
-        Assert.Equal(4, panel.Resets.Count);
+        Assert.Equal(2, panel.Resets.Count);
         Assert.Equal("2h 14m", panel.Resets[0].RemainingText);
-        Assert.Equal("Session", panel.Resets[0].MetricLabel);
         Assert.Equal("Claude Code", panel.Resets[0].ProviderName);
+        Assert.Equal("(Claude Code)", panel.Resets[0].ProviderLabel);
+        Assert.Equal("Codex", panel.Resets[1].ProviderName);
     }
 
     /// <summary>A panel whose providers report no reset instant says so rather than guessing.</summary>

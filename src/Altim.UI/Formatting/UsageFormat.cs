@@ -43,6 +43,28 @@ public static class UsageFormat
     /// <summary>Shown on Overview when nothing was detected to report on.</summary>
     public const string NoProviders = "No providers detected";
 
+    /// <summary>
+    /// Shown in place of a figure Altim has no way to produce. It is an em dash rather than
+    /// a zero, because "not known" is not "none", and it is one character rather than a
+    /// sentence because it stands where a figure would stand.
+    /// </summary>
+    public const string Unknown = "\u2014";
+
+    /// <summary>
+    /// Shown in place of a pacing figure there is not enough local history to compute. It
+    /// is an em dash rather than a zero, because "no comparison" is not "no change".
+    /// </summary>
+    public const string PacingUnknown = Unknown;
+
+    /// <summary>Shown when a session was last active less than a minute ago.</summary>
+    public const string JustNow = "just now";
+
+    /// <summary>The label over the pacing figure in a provider card's footer.</summary>
+    public const string PacingLabel = "Pacing";
+
+    /// <summary>The label over the reset time in a provider card's footer.</summary>
+    public const string ResetsLabel = "Resets in";
+
     /// <summary>Formats a percentage as a whole number, or nothing when it is not reported.</summary>
     /// <param name="usedPercent">The raw value from a provider, which may be null or implausible.</param>
     /// <returns>Something like <c>62%</c>, or <see langword="null"/>.</returns>
@@ -128,6 +150,115 @@ public static class UsageFormat
         ProviderStatus.Error => "Unavailable",
         _ => "Waiting",
     };
+
+    /// <summary>
+    /// The shorthand a window is named by where there is only room for two characters,
+    /// such as the popup's one line per provider: <c>5h</c>, <c>7d</c>.
+    /// </summary>
+    /// <param name="window">The window, or null when the provider reported none.</param>
+    /// <returns>The shorthand, or <see langword="null"/> when there is no window.</returns>
+    public static string? WindowShort(LimitWindow? window)
+    {
+        if (window is null || window.Length <= TimeSpan.Zero)
+        {
+            return null;
+        }
+
+        TimeSpan length = window.Length;
+        if (length.TotalHours < 24d)
+        {
+            int hours = (int)Math.Round(length.TotalHours, MidpointRounding.AwayFromZero);
+            return hours >= 1
+                ? string.Create(CultureInfo.InvariantCulture, $"{hours}h")
+                : string.Create(CultureInfo.InvariantCulture, $"{(int)Math.Round(length.TotalMinutes)}m");
+        }
+
+        int days = (int)Math.Round(length.TotalDays, MidpointRounding.AwayFromZero);
+        return string.Create(CultureInfo.InvariantCulture, $"{days}d");
+    }
+
+    /// <summary>
+    /// Formats a pacing figure: this window's level against the same point in the previous
+    /// one, in percentage points.
+    /// </summary>
+    /// <param name="deltaPercent">
+    /// The difference, or <see langword="null"/> when there is not enough local history to
+    /// compute one. A null reads as <see cref="PacingUnknown"/>, never as a zero.
+    /// </param>
+    public static string Pacing(double? deltaPercent) => deltaPercent is not { } delta
+        ? PacingUnknown
+        : string.Concat(
+            Math.Round(delta, MidpointRounding.AwayFromZero).ToString("+0;-0;0", CultureInfo.CurrentCulture),
+            "%");
+
+    /// <summary>The caption naming what a pacing figure was compared against.</summary>
+    /// <param name="window">The window the comparison was made over.</param>
+    /// <returns>Something like <c>vs. last week</c>, or null when there is no window.</returns>
+    public static string? PacingCaption(LimitWindow? window) =>
+        LimitWindowClassifier.Classify(window) switch
+        {
+            LimitWindowKind.FiveHour => "vs. last session",
+            LimitWindowKind.Daily => "vs. yesterday",
+            LimitWindowKind.Weekly => "vs. last week",
+            LimitWindowKind.Monthly => "vs. last month",
+            null => null,
+            _ => "vs. the window before",
+        };
+
+    /// <summary>Formats how long ago an instant was, in the coarsest useful unit.</summary>
+    /// <param name="instant">The instant, or null when the provider reports none.</param>
+    /// <param name="timeProvider">The clock the distance is measured against.</param>
+    /// <returns>Something like <c>2m ago</c>, or <see langword="null"/>.</returns>
+    public static string? RelativeTime(DateTimeOffset? instant, TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(timeProvider);
+
+        if (instant is not { } at)
+        {
+            return null;
+        }
+
+        TimeSpan elapsed = timeProvider.GetUtcNow() - at;
+        return elapsed < TimeSpan.FromMinutes(1d)
+            ? JustNow
+            : string.Concat(ResetCalculator.Humanise(elapsed), " ago");
+    }
+
+    /// <summary>Formats how long something has been running.</summary>
+    /// <param name="from">When it started.</param>
+    /// <param name="timeProvider">The clock the duration is measured against.</param>
+    /// <returns>Something like <c>42m</c>, or <see langword="null"/> when it has not begun.</returns>
+    public static string? Elapsed(DateTimeOffset? from, TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(timeProvider);
+
+        if (from is not { } started)
+        {
+            return null;
+        }
+
+        TimeSpan elapsed = timeProvider.GetUtcNow() - started;
+        return elapsed < TimeSpan.Zero ? null : ResetCalculator.Humanise(elapsed);
+    }
+
+    /// <summary>Joins the parts of a caption that are actually reported, with a middle dot.</summary>
+    /// <param name="parts">The parts, any of which may be null or blank.</param>
+    /// <returns>The joined line, or <see langword="null"/> when nothing was reported.</returns>
+    public static string? Join(params string?[] parts)
+    {
+        ArgumentNullException.ThrowIfNull(parts);
+
+        List<string> kept = [];
+        foreach (string? part in parts)
+        {
+            if (!string.IsNullOrWhiteSpace(part))
+            {
+                kept.Add(part);
+            }
+        }
+
+        return kept.Count == 0 ? null : string.Join(" \u00b7 ", kept);
+    }
 
     /// <summary>The sentence a provider page uses to describe its integration.</summary>
     /// <param name="status">The reported provider status.</param>

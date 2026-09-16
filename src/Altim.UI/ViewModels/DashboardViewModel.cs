@@ -7,7 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace Altim.UI.ViewModels;
 
 /// <summary>
-/// The dashboard window: a 200px sidebar and the page it selects.
+/// The dashboard window: a 192px sidebar and the page it selects.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -51,23 +51,24 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
             _providers.Add(new ProviderViewModel(provider, timeProvider, AltimSettings.Default));
         }
 
-        Overview = new OverviewViewModel(_providers, timeProvider);
+        Overview = new OverviewViewModel(_providers, history, timeProvider);
         History = new HistoryViewModel(_providers, history, timeProvider);
         Settings = new SettingsViewModel(settings, history, _providers);
         Settings.HistoryCleared += OnHistoryCleared;
 
-        Sections.Add(new NavigationItemViewModel(Overview));
+        Sections.Add(new NavigationItemViewModel(Overview, NavigationIcon.Overview));
         foreach (ProviderViewModel provider in _providers)
         {
+            provider.OpenRequested += OnProviderOpenRequested;
             Sections.Add(new NavigationItemViewModel(
                 new ProviderPageViewModel(provider),
-                provider.Glyph,
+                NavigationIcon.Provider,
                 provider.IsAnthropic,
                 provider.IsOpenAI));
         }
 
-        Sections.Add(new NavigationItemViewModel(History));
-        Sections.Add(new NavigationItemViewModel(Settings));
+        Sections.Add(new NavigationItemViewModel(History, NavigationIcon.History));
+        Sections.Add(new NavigationItemViewModel(Settings, NavigationIcon.Settings));
 
         // Assigned through the field so opening the window does not start a read before
         // the caller has decided to load anything.
@@ -92,8 +93,11 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
     /// <summary>The provider rows, shared by Overview, the provider pages and Settings.</summary>
     public IReadOnlyList<ProviderViewModel> Providers => _providers;
 
-    /// <summary>The window's title.</summary>
+    /// <summary>The window's title, and the wordmark in the sidebar's header.</summary>
     public string WindowTitle => "Altim";
+
+    /// <summary>The line under the wordmark in the sidebar's footer.</summary>
+    public string Tagline => "AI usage, at a glance.";
 
     /// <summary>Loads the stored settings, then the page currently selected.</summary>
     /// <param name="ct">Cancels the load.</param>
@@ -118,8 +122,10 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
 
         _disposed = true;
         Settings.HistoryCleared -= OnHistoryCleared;
+        Overview.Dispose();
         foreach (ProviderViewModel provider in _providers)
         {
+            provider.OpenRequested -= OnProviderOpenRequested;
             provider.Dispose();
         }
     }
@@ -134,4 +140,26 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
 
     private void OnHistoryCleared(object? sender, EventArgs e) =>
         _ = History.LoadAsync(CancellationToken.None);
+
+    /// <summary>
+    /// A provider card's own disclosure asks for that provider's page. The card knows which
+    /// provider it is and nothing about navigation, so the window matches the row to the
+    /// section that shows it.
+    /// </summary>
+    private void OnProviderOpenRequested(object? sender, EventArgs e)
+    {
+        if (sender is not ProviderViewModel row)
+        {
+            return;
+        }
+
+        foreach (NavigationItemViewModel section in Sections)
+        {
+            if (section.Page is ProviderPageViewModel page && ReferenceEquals(page.Provider, row))
+            {
+                SelectedSection = section;
+                return;
+            }
+        }
+    }
 }

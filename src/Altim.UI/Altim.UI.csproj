@@ -4,6 +4,14 @@
     <ProjectReference Include="..\Altim.Core\Altim.Core.csproj" />
   </ItemGroup>
 
+  <!-- The Altim mark, as the one bitmap the interface carries. The template face is the
+       monochrome one: it is drawn as an opacity mask over TextPrimary, so the mark takes
+       the ink colour of whichever variant is running rather than shipping two bitmaps and
+       a rule for choosing between them. -->
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\assets\icons\altim-template-64.png" Link="Assets\altim-mark.png" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Themes.Simple" />

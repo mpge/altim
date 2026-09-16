@@ -39,12 +39,17 @@
   <Thickness x:Key="AltimInset48">48</Thickness>
 
   <!-- ==================================================================== -->
-  <!-- Radius: 6 for controls and meter ends, 8 for cards and the popup.    -->
+  <!-- Radius: 4 for chips and meter ends, 6 for controls, 8 for rows and   -->
+  <!-- drop downs, 12 for cards, panels and the popup. Nothing else.        -->
   <!-- ==================================================================== -->
+  <x:Double x:Key="AltimRadius4">4</x:Double>
   <x:Double x:Key="AltimRadius6">6</x:Double>
   <x:Double x:Key="AltimRadius8">8</x:Double>
+  <x:Double x:Key="AltimRadius12">12</x:Double>
+  <CornerRadius x:Key="AltimCornerRadius4">4</CornerRadius>
   <CornerRadius x:Key="AltimCornerRadius6">6</CornerRadius>
   <CornerRadius x:Key="AltimCornerRadius8">8</CornerRadius>
+  <CornerRadius x:Key="AltimCornerRadius12">12</CornerRadius>
 
   <!-- ==================================================================== -->
   <!-- Line: borders are exactly 1px, separators are 1px with no margin.    -->
@@ -74,9 +79,14 @@
   <x:Double x:Key="AltimRowMinHeight">28</x:Double>
   <x:Double x:Key="AltimButtonMinHeight">32</x:Double>
   <x:Double x:Key="AltimControlMinHeight">32</x:Double>
-  <x:Double x:Key="AltimSidebarWidth">200</x:Double>
-  <x:Double x:Key="AltimSidebarItemHeight">32</x:Double>
+  <x:Double x:Key="AltimSidebarWidth">192</x:Double>
+  <x:Double x:Key="AltimSidebarItemHeight">40</x:Double>
   <x:Double x:Key="AltimPopupWidth">320</x:Double>
+
+  <!-- The sidebar's brand header: the mark and the wordmark above the navigation,
+       on the same 24px inset the footer block below the navigation uses. -->
+  <x:Double x:Key="AltimBrandMarkSize">22</x:Double>
+  <x:Double x:Key="AltimBrandHeaderHeight">64</x:Double>
 
   <!-- The popup's window is wider than its panel by the shadow inset on both sides, and
        taller by the inset above and below: the panel is the 320 DESIGN.md specifies and
@@ -85,9 +95,17 @@
        panel up with the tray icon. See AltimPopupShadowMargin below. -->
   <x:Double x:Key="AltimPopupWindowWidth">368</x:Double>
   <x:Double x:Key="AltimStatusDotSize">6</x:Double>
+  <x:Double x:Key="AltimLegendDotSize">8</x:Double>
+  <x:Double x:Key="AltimStatusIconSize">18</x:Double>
   <x:Double x:Key="AltimProviderGlyphSize">16</x:Double>
+
+  <!-- The mark keeps one job at three sizes: 28 where a provider heads a card or a
+       panel row, 20 in an activity row, 16 everywhere a mark sits beside a label. -->
+  <x:Double x:Key="AltimProviderGlyphSizeMedium">20</x:Double>
+  <x:Double x:Key="AltimProviderGlyphSizeLarge">28</x:Double>
   <x:Double x:Key="AltimIconSize">16</x:Double>
-  <x:Double x:Key="AltimMeterHeight">6</x:Double>
+  <x:Double x:Key="AltimIconStrokeThickness">1.5</x:Double>
+  <x:Double x:Key="AltimMeterHeight">8</x:Double>
 
   <!-- A meter reports a level by its width, so a meter with no width reports nothing. In
        an auto sized column it would measure to zero and vanish, which is why it asks for
@@ -97,8 +115,8 @@
        if the two disagree. -->
   <x:Double x:Key="AltimMeterMinWidth">48</x:Double>
   <x:Double x:Key="AltimTapeMinHeight">96</x:Double>
-  <x:Double x:Key="AltimTapeLineThickness">1.5</x:Double>
-  <x:Double x:Key="AltimTapeDotDiameter">3</x:Double>
+  <x:Double x:Key="AltimTapeLineThickness">2</x:Double>
+  <x:Double x:Key="AltimTapeDotDiameter">4</x:Double>
   <x:Double x:Key="AltimScrollBarThickness">8</x:Double>
 
   <!-- DESIGN.md does not specify a toggle. The track is derived from the scale: a 16
@@ -130,9 +148,14 @@
   <Thickness x:Key="AltimTextBoxPadding">8,0</Thickness>
   <Thickness x:Key="AltimComboBoxPadding">8,0</Thickness>
   <Thickness x:Key="AltimToolTipPadding">8,6</Thickness>
-  <Thickness x:Key="AltimSidebarItemPadding">8,0</Thickness>
+  <Thickness x:Key="AltimSidebarItemPadding">16,0</Thickness>
   <Thickness x:Key="AltimRowPadding">12,12</Thickness>
-  <Thickness x:Key="AltimCardPadding">20</Thickness>
+  <Thickness x:Key="AltimCardPadding">24</Thickness>
+  <Thickness x:Key="AltimChipPadding">8,4</Thickness>
+
+  <!-- A card column narrower than this stops being a card and starts being a list, so
+       the card grid drops to one column rather than squeezing two. -->
+  <x:Double x:Key="AltimCardMinWidth">320</x:Double>
 
   <!-- Room for the one shadow, on the one window that casts it. Every side is a step on
        the scale, and the bottom is deeper because the shadow is offset 8 downward.
@@ -163,15 +186,32 @@
   <FontWeight x:Key="AltimFontWeightFigureSmall">SemiBold</FontWeight>
   <x:Double x:Key="AltimLetterSpacingFigureSmall">-0.2</x:Double>
 
+  <x:Double x:Key="AltimFontSizeDisplay">40</x:Double>
+  <x:Double x:Key="AltimLineHeightDisplay">44</x:Double>
+  <FontWeight x:Key="AltimFontWeightDisplay">Bold</FontWeight>
+  <x:Double x:Key="AltimLetterSpacingDisplay">-0.8</x:Double>
+
   <x:Double x:Key="AltimFontSizeTitle">28</x:Double>
   <x:Double x:Key="AltimLineHeightTitle">34</x:Double>
   <FontWeight x:Key="AltimFontWeightTitle">SemiBold</FontWeight>
   <x:Double x:Key="AltimLetterSpacingTitle">-0.56</x:Double>
 
+  <x:Double x:Key="AltimFontSizeSubhead">21</x:Double>
+  <x:Double x:Key="AltimLineHeightSubhead">28</x:Double>
+  <FontWeight x:Key="AltimFontWeightSubhead">SemiBold</FontWeight>
+  <x:Double x:Key="AltimLetterSpacingSubhead">-0.42</x:Double>
+
   <x:Double x:Key="AltimFontSizeHeading">15</x:Double>
   <x:Double x:Key="AltimLineHeightHeading">20</x:Double>
   <FontWeight x:Key="AltimFontWeightHeading">SemiBold</FontWeight>
   <x:Double x:Key="AltimLetterSpacingHeading">0</x:Double>
+
+  <x:Double x:Key="AltimFontSizeLead">14</x:Double>
+  <x:Double x:Key="AltimLineHeightLead">20</x:Double>
+  <FontWeight x:Key="AltimFontWeightLead">Normal</FontWeight>
+  <FontWeight x:Key="AltimFontWeightLeadMedium">Medium</FontWeight>
+  <FontWeight x:Key="AltimFontWeightLeadStrong">SemiBold</FontWeight>
+  <x:Double x:Key="AltimLetterSpacingLead">0</x:Double>
 
   <x:Double x:Key="AltimFontSizeBody">13</x:Double>
   <x:Double x:Key="AltimLineHeightBody">18</x:Double>
@@ -187,6 +227,14 @@
   <x:Double x:Key="AltimLineHeightCaption">14</x:Double>
   <FontWeight x:Key="AltimFontWeightCaption">Normal</FontWeight>
   <x:Double x:Key="AltimLetterSpacingCaption">0.11</x:Double>
+
+  <!-- The eyebrow is the one place Altim sets capitals, and it is the reference's
+       decision rather than this document's first instinct: at 11px, tracked a full
+       0.08em open, the caps read as a label for the title rather than as shouting. -->
+  <x:Double x:Key="AltimFontSizeEyebrow">11</x:Double>
+  <x:Double x:Key="AltimLineHeightEyebrow">14</x:Double>
+  <FontWeight x:Key="AltimFontWeightEyebrow">Medium</FontWeight>
+  <x:Double x:Key="AltimLetterSpacingEyebrow">0.88</x:Double>
 
   <!-- ==================================================================== -->
   <!-- Motion. Two durations exist: 120ms and 180ms. Motion happens only in  -->

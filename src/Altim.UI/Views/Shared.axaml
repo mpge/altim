@@ -10,23 +10,89 @@
   Nothing here restyles a control. Every ControlTheme still comes from Themes/.
 -->
 <Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:fmt="using:Altim.UI.Formatting">
 
-  <!-- The 16px provider mark. Default is the neutral face; the accent classes are the only
-       place a provider accent appears, and it never fills anything larger than this. -->
+  <!-- The path data arrives here rather than through a binding, and that is not a detail.
+       A Geometry cannot be built until Avalonia's rendering platform exists, so a view model
+       that held one could not be constructed by a unit test, or by anything else that runs
+       before a window does - and because the failure happens inside a type initialiser, the
+       first such touch poisons the type for the rest of the process. A style is applied to a
+       control that is already in a visual tree, which is exactly when the platform is up. -->
+
+  <!-- The provider mark. Default is the neutral face; the accent classes are the only
+       place a provider accent appears. Three sizes, one job: 16 beside a label, 20 in an
+       activity row, 28 where a provider heads a card or a panel row. The geometry is
+       authored on the 16px box and stretched, so one path serves all three. -->
   <Style Selector="Path.glyph">
     <Setter Property="Width" Value="{DynamicResource AltimProviderGlyphSize}" />
     <Setter Property="Height" Value="{DynamicResource AltimProviderGlyphSize}" />
+    <Setter Property="Stretch" Value="Uniform" />
     <Setter Property="VerticalAlignment" Value="Center" />
     <Setter Property="Fill" Value="{DynamicResource AltimTextSecondaryBrush}" />
+    <Setter Property="Data" Value="{x:Static fmt:ProviderIdentity.Circle}" />
+  </Style>
+
+  <Style Selector="Path.glyph.medium">
+    <Setter Property="Width" Value="{DynamicResource AltimProviderGlyphSizeMedium}" />
+    <Setter Property="Height" Value="{DynamicResource AltimProviderGlyphSizeMedium}" />
+  </Style>
+
+  <Style Selector="Path.glyph.large">
+    <Setter Property="Width" Value="{DynamicResource AltimProviderGlyphSizeLarge}" />
+    <Setter Property="Height" Value="{DynamicResource AltimProviderGlyphSizeLarge}" />
   </Style>
 
   <Style Selector="Path.glyph.anthropic">
     <Setter Property="Fill" Value="{DynamicResource AltimAccentAnthropicBrush}" />
+    <Setter Property="Data" Value="{x:Static fmt:ProviderIdentity.Diamond}" />
   </Style>
 
   <Style Selector="Path.glyph.openai">
     <Setter Property="Fill" Value="{DynamicResource AltimAccentOpenAIBrush}" />
+    <Setter Property="Data" Value="{x:Static fmt:ProviderIdentity.Hexagon}" />
+  </Style>
+
+  <!-- A line icon: the same 16px box, stroked rather than filled, in the ink of the
+       surface it stands on. The quiet class is for an icon inside a control whose label
+       is already carrying the meaning, such as a drop down's chevron. -->
+  <Style Selector="Path.icon">
+    <Setter Property="Width" Value="{DynamicResource AltimIconSize}" />
+    <Setter Property="Height" Value="{DynamicResource AltimIconSize}" />
+    <Setter Property="Stretch" Value="Uniform" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Stroke" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="StrokeThickness" Value="{DynamicResource AltimIconStrokeThickness}" />
+    <Setter Property="StrokeJoin" Value="Round" />
+    <Setter Property="StrokeLineCap" Value="Round" />
+  </Style>
+
+  <Style Selector="Path.icon.quiet">
+    <Setter Property="Stroke" Value="{DynamicResource AltimTextSecondaryBrush}" />
+  </Style>
+
+  <Style Selector="Path.icon.home">
+    <Setter Property="Data" Value="{x:Static fmt:AltimIcons.Home}" />
+  </Style>
+
+  <Style Selector="Path.icon.clock">
+    <Setter Property="Data" Value="{x:Static fmt:AltimIcons.Clock}" />
+  </Style>
+
+  <Style Selector="Path.icon.gear">
+    <Setter Property="Data" Value="{x:Static fmt:AltimIcons.Settings}" />
+  </Style>
+
+  <Style Selector="Path.icon.next">
+    <Setter Property="Data" Value="{x:Static fmt:AltimIcons.ChevronRight}" />
+  </Style>
+
+  <Style Selector="Path.icon.down">
+    <Setter Property="Data" Value="{x:Static fmt:AltimIcons.ChevronDown}" />
+  </Style>
+
+  <Style Selector="Path.icon.away">
+    <Setter Property="Data" Value="{x:Static fmt:AltimIcons.ArrowRight}" />
   </Style>
 
   <!-- The 6px status dot. Neutral by default: DESIGN.md gives status three colours, and a
@@ -34,6 +100,12 @@
   <Style Selector="Ellipse.status">
     <Setter Property="Theme" Value="{DynamicResource AltimStatusDot}" />
     <Setter Property="Fill" Value="{DynamicResource AltimTextSecondaryBrush}" />
+  </Style>
+
+  <!-- The larger form, for a row where the dot is the only thing carrying the state. -->
+  <Style Selector="Ellipse.status.large">
+    <Setter Property="Width" Value="{DynamicResource AltimLegendDotSize}" />
+    <Setter Property="Height" Value="{DynamicResource AltimLegendDotSize}" />
   </Style>
 
   <Style Selector="Ellipse.status.ok">
@@ -44,8 +116,50 @@
     <Setter Property="Fill" Value="{DynamicResource AltimStatusErrorBrush}" />
   </Style>
 
+  <!-- The legend dot names a line on the tape, so it takes the line's own weight rather
+       than a status colour: the tape has two weights and the legend has two dots. -->
+  <Style Selector="Ellipse.legend">
+    <Setter Property="Theme" Value="{DynamicResource AltimLegendDot}" />
+  </Style>
+
+  <Style Selector="Ellipse.legend.secondary">
+    <Setter Property="Fill" Value="{DynamicResource AltimChartLineSecondaryBrush}" />
+  </Style>
+
+  <!-- The panel's status icon: a filled disc with the mark cut through it in the ground
+       colour. The disc is ink when everything answered and StatusError when something did
+       not, which is status appearing as colour on a mark rather than as a tinted panel. -->
+  <Style Selector="Ellipse.statusDisc">
+    <Setter Property="Width" Value="{DynamicResource AltimStatusIconSize}" />
+    <Setter Property="Height" Value="{DynamicResource AltimStatusIconSize}" />
+    <Setter Property="Fill" Value="{DynamicResource AltimTextPrimaryBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.statusDisc.error">
+    <Setter Property="Fill" Value="{DynamicResource AltimStatusErrorBrush}" />
+  </Style>
+
+  <Style Selector="Path.statusMark">
+    <Setter Property="Data" Value="{x:Static fmt:AltimIcons.Check}" />
+    <Setter Property="Width" Value="{DynamicResource AltimSpace12}" />
+    <Setter Property="Height" Value="{DynamicResource AltimSpace12}" />
+    <Setter Property="Stretch" Value="Uniform" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Stroke" Value="{DynamicResource AltimSurfaceBrush}" />
+    <Setter Property="StrokeThickness" Value="{DynamicResource AltimIconStrokeThickness}" />
+    <Setter Property="StrokeJoin" Value="Round" />
+    <Setter Property="StrokeLineCap" Value="Round" />
+  </Style>
+
+  <Style Selector="Path.statusMark.error">
+    <Setter Property="Data" Value="{x:Static fmt:AltimIcons.Alert}" />
+  </Style>
+
   <!-- A metric figure. The first metric on a surface carries the large figure and the rest the
-       small one, so the percentage stays the largest thing on screen without repeating itself. -->
+       small one, so the percentage stays the largest thing on screen without repeating itself.
+       A provider card is the exception the reference sets: its metrics are a set to be read
+       against one another, so they are all one size. -->
   <Style Selector="TextBlock.figure">
     <Setter Property="Theme" Value="{DynamicResource AltimFigureSmallText}" />
   </Style>
@@ -57,6 +171,12 @@
   <!-- Above the threshold the label turns, never the meter fill. -->
   <Style Selector="TextBlock.warn">
     <Setter Property="Foreground" Value="{DynamicResource AltimStatusWarnBrush}" />
+  </Style>
+
+  <!-- Pacing under the previous window is the one piece of good news the interface has to
+       report, and it reports it the way it reports every other status: as colour on a word. -->
+  <Style Selector="TextBlock.pacing.better">
+    <Setter Property="Foreground" Value="{DynamicResource AltimStatusOkBrush}" />
   </Style>
 
 </Styles>

@@ -136,8 +136,8 @@ public sealed class MeterTests
             Assert.True(frame.PixelSize.Height > 0);
         }
 
-        Assert.Equal(6d, Meter.RailHeight);
-        Assert.Equal(6d, meter.Bounds.Height, 6);
+        Assert.Equal(8d, Meter.RailHeight);
+        Assert.Equal(8d, meter.Bounds.Height, 6);
     }
 
     /// <summary>The first value lands flat: an entrance is not a level changing.</summary>

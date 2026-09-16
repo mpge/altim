@@ -13,6 +13,11 @@
 
   Dark is the designed palette from the brief, not an inversion of Light: backgrounds
   lift, borders stay lower contrast than text, and pure black is never a surface.
+
+  The sidebar is the one ground that carries both a hover and a selection, so it owns two
+  keys of its own. Light presses the selected row into the muted ground and lifts the
+  hovered one out of it; Dark can only lift, so it lifts the selected row further than the
+  hovered one. Either way the selected row is always the one further from the ground.
 -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
@@ -30,7 +35,7 @@
       <Color x:Key="AltimStatusErrorColor">#B42318</Color>
       <Color x:Key="AltimAccentAnthropicColor">#C05B32</Color>
       <Color x:Key="AltimAccentOpenAIColor">#0A0A0A</Color>
-      <Color x:Key="AltimSidebarSelectedColor">#FFFFFF</Color>
+      <Color x:Key="AltimSidebarSelectedColor">#EDEDED</Color>
 
       <SolidColorBrush x:Key="AltimSurfaceBrush" Color="#FFFFFF" />
       <SolidColorBrush x:Key="AltimSurfaceMutedBrush" Color="#FAFAFA" />
@@ -54,7 +59,8 @@
       <SolidColorBrush x:Key="AltimMeterThresholdBrush" Color="#666666" />
       <SolidColorBrush x:Key="AltimPopupBackgroundBrush" Color="#FAFAFA" />
       <SolidColorBrush x:Key="AltimSidebarBackgroundBrush" Color="#FAFAFA" />
-      <SolidColorBrush x:Key="AltimSidebarSelectedBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="AltimSidebarHoverBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="AltimSidebarSelectedBrush" Color="#EDEDED" />
       <SolidColorBrush x:Key="AltimChartGroundBrush" Color="#FAFAFA" />
       <SolidColorBrush x:Key="AltimChartLevelLineBrush" Color="#EAEAEA" />
       <SolidColorBrush x:Key="AltimChartLinePrimaryBrush" Color="#0A0A0A" />
@@ -76,7 +82,7 @@
       <Color x:Key="AltimStatusErrorColor">#B42318</Color>
       <Color x:Key="AltimAccentAnthropicColor">#C05B32</Color>
       <Color x:Key="AltimAccentOpenAIColor">#0A0A0A</Color>
-      <Color x:Key="AltimSidebarSelectedColor">#FFFFFF</Color>
+      <Color x:Key="AltimSidebarSelectedColor">#EDEDED</Color>
 
       <SolidColorBrush x:Key="AltimSurfaceBrush" Color="#FFFFFF" />
       <SolidColorBrush x:Key="AltimSurfaceMutedBrush" Color="#FAFAFA" />
@@ -99,7 +105,8 @@
       <SolidColorBrush x:Key="AltimMeterThresholdBrush" Color="#666666" />
       <SolidColorBrush x:Key="AltimPopupBackgroundBrush" Color="#FAFAFA" />
       <SolidColorBrush x:Key="AltimSidebarBackgroundBrush" Color="#FAFAFA" />
-      <SolidColorBrush x:Key="AltimSidebarSelectedBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="AltimSidebarHoverBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="AltimSidebarSelectedBrush" Color="#EDEDED" />
       <SolidColorBrush x:Key="AltimChartGroundBrush" Color="#FAFAFA" />
       <SolidColorBrush x:Key="AltimChartLevelLineBrush" Color="#EAEAEA" />
       <SolidColorBrush x:Key="AltimChartLinePrimaryBrush" Color="#0A0A0A" />
@@ -120,7 +127,7 @@
       <Color x:Key="AltimStatusErrorColor">#F87171</Color>
       <Color x:Key="AltimAccentAnthropicColor">#D2764D</Color>
       <Color x:Key="AltimAccentOpenAIColor">#F2F2F3</Color>
-      <Color x:Key="AltimSidebarSelectedColor">#1C1C1F</Color>
+      <Color x:Key="AltimSidebarSelectedColor">#232326</Color>
 
       <SolidColorBrush x:Key="AltimSurfaceBrush" Color="#0C0C0D" />
       <SolidColorBrush x:Key="AltimSurfaceMutedBrush" Color="#151517" />
@@ -143,7 +150,8 @@
       <SolidColorBrush x:Key="AltimMeterThresholdBrush" Color="#8A8A90" />
       <SolidColorBrush x:Key="AltimPopupBackgroundBrush" Color="#151517" />
       <SolidColorBrush x:Key="AltimSidebarBackgroundBrush" Color="#151517" />
-      <SolidColorBrush x:Key="AltimSidebarSelectedBrush" Color="#1C1C1F" />
+      <SolidColorBrush x:Key="AltimSidebarHoverBrush" Color="#1C1C1F" />
+      <SolidColorBrush x:Key="AltimSidebarSelectedBrush" Color="#232326" />
       <SolidColorBrush x:Key="AltimChartGroundBrush" Color="#151517" />
       <SolidColorBrush x:Key="AltimChartLevelLineBrush" Color="#232326" />
       <SolidColorBrush x:Key="AltimChartLinePrimaryBrush" Color="#F2F2F3" />

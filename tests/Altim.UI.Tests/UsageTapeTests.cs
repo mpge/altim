@@ -24,8 +24,8 @@ public sealed class UsageTapeTests
 
     /// <summary>Rules are drawn at 25, 50, 75 and 100. There is no rule at zero.</summary>
     [AvaloniaFact]
-    public void LevelsAreTwentyFiveFiftySeventyFiveAndOneHundred() =>
-        Assert.Equal<double>([25d, 50d, 75d, 100d], UsageTape.Levels);
+    public void LevelsAreNoneHalfAndFull() =>
+        Assert.Equal<double>([0d, 50d, 100d], UsageTape.Levels);
 
     /// <summary>Dots stop at 32 points.</summary>
     [AvaloniaFact]

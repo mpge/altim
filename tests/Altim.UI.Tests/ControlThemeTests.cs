@@ -27,6 +27,8 @@ public sealed class ControlThemeTests
         "Button",
         "PrimaryButton",
         "QuietButton",
+        "IconButton",
+        "TextButton",
         "DestructiveButton",
         "ToggleSwitch",
         "ComboBox",
@@ -39,8 +41,14 @@ public sealed class ControlThemeTests
         "ToolTip",
         "Meter",
         "UsageTape",
+        "Panel",
         "ProviderCard",
+        "Chip",
+        "Pill",
+        "BrandMark",
+        "Sidebar",
         "StatusDot",
+        "LegendDot",
     ];
 
     /// <summary>Every restyled control renders a frame in Light and in Dark.</summary>
@@ -262,7 +270,7 @@ public sealed class ControlThemeTests
             Assert.Equal(WindowTransparencyLevel.Transparent, window.ActualTransparencyLevel);
 
             Border panel = Assert.IsType<Border>(Part<Border>(window, "PART_PopupPanel"));
-            Assert.Equal(new CornerRadius(8d), panel.CornerRadius);
+            Assert.Equal(new CornerRadius(12d), panel.CornerRadius);
             Assert.Equal(new Thickness(1d), panel.BorderThickness);
             Assert.Equal(1, panel.BoxShadow.Count);
 
@@ -325,6 +333,8 @@ public sealed class ControlThemeTests
         "Button" => new Button { Content = "Retry" },
         "PrimaryButton" => Themed(new Button { Content = "Open Altim" }, "AltimPrimaryButton"),
         "QuietButton" => Themed(new Button { Content = "Clear history" }, "AltimQuietButton"),
+        "IconButton" => Themed(new Button { Content = "S" }, "AltimIconButton"),
+        "TextButton" => Themed(new Button { Content = "Open Altim" }, "AltimTextButton"),
         "DestructiveButton" => Themed(new Button { Content = "Delete history" }, "AltimDestructiveButton"),
         "ToggleSwitch" => new ToggleSwitch { Content = "Start with the system", IsChecked = true },
         "ComboBox" => new ComboBox { ItemsSource = new[] { "System", "Light", "Dark" }, SelectedIndex = 0 },
@@ -342,10 +352,22 @@ public sealed class ControlThemeTests
         {
             Series = [new UsageTapeSeries("Claude", [10d, 30d, 25d, 60d, 80d])],
         },
+        "Panel" => Themed(
+            new Border { Child = new TextBlock { Text = "Usage history" } },
+            "AltimPanel"),
         "ProviderCard" => Themed(
             new Border { Child = new TextBlock { Text = "Claude" } },
             "AltimProviderCard"),
+        "Chip" => Themed(
+            new Border { Child = new TextBlock { Text = "claude-opus-4" } },
+            "AltimChip"),
+        "Pill" => Themed(new Border { Child = new TextBlock { Text = "Live" } }, "AltimPill"),
+        "BrandMark" => Themed(new Border(), "AltimBrandMark"),
+        "Sidebar" => Themed(
+            new Border { Child = new TextBlock { Text = "Overview" } },
+            "AltimSidebar"),
         "StatusDot" => Themed(new Ellipse(), "AltimStatusDot"),
+        "LegendDot" => Themed(new Ellipse(), "AltimLegendDot"),
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, "Unknown control."),
     };
 

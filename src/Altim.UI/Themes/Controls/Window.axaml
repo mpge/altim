@@ -4,7 +4,7 @@
   The default window is a plain Surface ground carrying the Inter face and Body size, so
   every descendant inherits the family without a view setting it.
 
-  AltimPopupWindow is the tray panel from DESIGN.md: a 320 wide panel, radius 8, 1px border,
+  AltimPopupWindow is the tray panel from DESIGN.md: a 320 wide panel, radius 12, 1px border,
   SurfaceMuted, and the single shadow the system allows. The 320 is on the PANEL. The window
   is wider - AltimPopupWindowWidth, 320 plus the shadow inset on both sides - because the
   window is transparent room for the shadow to fall into and the panel is the thing the user
@@ -84,7 +84,7 @@
                         Background="{DynamicResource AltimPopupBackgroundBrush}"
                         BorderBrush="{DynamicResource AltimBorderBrush}"
                         BorderThickness="{DynamicResource AltimBorderThickness}"
-                        CornerRadius="{DynamicResource AltimCornerRadius8}"
+                        CornerRadius="{DynamicResource AltimCornerRadius12}"
                         BoxShadow="{DynamicResource AltimPopupShadow}">
                   <ContentPresenter Name="PART_ContentPresenter"
                                     Content="{TemplateBinding Content}"

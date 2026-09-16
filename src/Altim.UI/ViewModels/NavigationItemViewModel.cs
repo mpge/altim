@@ -1,32 +1,50 @@
-using Avalonia.Media;
-using CommunityToolkit.Mvvm.ComponentModel;
-
 namespace Altim.UI.ViewModels;
 
 /// <summary>
-/// One sidebar row: a name, an optional 16px mark and the page it shows.
+/// Which mark a sidebar row carries.
+/// </summary>
+public enum NavigationIcon
+{
+    /// <summary>The Overview row: a house.</summary>
+    Overview = 0,
+
+    /// <summary>A provider row: that provider's own mark, in its own accent.</summary>
+    Provider = 1,
+
+    /// <summary>The History row: a clock.</summary>
+    History = 2,
+
+    /// <summary>The Settings row: a gear.</summary>
+    Settings = 3,
+}
+
+/// <summary>
+/// One sidebar row: a name, a 16px mark and the page it shows.
 /// </summary>
 /// <remarks>
-/// The mark is only set for a provider row, where it carries the provider accent. The other rows
-/// stay plain, because DESIGN.md gives navigation no accent of its own.
+/// The row says which mark it wants, not what the mark is. A geometry cannot be built before
+/// Avalonia's rendering platform exists, so a view model that held one could not be
+/// constructed by a plain unit test - or by anything else that runs before a window does. The
+/// view turns these flags into style classes and the style supplies the path, which happens
+/// when the row is already on screen.
 /// </remarks>
-public sealed class NavigationItemViewModel : ObservableObject
+public sealed class NavigationItemViewModel
 {
     /// <summary>Initializes a sidebar row.</summary>
     /// <param name="page">The page the row shows.</param>
-    /// <param name="glyph">The 16px mark, or null for a row without one.</param>
-    /// <param name="isAnthropic">Whether the mark wears the Anthropic accent.</param>
-    /// <param name="isOpenAI">Whether the mark wears the OpenAI accent.</param>
+    /// <param name="icon">The mark the row carries.</param>
+    /// <param name="isAnthropic">Whether a provider mark wears the Anthropic accent.</param>
+    /// <param name="isOpenAI">Whether a provider mark wears the OpenAI accent.</param>
     public NavigationItemViewModel(
         IDashboardPage page,
-        Geometry? glyph = null,
+        NavigationIcon icon = NavigationIcon.Overview,
         bool isAnthropic = false,
         bool isOpenAI = false)
     {
         ArgumentNullException.ThrowIfNull(page);
 
         Page = page;
-        Glyph = glyph;
+        Icon = icon;
         IsAnthropic = isAnthropic;
         IsOpenAI = isOpenAI;
     }
@@ -37,11 +55,20 @@ public sealed class NavigationItemViewModel : ObservableObject
     /// <summary>The row's name.</summary>
     public string Title => Page.Title;
 
-    /// <summary>The 16px mark, or null.</summary>
-    public Geometry? Glyph { get; }
+    /// <summary>The mark the row carries.</summary>
+    public NavigationIcon Icon { get; }
 
-    /// <summary>Whether a mark exists to draw.</summary>
-    public bool HasGlyph => Glyph is not null;
+    /// <summary>Whether the row's mark is a provider's own, rather than a line icon.</summary>
+    public bool IsProviderMark => Icon == NavigationIcon.Provider;
+
+    /// <summary>Whether the row carries the house.</summary>
+    public bool IsOverviewIcon => Icon == NavigationIcon.Overview;
+
+    /// <summary>Whether the row carries the clock.</summary>
+    public bool IsHistoryIcon => Icon == NavigationIcon.History;
+
+    /// <summary>Whether the row carries the gear.</summary>
+    public bool IsSettingsIcon => Icon == NavigationIcon.Settings;
 
     /// <summary>Whether the mark wears the Anthropic accent.</summary>
     public bool IsAnthropic { get; }

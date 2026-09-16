@@ -252,6 +252,10 @@ public sealed class PixelTests
         Control target;
         Control content;
 
+        // The sidebar's ground belongs to the Border around the list rather than to the
+        // list, because the brand header above it and the footer block below it stand on
+        // the same ground. Standing the list on its own would put it on Surface, which is
+        // not the ground the hover step was derived against.
         if (name == "SidebarItem")
         {
             var sidebar = new ListBox
@@ -260,7 +264,7 @@ public sealed class PixelTests
                 Theme = Resolve("AltimSidebarListBox"),
             };
 
-            content = sidebar;
+            content = new Border { Theme = Resolve("AltimSidebar"), Child = sidebar };
             target = sidebar;
         }
         else
@@ -300,9 +304,12 @@ public sealed class PixelTests
         host.Window.MouseMove(bounds.Center, RawInputModifiers.None);
         Frame after = host.Capture();
 
-        // The hover step on a muted ground is Border, one step further along the ramp.
+        // A control on a muted ground steps off it to say it is hovered. The sidebar
+        // lifts to Surface, because it keeps the step towards Border for the selected row;
+        // everything else takes Border, the next step along the same ramp.
+        Color expected = name == "SidebarItem" ? Ink.Surface : Ink.Border;
         Assert.True(
-            after.Count(inside, colour => Ink.Near(colour, Ink.Border)) > 0,
+            after.Count(inside, colour => Ink.Near(colour, expected)) > 0,
             $"Hover is invisible on a muted ground: {after.Describe(inside)}");
         Assert.True(
             after.DifferenceWith(before, inside) > 0,
@@ -386,10 +393,16 @@ public sealed class PixelTests
 
         // The tick is TextSecondary on a Border track, both flat colours. Every pixel in
         // the tick column is one or the other; a smeared tick would be a blend of them.
+        //
+        // The band stops short of the rail's rounded ends on every side. Those ends are
+        // antialiased against the page by design - the rail is a pill - so a band that
+        // included them would be reporting the radius as a smear. The inset is the rail's
+        // own radius, which is half its height, in device pixels.
+        double radius = Meter.RailHeight / 2d * 1.25d;
         var band = new Rect(
-            bounds.X * 1.25d,
+            (bounds.X * 1.25d) + radius,
             (bounds.Y * 1.25d) + 2d,
-            bounds.Width * 1.25d,
+            (bounds.Width * 1.25d) - (radius * 2d),
             Math.Max(1d, (bounds.Height * 1.25d) - 4d));
 
         int blended = frame.Count(

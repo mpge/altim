@@ -56,6 +56,9 @@ public static class DesignData
         }
     }
 
+    /// <summary>One provider card, populated.</summary>
+    public static ProviderViewModel? Provider => Dashboard?.Providers[0];
+
     /// <summary>One metric row, reported and above its threshold.</summary>
     public static MetricViewModel? Metric =>
         Dashboard is { } dashboard && dashboard.Providers[0].Metrics.Count > 0

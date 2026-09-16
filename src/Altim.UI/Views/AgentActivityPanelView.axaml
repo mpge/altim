@@ -1,0 +1,99 @@
+<!--
+  The agent activity panel: what every provider says is running right now.
+
+  Two things about this panel are deliberately not what the reference draws.
+
+  The badge reads "Live" and is a label rather than a picker. Activity is read live and never
+  written down - PRIVACY.md - so there is no second span to offer, and a drop down whose list
+  has one entry in it is a control that lies about what it can do.
+
+  The chip carries the model a session is running, and only that. The reference's chips show
+  the file being edited and the command being run; Altim's providers are built so that neither
+  can be obtained - process arguments are never read, and the parsers reject any string shaped
+  like a path. The model identifier is the one descriptor a provider exposes that is safe to
+  show, and a session that does not name one gets no chip rather than a placeholder.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:design="using:Altim.UI.ViewModels.Design"
+             xmlns:vm="using:Altim.UI.ViewModels"
+             x:Class="Altim.UI.Views.AgentActivityPanelView"
+             x:DataType="vm:OverviewViewModel"
+             Design.DataContext="{x:Static design:DesignData.Overview}">
+
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
+  </UserControl.Styles>
+
+  <Border Theme="{DynamicResource AltimPanel}">
+    <Grid RowDefinitions="Auto,*">
+
+      <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+        <TextBlock Grid.Column="0"
+                   VerticalAlignment="Center"
+                   Theme="{DynamicResource AltimHeadingText}"
+                   Text="{Binding ActivityTitle}" />
+        <Border Grid.Column="1" Theme="{DynamicResource AltimPill}">
+          <StackPanel Orientation="Horizontal"
+                      VerticalAlignment="Center"
+                      Spacing="{DynamicResource AltimSpace6}">
+            <Ellipse Classes="status ok" />
+            <TextBlock VerticalAlignment="Center"
+                       Theme="{DynamicResource AltimBodyText}"
+                       Text="{Binding LiveLabel}" />
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <TextBlock Grid.Row="1"
+                 Margin="0,16,0,0"
+                 IsVisible="{Binding !HasActivity}"
+                 Theme="{DynamicResource AltimBodyText}"
+                 Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                 Text="{Binding NoActivityText}" />
+
+      <ScrollViewer Grid.Row="1" Margin="0,8,0,0" IsVisible="{Binding HasActivity}">
+        <ItemsControl ItemsSource="{Binding Activity}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:AgentSessionViewModel">
+              <Grid Margin="0,12,0,0" ColumnDefinitions="Auto,*,Auto">
+                <Path Grid.Column="0"
+                      VerticalAlignment="Top"
+                      Margin="0,2,0,0"
+                      Classes="glyph medium"
+                      Classes.anthropic="{Binding IsAnthropic}"
+                      Classes.openai="{Binding IsOpenAI}" />
+                <StackPanel Grid.Column="1"
+                            Margin="12,0,12,0"
+                            Spacing="{DynamicResource AltimSpace4}">
+                  <TextBlock Theme="{DynamicResource AltimLeadStrongText}"
+                             Text="{Binding ProviderName}" />
+                  <TextBlock Theme="{DynamicResource AltimBodyText}"
+                             Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                             Text="{Binding DetailText}" />
+                  <Border Theme="{DynamicResource AltimChip}" IsVisible="{Binding HasChip}">
+                    <TextBlock Theme="{DynamicResource AltimChipText}" Text="{Binding ChipText}" />
+                  </Border>
+                </StackPanel>
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Top"
+                            Spacing="{DynamicResource AltimSpace8}">
+                  <TextBlock VerticalAlignment="Center"
+                             IsVisible="{Binding HasRelativeText}"
+                             Theme="{DynamicResource AltimLabelMetricText}"
+                             Text="{Binding RelativeText}" />
+                  <Ellipse Classes="status large"
+                           Classes.ok="{Binding IsActive}"
+                           VerticalAlignment="Center" />
+                </StackPanel>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+
+    </Grid>
+  </Border>
+
+</UserControl>

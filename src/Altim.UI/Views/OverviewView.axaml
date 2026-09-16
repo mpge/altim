@@ -1,12 +1,20 @@
 <!--
-  Overview: the greeting, then one card per provider.
+  Overview: the heading, a card per provider, and the week beside what is running now.
 
-  The card is the only card in the system and it appears only here: 1px border, radius 8,
-  padding 20, no shadow. Inside it, metrics are separated by whitespace and the footer by a
-  single rule, because a card inside a card is what DESIGN.md exists to prevent.
+  The heading is an eyebrow, a title and a line. The eyebrow carries the greeting - which is
+  the time-sensitive part and the part that repeats - and the title names the page, which is
+  what somebody navigating back to it is looking for. The aggregate status sits opposite the
+  eyebrow, on the same line, because it is the other thing that is true of the whole page.
+
+  Both rows below are card grids: two columns while there is room for a card of a readable
+  width, one column when there is not. The bottom row is given a height because the panels in
+  it are windows onto lists that have no natural end - a week of history and however many
+  agents happen to be running - and a panel that grew with its contents would push the cards
+  above it off the top of the page.
 -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Altim.UI.Controls"
              xmlns:design="using:Altim.UI.ViewModels.Design"
              xmlns:views="using:Altim.UI.Views"
              xmlns:vm="using:Altim.UI.ViewModels"
@@ -21,86 +29,53 @@
   <ScrollViewer>
     <StackPanel Margin="{DynamicResource AltimInset32}" Spacing="{DynamicResource AltimSpace24}">
 
-      <StackPanel Spacing="{DynamicResource AltimSpace4}">
-        <TextBlock Theme="{DynamicResource AltimTitleText}" Text="{Binding GreetingText}" />
-        <TextBlock Theme="{DynamicResource AltimBodyText}"
-                   Foreground="{DynamicResource AltimTextSecondaryBrush}"
-                   Text="{Binding SubHeading}" />
-      </StackPanel>
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Grid.Column="0" Spacing="{DynamicResource AltimSpace8}">
+          <TextBlock Theme="{DynamicResource AltimEyebrowText}" Text="{Binding EyebrowText}" />
+          <TextBlock Theme="{DynamicResource AltimDisplayText}" Text="{Binding PageTitle}" />
+          <TextBlock Theme="{DynamicResource AltimLeadText}"
+                     TextWrapping="Wrap"
+                     Text="{Binding SubHeading}" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    VerticalAlignment="Top"
+                    Spacing="{DynamicResource AltimSpace8}">
+          <Ellipse Classes="status"
+                   Classes.ok="{Binding StatusIsOk}"
+                   Classes.error="{Binding StatusIsError}" />
+          <TextBlock VerticalAlignment="Center"
+                     Theme="{DynamicResource AltimBodyText}"
+                     Text="{Binding StatusLine}" />
+        </StackPanel>
+      </Grid>
 
       <TextBlock IsVisible="{Binding !HasProviders}"
                  Theme="{DynamicResource AltimBodyText}"
                  Text="{Binding NoProvidersText}" />
 
       <ItemsControl ItemsSource="{Binding Providers}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <controls:CardGrid MinimumColumnWidth="{DynamicResource AltimCardMinWidth}"
+                               ColumnGap="{DynamicResource AltimSpace24}"
+                               RowGap="{DynamicResource AltimSpace24}" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:ProviderViewModel">
-            <Border Theme="{DynamicResource AltimProviderCard}" Margin="0,0,0,16">
-              <StackPanel Spacing="{DynamicResource AltimSpace16}">
-
-                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
-                  <Path Grid.Column="0"
-                        Classes="glyph"
-                        Classes.anthropic="{Binding IsAnthropic}"
-                        Classes.openai="{Binding IsOpenAI}"
-                        Data="{Binding Glyph}" />
-                  <TextBlock Grid.Column="1"
-                             Margin="8,0,0,0"
-                             VerticalAlignment="Center"
-                             Theme="{DynamicResource AltimHeadingText}"
-                             Text="{Binding DisplayName}" />
-                  <Ellipse Grid.Column="2"
-                           Classes="status"
-                           Classes.ok="{Binding Status.IsOk}"
-                           Classes.error="{Binding Status.IsError}" />
-                  <TextBlock Grid.Column="3"
-                             Margin="6,0,0,0"
-                             VerticalAlignment="Center"
-                             Theme="{DynamicResource AltimLabelText}"
-                             Text="{Binding Status.Word}" />
-                </Grid>
-
-                <StackPanel IsVisible="{Binding HasError}" Spacing="{DynamicResource AltimSpace8}">
-                  <TextBlock Theme="{DynamicResource AltimBodyText}" Text="{Binding ErrorText}" />
-                  <Button HorizontalAlignment="Left"
-                          Content="{Binding RetryLabel}"
-                          Command="{Binding RetryCommand}" />
-                </StackPanel>
-
-                <TextBlock IsVisible="{Binding ShowsNoMetricsNotice}"
-                           Theme="{DynamicResource AltimBodyText}"
-                           Foreground="{DynamicResource AltimTextSecondaryBrush}"
-                           Text="{Binding NoMetricsText}" />
-
-                <ItemsControl ItemsSource="{Binding Metrics}">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:MetricViewModel">
-                      <views:MetricRowView Margin="0,0,0,16" />
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-
-                <TextBlock IsVisible="{Binding HasTokens}"
-                           Theme="{DynamicResource AltimCaptionMetricText}"
-                           Text="{Binding TokensText}" />
-
-                <Separator />
-
-                <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Grid.Column="0"
-                             IsVisible="{Binding HasReset}"
-                             Theme="{DynamicResource AltimCaptionMetricText}"
-                             Text="{Binding ResetText}" />
-                  <TextBlock Grid.Column="1"
-                             Theme="{DynamicResource AltimCaptionMetricText}"
-                             Text="{Binding LastRefreshedText}" />
-                </Grid>
-
-              </StackPanel>
-            </Border>
+            <views:ProviderCardView />
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
+
+      <controls:CardGrid MinimumColumnWidth="{DynamicResource AltimCardMinWidth}"
+                         ColumnGap="{DynamicResource AltimSpace24}"
+                         RowGap="{DynamicResource AltimSpace24}">
+        <views:UsageHistoryPanelView Height="248" DataContext="{Binding UsageHistory}" />
+        <views:AgentActivityPanelView Height="248" />
+      </controls:CardGrid>
 
     </StackPanel>
   </ScrollViewer>

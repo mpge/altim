@@ -11,7 +11,8 @@ using CommunityToolkit.Mvvm.Input;
 namespace Altim.UI.ViewModels;
 
 /// <summary>
-/// The tray panel: provider rows, reset times, one status line and one action.
+/// The tray panel: a header, a line per provider, the next reset each of them has, one
+/// status line and one action.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -39,6 +40,10 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _hasProviders;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusIsOk))]
+    private bool _statusIsError;
+
     /// <summary>Initializes the panel over every configured provider.</summary>
     /// <param name="providers">The providers to report on.</param>
     /// <param name="timeProvider">The clock reset times are measured against.</param>
@@ -56,6 +61,7 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
         {
             var row = new ProviderViewModel(provider, timeProvider, settings);
             row.PropertyChanged += OnProviderPropertyChanged;
+            row.OpenRequested += OnProviderOpenRequested;
             Providers.Add(row);
         }
 
@@ -63,8 +69,12 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
         Rebuild();
     }
 
-    /// <summary>Raised when the panel's action asks for the dashboard.</summary>
-    public event EventHandler? OpenRequested;
+    /// <summary>
+    /// Raised when the panel asks for the dashboard. The payload is the sidebar section to
+    /// open it on, or null for wherever it opens by default: the gear asks for Settings and a
+    /// provider's own row asks for that provider, and the panel does not open windows itself.
+    /// </summary>
+    public event EventHandler<string?>? OpenRequested;
 
     /// <summary>One row per provider, in the order they were registered.</summary>
     public ObservableCollection<ProviderViewModel> Providers { get; } = [];
@@ -72,8 +82,20 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     /// <summary>Every reset instant any provider reports, soonest first.</summary>
     public ObservableCollection<ResetRowViewModel> Resets { get; } = [];
 
+    /// <summary>The wordmark in the panel's header.</summary>
+    public string Title => "Altim";
+
     /// <summary>The label on the panel's one action.</summary>
     public string OpenLabel => "Open Altim";
+
+    /// <summary>The heading over the resets section.</summary>
+    public string ResetsLabel => UsageFormat.ResetsLabel;
+
+    /// <summary>Whether the status icon reads as operational.</summary>
+    public bool StatusIsOk => !StatusIsError;
+
+    /// <summary>The name of the sidebar section the gear opens.</summary>
+    public const string SettingsSection = "Settings";
 
     /// <summary>Shown in place of the resets section when no window reports an instant.</summary>
     public string NoResetsText => UsageFormat.NoResetsReported;
@@ -121,12 +143,24 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
         foreach (ProviderViewModel provider in Providers)
         {
             provider.PropertyChanged -= OnProviderPropertyChanged;
+            provider.OpenRequested -= OnProviderOpenRequested;
             provider.Dispose();
         }
     }
 
     [RelayCommand]
-    private void OpenAltim() => OpenRequested?.Invoke(this, EventArgs.Empty);
+    private void OpenAltim() => OpenRequested?.Invoke(this, null);
+
+    [RelayCommand]
+    private void OpenSettings() => OpenRequested?.Invoke(this, SettingsSection);
+
+    private void OnProviderOpenRequested(object? sender, EventArgs e)
+    {
+        if (sender is ProviderViewModel row)
+        {
+            OpenRequested?.Invoke(this, row.DisplayName);
+        }
+    }
 
     private void OnProviderPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -150,7 +184,9 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
             readings.Add(provider.CurrentUsage);
         }
 
-        StatusLine = UsageAggregator.DescribeStatus(readings, DisplayNameFor);
+        UsageOverview overview = UsageAggregator.Aggregate(readings, DisplayNameFor);
+        StatusLine = overview.StatusLine;
+        StatusIsError = overview.Status == ProviderStatus.Error;
     }
 
     private string DisplayNameFor(string providerId)
@@ -166,23 +202,34 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
         return providerId;
     }
 
+    /// <summary>
+    /// One line per provider, carrying the soonest window that provider actually reports a
+    /// reset instant for. The panel used to list every window of every provider, which on a
+    /// machine with two providers and five windows was five lines of small print where the
+    /// question being asked is "how long have I got".
+    /// </summary>
     private void RebuildResets()
     {
         List<(DateTimeOffset At, ResetRowViewModel Row)> rows = [];
         foreach (ProviderViewModel provider in Providers)
         {
+            MetricViewModel? soonest = null;
             foreach (MetricViewModel metric in provider.Metrics)
             {
-                if (metric.ResetsAt is not { } instant || metric.RemainingText is not { } remaining)
+                if (metric.ResetsAt is not { } instant || metric.RemainingText is null)
                 {
                     continue;
                 }
 
-                rows.Add((instant, new ResetRowViewModel(
-                    metric.Label,
-                    provider.DisplayName,
-                    remaining,
-                    metric.ResetClockText)));
+                if (soonest?.ResetsAt is not { } best || instant < best)
+                {
+                    soonest = metric;
+                }
+            }
+
+            if (soonest is { ResetsAt: { } at, RemainingText: { } remaining })
+            {
+                rows.Add((at, new ResetRowViewModel(provider.DisplayName, remaining)));
             }
         }
 

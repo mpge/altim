@@ -1,10 +1,14 @@
 <!--
-  The dashboard: a 200px sidebar and the page it selects.
+  The dashboard: a 192px sidebar and the page it selects.
 
-  Navigation is a list and nothing more. The selected row takes the Surface colour back off the
-  muted sidebar ground, which is the whole of the selected treatment: no accent bar, no bold, no
-  second colour. The sidebar itself is the AltimSidebarListBox theme, so its width, ground and
-  right border all come from the design system rather than from here.
+  The sidebar is three things stacked on one ground: the brand header, the navigation, and a
+  footer block that names the product and what it is for. The ground, the width and the right
+  border belong to the containing Border rather than to the list, because the header above the
+  list and the block below it stand on the same ground.
+
+  Navigation is a list and nothing more. The selected row is a flat fill and nothing else: no
+  accent bar, no bold, no second colour. Each row carries a 16px mark - a house, a provider's
+  own glyph, a clock, a gear - which the style supplies from the flags the row exposes.
 -->
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -15,10 +19,10 @@
         x:DataType="vm:DashboardViewModel"
         Design.DataContext="{x:Static design:DesignData.Dashboard}"
         Title="Altim"
-        Width="960"
-        Height="680"
-        MinWidth="720"
-        MinHeight="520"
+        Width="1120"
+        Height="900"
+        MinWidth="820"
+        MinHeight="600"
         WindowStartupLocation="CenterScreen">
 
   <Window.Styles>
@@ -27,31 +31,66 @@
 
   <Grid ColumnDefinitions="Auto,*">
 
-    <ListBox Grid.Column="0"
-             Theme="{DynamicResource AltimSidebarListBox}"
-             ItemsSource="{Binding Sections}"
-             SelectedItem="{Binding SelectedSection}">
-      <ListBox.ItemTemplate>
-        <DataTemplate x:DataType="vm:NavigationItemViewModel">
-          <Grid ColumnDefinitions="Auto,*">
-            <!-- The mark's box is always present so provider rows and plain rows line up. -->
-            <Panel Grid.Column="0"
-                   Width="{DynamicResource AltimProviderGlyphSize}"
-                   Height="{DynamicResource AltimProviderGlyphSize}">
-              <Path Classes="glyph"
-                    Classes.anthropic="{Binding IsAnthropic}"
-                    Classes.openai="{Binding IsOpenAI}"
-                    IsVisible="{Binding HasGlyph}"
-                    Data="{Binding Glyph}" />
-            </Panel>
-            <TextBlock Grid.Column="1"
-                       Margin="8,0,0,0"
-                       VerticalAlignment="Center"
-                       Text="{Binding Title}" />
-          </Grid>
-        </DataTemplate>
-      </ListBox.ItemTemplate>
-    </ListBox>
+    <Border Grid.Column="0" Theme="{DynamicResource AltimSidebar}">
+      <DockPanel LastChildFill="True">
+
+        <!-- Brand header -->
+        <Grid DockPanel.Dock="Top"
+              Height="{DynamicResource AltimBrandHeaderHeight}"
+              Margin="24,0"
+              ColumnDefinitions="Auto,*">
+          <Border Grid.Column="0" Theme="{DynamicResource AltimBrandMark}" />
+          <TextBlock Grid.Column="1"
+                     Margin="8,0,0,0"
+                     VerticalAlignment="Center"
+                     Theme="{DynamicResource AltimHeadingText}"
+                     Text="{Binding WindowTitle}" />
+        </Grid>
+
+        <!-- Footer block, pinned to the bottom on the header's own inset -->
+        <StackPanel DockPanel.Dock="Bottom"
+                    Margin="24,24,24,24"
+                    Spacing="{DynamicResource AltimSpace2}">
+          <TextBlock Theme="{DynamicResource AltimBodyText}"
+                     FontWeight="{DynamicResource AltimFontWeightHeading}"
+                     Text="{Binding WindowTitle}" />
+          <TextBlock Theme="{DynamicResource AltimLabelText}"
+                     TextWrapping="Wrap"
+                     Text="{Binding Tagline}" />
+        </StackPanel>
+
+        <ListBox Theme="{DynamicResource AltimSidebarListBox}"
+                 ItemsSource="{Binding Sections}"
+                 SelectedItem="{Binding SelectedSection}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:NavigationItemViewModel">
+              <Grid ColumnDefinitions="Auto,*">
+                <!-- The mark's box is always present so every row lines up, whichever of
+                     the two kinds of mark it is carrying. -->
+                <Panel Grid.Column="0"
+                       Width="{DynamicResource AltimIconSize}"
+                       Height="{DynamicResource AltimIconSize}">
+                  <Path Classes="glyph"
+                        Classes.anthropic="{Binding IsAnthropic}"
+                        Classes.openai="{Binding IsOpenAI}"
+                        IsVisible="{Binding IsProviderMark}" />
+                  <Path Classes="icon"
+                        Classes.home="{Binding IsOverviewIcon}"
+                        Classes.clock="{Binding IsHistoryIcon}"
+                        Classes.gear="{Binding IsSettingsIcon}"
+                        IsVisible="{Binding !IsProviderMark}" />
+                </Panel>
+                <TextBlock Grid.Column="1"
+                           Margin="12,0,0,0"
+                           VerticalAlignment="Center"
+                           Text="{Binding Title}" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+      </DockPanel>
+    </Border>
 
     <ContentControl Grid.Column="1" Content="{Binding CurrentPage}">
       <ContentControl.DataTemplates>

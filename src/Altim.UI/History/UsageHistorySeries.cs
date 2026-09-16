@@ -162,7 +162,7 @@ public static class UsageHistorySeries
                 cursor++;
             }
 
-            if (held is null || (ExpiresAt(held) is { } expiry && expiry <= start))
+            if (held is null || !HoldsAt(held, start))
             {
                 values[i] = null;
                 continue;
@@ -173,6 +173,22 @@ public static class UsageHistorySeries
         }
 
         return drawn == 0 ? [] : values;
+    }
+
+    /// <summary>
+    /// Whether a sample's level is still the level at an instant.
+    /// </summary>
+    /// <param name="sample">The sample.</param>
+    /// <param name="at">The instant to test.</param>
+    /// <returns>
+    /// True while the window the sample measured is still the window running at that
+    /// instant. False once it has rolled over, because the level it recorded then describes
+    /// a window nobody is in any more - which is not the same as the level being zero.
+    /// </returns>
+    public static bool HoldsAt(UsageSample sample, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(sample);
+        return ExpiresAt(sample) is not { } expiry || expiry > at;
     }
 
     private static DateTimeOffset? ExpiresAt(UsageSample sample)

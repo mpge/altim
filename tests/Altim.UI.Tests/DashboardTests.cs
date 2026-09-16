@@ -46,10 +46,15 @@ public sealed class DashboardTests
             section => Assert.Equal("History", section.Title),
             section => Assert.Equal("Settings", section.Title));
 
-        Assert.False(dashboard.Sections[0].HasGlyph);
-        Assert.True(dashboard.Sections[1].HasGlyph);
+        // Every row carries a mark now. What differs is which kind: the pages take a line
+        // icon and a provider takes its own glyph in its own accent.
+        Assert.Equal(NavigationIcon.Overview, dashboard.Sections[0].Icon);
+        Assert.False(dashboard.Sections[0].IsProviderMark);
+        Assert.True(dashboard.Sections[1].IsProviderMark);
         Assert.True(dashboard.Sections[1].IsAnthropic);
         Assert.True(dashboard.Sections[2].IsOpenAI);
+        Assert.Equal(NavigationIcon.History, dashboard.Sections[3].Icon);
+        Assert.Equal(NavigationIcon.Settings, dashboard.Sections[4].Icon);
     }
 
     /// <summary>Opening the window reads nothing until something asks it to.</summary>
@@ -106,7 +111,10 @@ public sealed class DashboardTests
         using var dashboard = new DashboardViewModel(providers, history, settings, clock);
         await dashboard.LoadAsync(TestContext.Current.CancellationToken);
 
+        // The greeting is the eyebrow above the title now, and the title names the page.
         Assert.Equal("Good evening", dashboard.Overview.GreetingText);
+        Assert.Equal("GOOD EVENING", dashboard.Overview.EyebrowText);
+        Assert.Equal("Usage overview", dashboard.Overview.PageTitle);
         Assert.Equal("Here's how your AI agents are doing.", dashboard.Overview.SubHeading);
     }
 

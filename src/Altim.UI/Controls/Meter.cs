@@ -7,7 +7,7 @@ using Avalonia.Media;
 namespace Altim.UI.Controls;
 
 /// <summary>
-/// The Altim usage meter: a flat 6px rail with a hairline limit tick, drawn directly
+/// The Altim usage meter: a flat 8px rail with a hairline limit tick, drawn directly
 /// rather than templated. It reports one level and nothing else.
 /// </summary>
 /// <remarks>
@@ -41,7 +41,7 @@ namespace Altim.UI.Controls;
 public sealed class Meter : Control
 {
     /// <summary>The height of the rail in device independent pixels.</summary>
-    public const double RailHeight = 6d;
+    public const double RailHeight = 8d;
 
     /// <summary>
     /// The narrowest a meter will measure to. It matches the <c>AltimMeterMinWidth</c>

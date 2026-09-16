@@ -4,11 +4,11 @@
   Activity and history entries are rows, not cards: a 1px bottom rule, 12px of vertical
   padding, SurfaceMuted on hover, 28px minimum height. No nesting, no card inside a card.
 
-  AltimSidebarItem is the second row shape DESIGN.md names: 32px, radius 6, a 13px label
-  and a 16px icon, selected by taking the Surface colour back off the muted sidebar ground.
-  No accent bar, no bold. Its hover cannot be SurfaceMuted, because the sidebar's own ground
-  is SurfaceMuted: it takes the next step along that ramp instead, which leaves the Surface
-  lift to mean selected and keeps the two states apart.
+  AltimSidebarItem is the second row shape DESIGN.md names: 40px, radius 8, a 14px label
+  and a 16px icon, selected by a flat fill and nothing else. No accent bar, no bold. Its
+  hover cannot be SurfaceMuted, because the sidebar's own ground is SurfaceMuted: hover
+  lifts the row off that ground and selection presses it in, so the two states are on
+  opposite sides of the ground and cannot be mistaken for one another.
 
   Both row shapes turn off ClipToBounds and null FocusAdorner, for the reason Button.axaml
   states: the focus ring is drawn outside the row's bounds.
@@ -76,16 +76,16 @@
                 TargetType="ListBoxItem"
                 BasedOn="{StaticResource {x:Type ListBoxItem}}">
     <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThicknessNone}" />
-    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius6}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius8}" />
     <Setter Property="Padding" Value="{DynamicResource AltimSidebarItemPadding}" />
     <Setter Property="Height" Value="{DynamicResource AltimSidebarItemHeight}" />
     <Setter Property="MinHeight" Value="{DynamicResource AltimSidebarItemHeight}" />
-    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeLead}" />
 
     <!-- Order matters: a selected row that is also hovered stays selected, because the
          later style wins when both match. -->
     <Style Selector="^:pointerover /template/ Border#PART_Body">
-      <Setter Property="Background" Value="{DynamicResource AltimHoverMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AltimSidebarHoverBrush}" />
     </Style>
 
     <Style Selector="^:selected /template/ Border#PART_Body">
@@ -122,14 +122,14 @@
     </Setter>
   </ControlTheme>
 
-  <!-- The sidebar itself: 200px, SurfaceMuted, 1px right border, radius 6 rows. -->
+  <!-- The navigation list, which stands on the sidebar rather than being it: the ground,
+       the width and the right border belong to AltimSidebar, because the brand header above
+       this list and the footer block below it stand on the same ground. -->
   <ControlTheme x:Key="AltimSidebarListBox"
                 TargetType="ListBox"
                 BasedOn="{StaticResource {x:Type ListBox}}">
-    <Setter Property="Width" Value="{DynamicResource AltimSidebarWidth}" />
-    <Setter Property="Background" Value="{DynamicResource AltimSidebarBackgroundBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource AltimBorderBrush}" />
-    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThicknessRight}" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThicknessNone}" />
     <Setter Property="Padding" Value="{DynamicResource AltimInset8}" />
     <Setter Property="ItemContainerTheme" Value="{StaticResource AltimSidebarItem}" />
   </ControlTheme>

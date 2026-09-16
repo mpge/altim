@@ -34,6 +34,7 @@ public sealed class MetricViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         Key = metric.Key;
+        Window = metric.Window;
         Label = string.IsNullOrWhiteSpace(metric.Label)
             ? LimitWindowClassifier.Label(metric.Window) ?? metric.Key
             : metric.Label;
@@ -46,13 +47,15 @@ public sealed class MetricViewModel : ObservableObject
         ResetsAt = metric.Window?.ResetsAt;
         RemainingText = UsageFormat.Remaining(metric.Window, timeProvider);
         ResetText = UsageFormat.ResetsIn(metric.Window, timeProvider);
-        ResetClockText = UsageFormat.ClockTime(metric.Window?.ResetsAt);
         WindowText = LimitWindowClassifier.Label(metric.Window);
         IsBestEffort = metric.Confidence == MetricConfidence.BestEffort;
     }
 
     /// <summary>The provider's own key for this metric.</summary>
     public string Key { get; }
+
+    /// <summary>The window the metric is measured over, or null when none was reported.</summary>
+    public LimitWindow? Window { get; }
 
     /// <summary>The label shown to the left of the figure.</summary>
     public string Label { get; }
@@ -89,9 +92,6 @@ public sealed class MetricViewModel : ObservableObject
 
     /// <summary>Whether a reset caption exists.</summary>
     public bool HasReset => ResetText is not null;
-
-    /// <summary>The reset instant as a local clock time, or null when none is reported.</summary>
-    public string? ResetClockText { get; }
 
     /// <summary>The window's own name, such as <c>Session</c>, or null when it has none.</summary>
     public string? WindowText { get; }

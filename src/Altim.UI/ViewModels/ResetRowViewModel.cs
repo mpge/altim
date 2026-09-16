@@ -1,42 +1,20 @@
-using CommunityToolkit.Mvvm.ComponentModel;
-
 namespace Altim.UI.ViewModels;
 
 /// <summary>
-/// One line of the popup's resets section.
+/// One line of the tray panel's resets section: one provider, and the next window of its
+/// that rolls over.
 /// </summary>
 /// <remarks>
-/// Only a window that actually reports a reset instant becomes a row. A window with no instant
-/// is left out entirely rather than shown with a guessed time.
+/// A provider reports several windows and the panel has room for one line each, so the line
+/// carries the soonest of them. The rest are on the provider's own page, which is where a
+/// person goes to read a provider in full. Only a window that actually reports a reset
+/// instant becomes a row: a window with no instant is left out entirely rather than shown
+/// with a time nobody reported.
 /// </remarks>
-public sealed class ResetRowViewModel : ObservableObject
+/// <param name="ProviderName">The provider the window belongs to.</param>
+/// <param name="RemainingText">The time remaining, such as <c>5h 12m</c>.</param>
+public sealed record ResetRowViewModel(string ProviderName, string RemainingText)
 {
-    /// <summary>Initializes a reset row.</summary>
-    /// <param name="metricLabel">The window's label, such as <c>Session</c>.</param>
-    /// <param name="providerName">The provider the window belongs to.</param>
-    /// <param name="remainingText">The time remaining, such as <c>2h 14m</c>.</param>
-    /// <param name="clockText">The reset instant as a local clock time, such as <c>8:00 PM</c>.</param>
-    public ResetRowViewModel(string metricLabel, string providerName, string remainingText, string? clockText)
-    {
-        ArgumentNullException.ThrowIfNull(metricLabel);
-        ArgumentNullException.ThrowIfNull(providerName);
-        ArgumentNullException.ThrowIfNull(remainingText);
-
-        MetricLabel = metricLabel;
-        ProviderName = providerName;
-        RemainingText = remainingText;
-        ClockText = clockText;
-    }
-
-    /// <summary>The window's label.</summary>
-    public string MetricLabel { get; }
-
-    /// <summary>The provider the window belongs to.</summary>
-    public string ProviderName { get; }
-
-    /// <summary>The time remaining.</summary>
-    public string RemainingText { get; }
-
-    /// <summary>The reset instant as a local clock time, or null when it cannot be shown.</summary>
-    public string? ClockText { get; }
+    /// <summary>The provider's name as it reads beside the time: <c>(Claude Code)</c>.</summary>
+    public string ProviderLabel => string.Concat("(", ProviderName, ")");
 }

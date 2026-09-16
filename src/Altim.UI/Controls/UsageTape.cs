@@ -9,15 +9,23 @@ using Avalonia.Media;
 namespace Altim.UI.Controls;
 
 /// <summary>
-/// The Altim history tape: hairline level lines at 25, 50, 75 and 100, one line per
-/// provider over them, and the provider name set at the end of its own line.
+/// The Altim history tape: hairline level lines at 0, 50 and 100 per cent, one line per
+/// provider over them, and dates along the bottom.
 /// </summary>
 /// <remarks>
 /// <para>
 /// There is no charting dependency and no chart furniture. No fills, no gradients, no
-/// legend box, no axis frame, no grid below 25. Dots mark individual samples only while a
-/// series has fewer than <see cref="DotSampleLimit"/> points, because past that they stop
-/// being readable and start being texture.
+/// legend box, no axis frame. Three rules is the fewest that still says which way is up:
+/// the top is the limit, the bottom is nothing used, and the middle is half. Dots mark
+/// individual samples only while a series has fewer than <see cref="DotSampleLimit"/>
+/// points, because past that they stop being readable and start being texture.
+/// </para>
+/// <para>
+/// The provider names can be set at the end of each line or handed to a legend outside the
+/// control - <see cref="ShowSeriesNames"/> chooses. Inside a panel the legend sits under the
+/// panel's own heading, where it reads as part of the heading rather than as two words
+/// floating in the plot, and it is also the arrangement that survives two lines finishing at
+/// the same level.
 /// </para>
 /// <para>
 /// Time runs left to right and the newest sample is always at the right edge, so a series
@@ -46,7 +54,7 @@ public sealed class UsageTape : Control
     public const int DotSampleLimit = 32;
 
     /// <summary>The levels the hairline rules are drawn at.</summary>
-    public static readonly IReadOnlyList<double> Levels = [25d, 50d, 75d, 100d];
+    public static readonly IReadOnlyList<double> Levels = [0d, 50d, 100d];
 
     private const double GutterGap = 6d;
     private const double LabelGap = 2d;
@@ -85,6 +93,20 @@ public sealed class UsageTape : Control
     public static readonly StyledProperty<bool> ShowLevelLabelsProperty =
         AvaloniaProperty.Register<UsageTape, bool>(nameof(ShowLevelLabels), true);
 
+    /// <summary>
+    /// Whether each provider's name is set at the end of its own line. False when a legend
+    /// outside the control is naming them instead.
+    /// </summary>
+    public static readonly StyledProperty<bool> ShowSeriesNamesProperty =
+        AvaloniaProperty.Register<UsageTape, bool>(nameof(ShowSeriesNames), true);
+
+    /// <summary>
+    /// The dates written along the bottom of the plot, evenly spaced from the left edge to
+    /// the right. Empty draws no axis at all rather than an axis of nothing.
+    /// </summary>
+    public static readonly StyledProperty<IReadOnlyList<string>?> AxisLabelsProperty =
+        AvaloniaProperty.Register<UsageTape, IReadOnlyList<string>?>(nameof(AxisLabels));
+
     /// <summary>The size of the level labels and inline series names. Caption, 11px.</summary>
     public static readonly StyledProperty<double> CaptionFontSizeProperty =
         AvaloniaProperty.Register<UsageTape, double>(nameof(CaptionFontSize), 11d);
@@ -110,6 +132,8 @@ public sealed class UsageTape : Control
             LabelBrushProperty,
             EmptyTextProperty,
             ShowLevelLabelsProperty,
+            ShowSeriesNamesProperty,
+            AxisLabelsProperty,
             CaptionFontSizeProperty,
             LineThicknessProperty,
             DotDiameterProperty);
@@ -164,6 +188,20 @@ public sealed class UsageTape : Control
     {
         get => GetValue(ShowLevelLabelsProperty);
         set => SetValue(ShowLevelLabelsProperty, value);
+    }
+
+    /// <inheritdoc cref="ShowSeriesNamesProperty" />
+    public bool ShowSeriesNames
+    {
+        get => GetValue(ShowSeriesNamesProperty);
+        set => SetValue(ShowSeriesNamesProperty, value);
+    }
+
+    /// <inheritdoc cref="AxisLabelsProperty" />
+    public IReadOnlyList<string>? AxisLabels
+    {
+        get => GetValue(AxisLabelsProperty);
+        set => SetValue(AxisLabelsProperty, value);
     }
 
     /// <inheritdoc cref="CaptionFontSizeProperty" />
@@ -310,20 +348,26 @@ public sealed class UsageTape : Control
         }
 
         double rightGutter = 0d;
-        foreach (UsageTapeSeries s in series)
+        if (ShowSeriesNames)
         {
-            rightGutter = Math.Max(
-                rightGutter,
-                Text(s.Name, typeface, captionSize, LabelBrush).Width);
+            foreach (UsageTapeSeries s in series)
+            {
+                rightGutter = Math.Max(
+                    rightGutter,
+                    Text(s.Name, typeface, captionSize, LabelBrush).Width);
+            }
+
+            rightGutter += GutterGap;
         }
 
-        rightGutter += GutterGap;
+        IReadOnlyList<string> axis = AxisLabels ?? [];
+        double bottomGutter = axis.Count > 1 ? captionHeight + GutterGap : 0d;
 
         var plot = new Rect(
             leftGutter,
             pad,
             size.Width - leftGutter - rightGutter,
-            size.Height - (pad * 2d));
+            size.Height - (pad * 2d) - bottomGutter);
 
         if (plot.Width <= 0d || plot.Height <= 0d)
         {
@@ -331,6 +375,7 @@ public sealed class UsageTape : Control
         }
 
         RenderLevels(context, plot, typeface, captionSize);
+        RenderAxis(context, axis, plot, typeface, captionSize);
 
         using (context.PushTransform(Matrix.CreateTranslation(plot.X, plot.Y)))
         {
@@ -340,7 +385,10 @@ public sealed class UsageTape : Control
             }
         }
 
-        RenderSeriesNames(context, series, plot, typeface, captionSize);
+        if (ShowSeriesNames)
+        {
+            RenderSeriesNames(context, series, plot, typeface, captionSize);
+        }
     }
 
     /// <inheritdoc />
@@ -403,7 +451,7 @@ public sealed class UsageTape : Control
     }
 
     private static string LevelLabel(double level) =>
-        level.ToString("0", CultureInfo.CurrentCulture);
+        string.Concat(level.ToString("0", CultureInfo.CurrentCulture), "%");
 
     private static FormattedText Text(string text, Typeface typeface, double size, IBrush? brush) =>
         new(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, typeface, size, brush);
@@ -516,6 +564,63 @@ public sealed class UsageTape : Control
             context.DrawText(
                 label,
                 new Point(plot.X - GutterGap - label.Width, centre - (label.Height / 2d)));
+        }
+    }
+
+    /// <summary>
+    /// Writes the dates along the bottom. The first is left aligned on the plot's left edge
+    /// and the last right aligned on its right edge, because a date centred on the edge
+    /// hangs half of itself outside the control; the ones between are centred on their own
+    /// position, which is where their samples are.
+    /// </summary>
+    /// <remarks>
+    /// The caller decides how the span divides - whole days across a week - and the tape
+    /// decides how many of those divisions there is room to write, because that depends on
+    /// the width it was given, which the caller does not know. Where they do not all fit it
+    /// writes every second or every third one rather than dropping whichever happens to
+    /// collide: an axis of evenly spaced dates two days apart is a scale, and the same axis
+    /// with one date missing from the middle of it looks like a defect.
+    /// </remarks>
+    private void RenderAxis(
+        DrawingContext context,
+        IReadOnlyList<string> axis,
+        Rect plot,
+        Typeface typeface,
+        double captionSize)
+    {
+        if (axis.Count < 2)
+        {
+            return;
+        }
+
+        double widest = 0d;
+        foreach (string text in axis)
+        {
+            widest = Math.Max(widest, LevelText(text, typeface, captionSize).Width);
+        }
+
+        int fits = Math.Max(1, (int)((plot.Width + GutterGap) / Math.Max(1d, widest + GutterGap)));
+        int stride = Math.Max(1, (int)Math.Ceiling((double)axis.Count / fits));
+
+        double top = plot.Bottom + GutterGap;
+        double drawnTo = double.NegativeInfinity;
+
+        for (int i = 0; i < axis.Count; i += stride)
+        {
+            FormattedText label = LevelText(axis[i], typeface, captionSize);
+            double centre = plot.X + (plot.Width * i / (axis.Count - 1));
+            double x = Math.Clamp(
+                centre - (label.Width / 2d),
+                plot.X,
+                Math.Max(plot.X, plot.Right - label.Width));
+
+            if (x < drawnTo)
+            {
+                continue;
+            }
+
+            context.DrawText(label, new Point(x, top));
+            drawnTo = x + label.Width + GutterGap;
         }
     }
 

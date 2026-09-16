@@ -574,10 +574,15 @@ internal sealed class AltimRuntime : IAsyncDisposable
     private void OnWindowVisibilityChanged(object? sender, EventArgs e) =>
         _scheduler?.SetUiVisible(IsAnyWindowOpen());
 
-    private void OnPopupOpenRequested(object? sender, EventArgs e)
+    /// <summary>
+    /// The panel asks for the window, and says which section it wants: the gear asks for
+    /// Settings and a provider's own row asks for that provider, while the action at the
+    /// foot of the panel asks for wherever the window opens by default.
+    /// </summary>
+    private void OnPopupOpenRequested(object? sender, string? section)
     {
         _popup?.Close("opened the dashboard");
-        _dashboard?.Open();
+        _dashboard?.Open(section);
     }
 
     private void OnTrayActivated(object? sender, TrayClickEventArgs e)

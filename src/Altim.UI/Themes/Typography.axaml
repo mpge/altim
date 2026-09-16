@@ -17,7 +17,86 @@
                     xmlns:themes="using:Altim.UI.Themes">
 
   <FontFamily x:Key="AltimFontFamily">avares://Avalonia.Fonts.Inter/Assets#Inter, $Default</FontFamily>
+
+  <!-- The second family, and the only one: a monospace face for the chip that carries a
+       provider's own identifier. An identifier is not prose, and setting it in the prose
+       face makes it read as prose. Nothing is bundled for it - the list is the faces a
+       desktop already has, with the platform default behind them, because a chip that
+       falls back to the UI face still reads correctly. -->
+  <FontFamily x:Key="AltimMonoFontFamily">Cascadia Mono, Consolas, SF Mono, Menlo, DejaVu Sans Mono, $Default</FontFamily>
+
   <themes:TabularFigures x:Key="AltimTabularFigures" />
+
+  <!-- Display: the page title, and the largest type in the interface. -->
+  <ControlTheme x:Key="AltimDisplayText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeDisplay}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightDisplay}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightDisplay}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingDisplay}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+  </ControlTheme>
+
+  <!-- Eyebrow: the one capitalised role. The view supplies the capitals, because a
+       TextBlock has no text transform and a style that pretended to would be a lie about
+       what is in the string an accessibility tool reads out. -->
+  <ControlTheme x:Key="AltimEyebrowText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeEyebrow}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightEyebrow}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightEyebrow}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingEyebrow}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextSecondaryBrush}" />
+  </ControlTheme>
+
+  <!-- Subhead: a provider's name where it heads a card. -->
+  <ControlTheme x:Key="AltimSubheadText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeSubhead}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightSubhead}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightSubhead}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingSubhead}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+  </ControlTheme>
+
+  <!-- Lead: 14px, the size the reference sets a page's opening line, a metric's name and
+       an activity row's name in. Quiet by default, because its commonest job is the grey
+       line under a title; the two weighted variants carry the primary ink. -->
+  <ControlTheme x:Key="AltimLeadText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeLead}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightLead}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightLead}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingLead}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextSecondaryBrush}" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimLeadMediumText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeLead}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightLeadMedium}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightLead}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingLead}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimLeadStrongText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeLead}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightLeadStrong}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightLead}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingLead}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+  </ControlTheme>
+
+  <!-- The chip: a provider's own identifier, set in the mono face at caption size. -->
+  <ControlTheme x:Key="AltimChipText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimMonoFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeCaption}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightCaption}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightCaption}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextSecondaryBrush}" />
+  </ControlTheme>
 
   <!-- Figure: the percentage, and the largest thing on any surface. -->
   <ControlTheme x:Key="AltimFigureText" TargetType="TextBlock">

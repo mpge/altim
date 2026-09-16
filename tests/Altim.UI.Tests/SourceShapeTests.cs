@@ -35,6 +35,14 @@ public sealed partial class SourceShapeTests
     [GeneratedRegex(@"x:Key=""(Altim[^""]+)""")]
     private static partial Regex ResourceKey { get; }
 
+    /// <summary>A member declared as a Geometry, whatever its accessibility.</summary>
+    [GeneratedRegex(@"^\s*(?:public|internal|private|protected)[\w\s]*\bGeometry\b\s+\w+")]
+    private static partial Regex GeometryMember { get; }
+
+    /// <summary>A static field holding a Geometry, which parses at type initialisation.</summary>
+    [GeneratedRegex(@"static\s+(?:readonly\s+)?Geometry\s+\w+\s*=(?!>)")]
+    private static partial Regex StaticGeometryField { get; }
+
     /// <summary>
     /// No XAML in the UI project reaches a colour, brush or shadow token statically. The
     /// comment block in Tokens.axaml promises this test exists; this is it.
@@ -134,6 +142,75 @@ public sealed partial class SourceShapeTests
         Assert.Equal([], declared.Except(asserted).Order());
         Assert.Equal([], asserted.Except(declared).Order());
     }
+
+    /// <summary>
+    /// No view model declares a <c>Geometry</c>. A geometry cannot be built before
+    /// Avalonia's rendering platform exists, so a view model that held one could not be
+    /// constructed by a unit test, by the composition root before its first window, or by
+    /// anything else that runs early - and the failure lands inside a type initialiser,
+    /// which the CLR caches, so one early touch takes the type out for the whole process.
+    /// The views choose the path from a style class instead, once the control is on screen.
+    /// </summary>
+    [Fact]
+    public void NoViewModelDeclaresAGeometry()
+    {
+        List<string> offences = [];
+
+        foreach (string file in ProjectSource("ViewModels"))
+        {
+            string[] lines = File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (GeometryMember.IsMatch(lines[i]))
+                {
+                    offences.Add($"{Path.GetFileName(file)}:{i + 1} {lines[i].Trim()}");
+                }
+            }
+        }
+
+        Assert.True(
+            offences.Count == 0,
+            "A view model holding a Geometry cannot be built without a rendering platform:"
+                + Environment.NewLine
+                + string.Join(Environment.NewLine, offences));
+    }
+
+    /// <summary>
+    /// Neither icon source parses a geometry in a static field. The paths are strings and
+    /// the parse is behind a <c>Lazy</c>, so constructing the type costs nothing and the
+    /// parse happens on first read - which is when a style is applied to a live control.
+    /// </summary>
+    [Fact]
+    public void NoIconSourceParsesAGeometryAtTypeInitialisation()
+    {
+        List<string> offences = [];
+
+        foreach (string file in ProjectSource("Formatting"))
+        {
+            string[] lines = File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (StaticGeometryField.IsMatch(lines[i]))
+                {
+                    offences.Add($"{Path.GetFileName(file)}:{i + 1} {lines[i].Trim()}");
+                }
+            }
+        }
+
+        Assert.True(
+            offences.Count == 0,
+            "A static Geometry field parses inside the type initialiser, which poisons the"
+                + " type for the whole process the first time it is touched too early:"
+                + Environment.NewLine
+                + string.Join(Environment.NewLine, offences));
+    }
+
+    /// <summary>Every C# file under one folder of the UI project.</summary>
+    /// <param name="folder">The folder, relative to the project.</param>
+    /// <returns>Absolute paths, sorted.</returns>
+    private static IEnumerable<string> ProjectSource(string folder) =>
+        Directory.EnumerateFiles(
+            Path.Combine(ProjectDirectory(), folder), "*.cs", SearchOption.AllDirectories).Order();
 
     /// <summary>Every XAML file in the UI project.</summary>
     /// <returns>Absolute paths, sorted.</returns>

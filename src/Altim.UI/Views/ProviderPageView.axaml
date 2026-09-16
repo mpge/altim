@@ -25,14 +25,13 @@
 
       <Grid ColumnDefinitions="Auto,*,Auto,Auto">
         <Path Grid.Column="0"
-              Classes="glyph"
+              Classes="glyph large"
               Classes.anthropic="{Binding Provider.IsAnthropic}"
-              Classes.openai="{Binding Provider.IsOpenAI}"
-              Data="{Binding Provider.Glyph}" />
+              Classes.openai="{Binding Provider.IsOpenAI}" />
         <TextBlock Grid.Column="1"
                    Margin="12,0,0,0"
                    VerticalAlignment="Center"
-                   Theme="{DynamicResource AltimTitleText}"
+                   Theme="{DynamicResource AltimDisplayText}"
                    Text="{Binding Provider.DisplayName}" />
         <Ellipse Grid.Column="2"
                  Classes="status"

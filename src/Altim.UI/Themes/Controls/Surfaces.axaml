@@ -1,29 +1,87 @@
 <!--
-  The two shapes DESIGN.md specifies exactly but that are not controls in their own right.
+  The shapes DESIGN.md specifies exactly but that are not controls in their own right.
 
-  AltimProviderCard is the only card in the system, used once per provider on Overview:
-  1px border, radius 8, padding 20, no shadow. There is no nested variant, because there is
-  no card inside a card - sections are split by separators and whitespace instead.
+  AltimPanel is the one container in the system: 1px border, radius 12, padding 24, the
+  Surface ground, no shadow. A provider card and a dashboard panel are the same shape doing
+  two jobs, so AltimProviderCard is that shape under the name the Overview page uses for it.
+  There is no nested variant, because there is no card inside a card - sections inside a
+  panel are split by separators and whitespace instead.
 
   AltimStatusDot is the 6px dot status is allowed to appear as. The other permitted form is
   a single word. A tinted panel is not one of them, so no themed background exists here.
+  AltimLegendDot is the same dot one step larger, naming a line on the history tape.
+
+  AltimChip is the ground under a provider's own identifier, and AltimPill the outline
+  around a control that reports rather than opens.
+
+  AltimBrandMark is the Altim mark. It is the template bitmap drawn as an opacity mask over
+  TextPrimary, so it is ink in Light and ink in Dark from one asset: an Image would ship the
+  mark in one fixed colour and need a second bitmap and a rule to choose between them.
 -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-  <ControlTheme x:Key="AltimProviderCard" TargetType="Border">
+  <ControlTheme x:Key="AltimPanel" TargetType="Border">
     <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource AltimBorderBrush}" />
     <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThickness}" />
-    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius8}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius12}" />
     <Setter Property="Padding" Value="{DynamicResource AltimCardPadding}" />
   </ControlTheme>
+
+  <ControlTheme x:Key="AltimProviderCard"
+                TargetType="Border"
+                BasedOn="{StaticResource AltimPanel}" />
 
   <ControlTheme x:Key="AltimStatusDot" TargetType="Ellipse">
     <Setter Property="Width" Value="{DynamicResource AltimStatusDotSize}" />
     <Setter Property="Height" Value="{DynamicResource AltimStatusDotSize}" />
     <Setter Property="Fill" Value="{DynamicResource AltimStatusOkBrush}" />
     <Setter Property="VerticalAlignment" Value="Center" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimLegendDot" TargetType="Ellipse">
+    <Setter Property="Width" Value="{DynamicResource AltimLegendDotSize}" />
+    <Setter Property="Height" Value="{DynamicResource AltimLegendDotSize}" />
+    <Setter Property="Fill" Value="{DynamicResource AltimChartLinePrimaryBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimChip" TargetType="Border">
+    <Setter Property="Background" Value="{DynamicResource AltimSurfaceMutedBrush}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius4}" />
+    <Setter Property="Padding" Value="{DynamicResource AltimChipPadding}" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimPill" TargetType="Border">
+    <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimBorderBrush}" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThickness}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius8}" />
+    <Setter Property="Padding" Value="{DynamicResource AltimButtonPadding}" />
+    <Setter Property="Height" Value="{DynamicResource AltimControlMinHeight}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimBrandMark" TargetType="Border">
+    <Setter Property="Width" Value="{DynamicResource AltimBrandMarkSize}" />
+    <Setter Property="Height" Value="{DynamicResource AltimBrandMarkSize}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Background" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="OpacityMask">
+      <ImageBrush Source="avares://Altim.UI/Assets/altim-mark.png" Stretch="Uniform" />
+    </Setter>
+  </ControlTheme>
+
+  <!-- The sidebar itself is the container, not the list inside it: the brand header and the
+       footer block stand on the same ground and inside the same right border, and a list
+       that owned the ground could not have anything above or below it. -->
+  <ControlTheme x:Key="AltimSidebar" TargetType="Border">
+    <Setter Property="Width" Value="{DynamicResource AltimSidebarWidth}" />
+    <Setter Property="Background" Value="{DynamicResource AltimSidebarBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimBorderBrush}" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThicknessRight}" />
   </ControlTheme>
 
 </ResourceDictionary>

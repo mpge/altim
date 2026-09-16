@@ -1,15 +1,21 @@
 <!--
   The tray panel's contents.
 
-  Four sections split by 1px rules, in DESIGN.md's order: providers, resets, status, actions.
-  The rules are full bleed, so the padding belongs to each section rather than to the panel.
+  Five sections split by 1px rules: the header, the providers, the resets, the status and the
+  one action. The rules are full bleed, so the padding belongs to each section rather than to
+  the panel.
+
+  A provider is one line here, not a stack of metric rows: the mark, the name, and every window
+  it reports as "5h 42% . 7d 68%" with the figures in the ink and the windows in grey. There
+  are no meters. A meter reports a level by its width, and at this width, three of them stacked
+  under one another report a texture. The panel answers "where am I"; the window answers "how
+  did I get here", and the disclosure beside each name is how you get from one to the other.
 
   Nothing here is a card. The panel is one surface; whitespace and the rules do the separating.
 -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:design="using:Altim.UI.ViewModels.Design"
-             xmlns:views="using:Altim.UI.Views"
              xmlns:vm="using:Altim.UI.ViewModels"
              x:Class="Altim.UI.Views.PopupView"
              x:DataType="vm:PopupViewModel"
@@ -21,6 +27,23 @@
 
   <StackPanel>
 
+    <!-- Header -->
+    <Grid Margin="16,12" ColumnDefinitions="Auto,*,Auto">
+      <Border Grid.Column="0" Theme="{DynamicResource AltimBrandMark}" />
+      <TextBlock Grid.Column="1"
+                 Margin="8,0,0,0"
+                 VerticalAlignment="Center"
+                 Theme="{DynamicResource AltimHeadingText}"
+                 Text="{Binding Title}" />
+      <Button Grid.Column="2"
+              Theme="{DynamicResource AltimIconButton}"
+              Command="{Binding OpenSettingsCommand}">
+        <Path Classes="icon gear quiet" />
+      </Button>
+    </Grid>
+
+    <Separator />
+
     <!-- Providers -->
     <TextBlock IsVisible="{Binding !HasProviders}"
                Margin="{DynamicResource AltimInset16}"
@@ -30,93 +53,119 @@
     <ItemsControl IsVisible="{Binding HasProviders}"
                   Margin="{DynamicResource AltimInset16}"
                   ItemsSource="{Binding Providers}">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <StackPanel Spacing="{DynamicResource AltimSpace16}" />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
       <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="vm:ProviderViewModel">
-          <StackPanel Spacing="{DynamicResource AltimSpace12}" Margin="0,0,0,16">
+          <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
 
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto"
-                  MinHeight="{DynamicResource AltimRowMinHeight}">
-              <Path Grid.Column="0"
-                    Classes="glyph"
-                    Classes.anthropic="{Binding IsAnthropic}"
-                    Classes.openai="{Binding IsOpenAI}"
-                    Data="{Binding Glyph}" />
-              <TextBlock Grid.Column="1"
-                         Margin="8,0,0,0"
+            <Path Grid.Row="0"
+                  Grid.RowSpan="2"
+                  Grid.Column="0"
+                  VerticalAlignment="Center"
+                  Classes="glyph large"
+                  Classes.anthropic="{Binding IsAnthropic}"
+                  Classes.openai="{Binding IsOpenAI}" />
+
+            <Grid Grid.Row="0" Grid.Column="1" Margin="12,0,0,0" ColumnDefinitions="Auto,Auto,*">
+              <TextBlock Grid.Column="0"
                          VerticalAlignment="Center"
                          Theme="{DynamicResource AltimHeadingText}"
                          Text="{Binding DisplayName}" />
-              <Ellipse Grid.Column="2"
-                       Classes="status"
-                       Classes.ok="{Binding Status.IsOk}"
-                       Classes.error="{Binding Status.IsError}" />
-              <TextBlock Grid.Column="3"
-                         Margin="6,0,0,0"
-                         VerticalAlignment="Center"
-                         Theme="{DynamicResource AltimLabelText}"
-                         Text="{Binding Status.Word}" />
+              <Button Grid.Column="1"
+                      Margin="2,0,0,0"
+                      VerticalAlignment="Center"
+                      Theme="{DynamicResource AltimIconButton}"
+                      Command="{Binding OpenCommand}">
+                <Path Classes="icon next quiet" />
+              </Button>
             </Grid>
 
+            <!-- The one line, or the sentence that stands in for it. -->
+            <ItemsControl Grid.Row="1"
+                          Grid.Column="1"
+                          Margin="12,2,0,0"
+                          IsVisible="{Binding HasCompactMetrics}"
+                          ItemsSource="{Binding CompactMetrics}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:CompactMetricViewModel">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Theme="{DynamicResource AltimLabelText}"
+                               IsVisible="{Binding ShowsSeparator}"
+                               Text="  ·  " />
+                    <TextBlock Theme="{DynamicResource AltimLabelMetricText}"
+                               Text="{Binding Label}" />
+                    <TextBlock Margin="4,0,0,0"
+                               Theme="{DynamicResource AltimBodyMetricText}"
+                               FontWeight="{DynamicResource AltimFontWeightHeading}"
+                               Text="{Binding ValueText}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
             <!-- A failed reading: the sentence and the one action that can change it. -->
-            <StackPanel IsVisible="{Binding HasError}" Spacing="{DynamicResource AltimSpace8}">
+            <StackPanel Grid.Row="1"
+                        Grid.Column="1"
+                        Margin="12,6,0,0"
+                        IsVisible="{Binding HasError}"
+                        Spacing="{DynamicResource AltimSpace8}">
               <TextBlock Theme="{DynamicResource AltimBodyText}" Text="{Binding ErrorText}" />
               <Button HorizontalAlignment="Left"
                       Content="{Binding RetryLabel}"
                       Command="{Binding RetryCommand}" />
             </StackPanel>
 
-            <!-- A reading that carried no metric at all says so, rather than showing nothing. -->
-            <TextBlock IsVisible="{Binding ShowsNoMetricsNotice}"
+            <!-- A reading that carried no figure at all says so, rather than showing nothing. -->
+            <TextBlock Grid.Row="1"
+                       Grid.Column="1"
+                       Margin="12,2,0,0"
+                       IsVisible="{Binding ShowsNoFiguresNotice}"
                        Theme="{DynamicResource AltimBodyText}"
                        Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                       TextWrapping="Wrap"
                        Text="{Binding NoMetricsText}" />
 
-            <ItemsControl ItemsSource="{Binding Metrics}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:MetricViewModel">
-                  <views:MetricRowView Margin="0,0,0,12" />
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-
-          </StackPanel>
+          </Grid>
         </DataTemplate>
       </ItemsControl.ItemTemplate>
     </ItemsControl>
 
     <Separator />
 
-    <!-- Resets -->
-    <StackPanel Margin="{DynamicResource AltimInset16}">
+    <!-- Resets: one line per provider, carrying the soonest window it reports. -->
+    <StackPanel Margin="{DynamicResource AltimInset16}" Spacing="{DynamicResource AltimSpace8}">
+      <TextBlock Theme="{DynamicResource AltimLabelText}" Text="{Binding ResetsLabel}" />
+
       <TextBlock IsVisible="{Binding !HasResets}"
-                 Theme="{DynamicResource AltimCaptionText}"
+                 Theme="{DynamicResource AltimBodyText}"
+                 Foreground="{DynamicResource AltimTextSecondaryBrush}"
                  Text="{Binding NoResetsText}" />
 
       <ItemsControl IsVisible="{Binding HasResets}" ItemsSource="{Binding Resets}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="{DynamicResource AltimSpace4}" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:ResetRowViewModel">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto" MinHeight="{DynamicResource AltimRowMinHeight}">
-              <TextBlock Grid.Column="0"
-                         VerticalAlignment="Center"
-                         Theme="{DynamicResource AltimLabelText}"
-                         Foreground="{DynamicResource AltimTextPrimaryBrush}"
-                         Text="{Binding MetricLabel}" />
-              <TextBlock Grid.Column="1"
-                         Margin="6,0,0,0"
-                         VerticalAlignment="Center"
-                         Theme="{DynamicResource AltimCaptionText}"
-                         Text="{Binding ProviderName}" />
-              <TextBlock Grid.Column="2"
-                         VerticalAlignment="Center"
-                         Theme="{DynamicResource AltimCaptionMetricText}"
-                         Foreground="{DynamicResource AltimTextPrimaryBrush}"
+            <StackPanel Orientation="Horizontal" Spacing="{DynamicResource AltimSpace6}">
+              <TextBlock Theme="{DynamicResource AltimBodyMetricText}"
+                         FontWeight="{DynamicResource AltimFontWeightHeading}"
                          Text="{Binding RemainingText}" />
-              <TextBlock Grid.Column="3"
-                         Margin="6,0,0,0"
-                         VerticalAlignment="Center"
-                         Theme="{DynamicResource AltimCaptionMetricText}"
-                         Text="{Binding ClockText}" />
-            </Grid>
+              <TextBlock VerticalAlignment="Center"
+                         Theme="{DynamicResource AltimLabelText}"
+                         Text="{Binding ProviderLabel}" />
+            </StackPanel>
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
@@ -125,17 +174,31 @@
     <Separator />
 
     <!-- Status -->
-    <TextBlock Margin="{DynamicResource AltimInset16}"
-               Theme="{DynamicResource AltimBodyText}"
-               Text="{Binding StatusLine}" />
+    <StackPanel Margin="{DynamicResource AltimInset16}"
+                Orientation="Horizontal"
+                Spacing="{DynamicResource AltimSpace12}">
+      <Panel VerticalAlignment="Center">
+        <Ellipse Classes="statusDisc" Classes.error="{Binding StatusIsError}" />
+        <Path Classes="statusMark" Classes.error="{Binding StatusIsError}" />
+      </Panel>
+      <TextBlock VerticalAlignment="Center"
+                 Theme="{DynamicResource AltimBodyText}"
+                 TextWrapping="Wrap"
+                 Text="{Binding StatusLine}" />
+    </StackPanel>
 
     <Separator />
 
-    <!-- Actions -->
-    <Button Margin="{DynamicResource AltimInset16}"
-            HorizontalAlignment="Stretch"
-            Content="{Binding OpenLabel}"
-            Command="{Binding OpenAltimCommand}" />
+    <!-- Action -->
+    <Button Margin="8"
+            HorizontalAlignment="Left"
+            Theme="{DynamicResource AltimTextButton}"
+            Command="{Binding OpenAltimCommand}">
+      <StackPanel Orientation="Horizontal" Spacing="{DynamicResource AltimSpace8}">
+        <TextBlock VerticalAlignment="Center" Text="{Binding OpenLabel}" />
+        <Path Classes="icon away" />
+      </StackPanel>
+    </Button>
 
   </StackPanel>
 
