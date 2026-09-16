@@ -29,9 +29,34 @@ public interface IPlatformService
     ValueTask<PixelRect?> GetTrayAnchorAsync();
 
     /// <summary>
-    /// Raised when the machine wakes from sleep. The scheduler pauses on suspend and
-    /// refreshes once here, so a wake produces one refresh rather than a backlog.
+    /// Raised when the machine is about to sleep. The scheduler pauses on it, so no timer
+    /// tick and no filesystem hint is acted on across a sleep.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The window between this and the machine actually suspending is short — Windows
+    /// allows about two seconds — so a handler stops work rather than starting any.
+    /// </para>
+    /// <para>
+    /// <b>It is not guaranteed to arrive, and it is not the display going off.</b> A modern
+    /// standby machine can sleep without sending the classic suspend broadcast, so a wake
+    /// may arrive with no suspend before it; callers treat this as a hint that lets them do
+    /// less, never as a precondition for <see cref="SystemResumed"/>. Platforms deliberately
+    /// do not raise it for a display blanking, because a screen that has switched off does
+    /// not mean the machine has stopped working, and an agent running against a dark monitor
+    /// must still be recorded.
+    /// </para>
+    /// </remarks>
+    event EventHandler? SystemSuspending;
+
+    /// <summary>
+    /// Raised when the machine wakes from sleep. The scheduler pauses on
+    /// <see cref="SystemSuspending"/> and refreshes once here, so a wake produces one
+    /// refresh rather than a backlog.
+    /// </summary>
+    /// <remarks>
+    /// Implementations coalesce, so a wake reported by two sources raises this once.
+    /// </remarks>
     event EventHandler? SystemResumed;
 
     /// <summary>

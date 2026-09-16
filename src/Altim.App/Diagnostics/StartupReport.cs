@@ -21,6 +21,19 @@ internal sealed class StartupReport
     private readonly List<string> _issues = [];
     private readonly Lock _gate = new();
 
+    /// <summary>
+    /// Raised, on the thread that recorded it, the first time a given sentence is added.
+    /// </summary>
+    /// <remarks>
+    /// Not every degraded condition is known at start-up. The Linux notification service
+    /// connects to the session bus on its first message, so whether notifications work is
+    /// not knowable until one is sent; the same is true of anything else that fails on
+    /// first use rather than on construction. Without this the menu would be built once
+    /// from the conditions detected before the icon went up and would never mention the
+    /// rest. The composition root rebuilds the tray menu on it.
+    /// </remarks>
+    public event EventHandler? Changed;
+
     /// <summary>The issues recorded so far, in the order they happened.</summary>
     public IReadOnlyList<string> Issues
     {
@@ -56,10 +69,15 @@ internal sealed class StartupReport
 
         lock (_gate)
         {
-            if (!_issues.Contains(issue, StringComparer.Ordinal))
+            if (_issues.Contains(issue, StringComparer.Ordinal))
             {
-                _issues.Add(issue);
+                return;
             }
+
+            _issues.Add(issue);
         }
+
+        // Outside the lock: a subscriber rebuilds the tray menu, which reads Issues.
+        Changed?.Invoke(this, EventArgs.Empty);
     }
 }

@@ -41,6 +41,7 @@ public sealed class SettingsTests
                 SessionThresholdPercent = 70,
                 WeeklyThresholdPercent = 85,
                 NotifyOnWindowReset = false,
+                AllowNetworkCalls = false,
             },
         };
 
@@ -55,6 +56,42 @@ public sealed class SettingsTests
         Assert.Equal(70, page.SelectedSessionThreshold.Value);
         Assert.Equal(85, page.SelectedWeeklyThreshold.Value);
         Assert.False(page.ResetAlertsEnabled);
+        Assert.False(page.AllowNetworkCalls);
+    }
+
+    /// <summary>
+    /// The live-quota permission round-trips, and the provider rows on the same page hear
+    /// about it.
+    /// </summary>
+    /// <remarks>
+    /// The defect this covers: <c>AllowNetworkCalls</c> existed in the settings record and in
+    /// the database and had no control anywhere, so the only way to reach it was to edit the
+    /// row by hand. A setting nothing can set is not a setting.
+    /// </remarks>
+    [Fact]
+    public async Task TheLiveQuotaPermissionRoundTripsAndReachesTheProviderRows()
+    {
+        var store = new FakeSettingsStore();
+        ProviderViewModel row = Row();
+        SettingsViewModel page = Page(store, new FakeHistoryService(), row);
+
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(page.AllowNetworkCalls);
+        Assert.False(page.ShowsLocalOnlyNotice);
+        Assert.False(row.ShowsLocalOnlyNotice);
+
+        page.AllowNetworkCalls = false;
+        await page.SaveAsync(TestContext.Current.CancellationToken);
+
+        AltimSettings saved = Assert.IsType<AltimSettings>(store.Saved);
+        Assert.False(saved.AllowNetworkCalls);
+
+        // And the page says what the figures now are, rather than leaving the toggle to
+        // speak for itself.
+        Assert.True(page.ShowsLocalOnlyNotice);
+        Assert.True(row.ShowsLocalOnlyNotice);
+        Assert.Equal(row.LocalOnlyText, page.LocalOnlyNotice);
     }
 
     /// <summary>Every edited value comes back out through the same store.</summary>

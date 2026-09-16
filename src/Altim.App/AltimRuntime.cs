@@ -41,16 +41,20 @@ namespace Altim.App;
 /// </remarks>
 internal sealed class AltimRuntime : IAsyncDisposable
 {
+    /// <summary>How often the housekeeping pass runs.</summary>
+    private static readonly TimeSpan MaintenanceInterval = TimeSpan.FromMinutes(5);
+
     /// <summary>
-    /// How close together two tray activations have to be to count as one click. Long
-    /// enough to absorb the shell's duplicate message, short enough that a user deliberately
-    /// clicking twice still gets two answers.
+    /// How long the database must have gone unwritten before the write-ahead log is
+    /// emptied. Comfortably longer than the tightest refresh cadence, so a checkpoint never
+    /// lands in the middle of a burst of samples.
     /// </summary>
-    private const long ActivationCoalescingMilliseconds = 350;
+    private static readonly TimeSpan WalCheckpointIdleWindow = TimeSpan.FromMinutes(2);
 
     private readonly IClassicDesktopStyleApplicationLifetime _lifetime;
     private readonly StartupReport _report = new();
     private readonly SchedulerNetworkGate _networkGate = new();
+    private readonly LiveNetworkPolicy _networkPolicy = new();
     private readonly CancellationTokenSource _shutdown = new();
     private readonly DateTimeOffset _processStarted;
 
@@ -69,7 +73,6 @@ internal sealed class AltimRuntime : IAsyncDisposable
 
     private AltimSettings _current = AltimSettings.Default;
     private Altim.Core.Models.PixelRect? _pendingAnchor;
-    private long _lastActivation;
     private bool _activationPending;
     private int _shuttingDown;
     private int _disposed;
@@ -102,6 +105,11 @@ internal sealed class AltimRuntime : IAsyncDisposable
 
         _lifetime.ShutdownRequested += OnShutdownRequested;
 
+        // Subscribed before the stack is built, because building it is what finds most of
+        // the conditions. A condition found later — the Linux notification service learning
+        // on its first message that nothing is listening — reaches the menu the same way.
+        _report.Changed += OnReportChanged;
+
         _platform = PlatformStack.Create(_report);
 
         if (_platform.Platform is { } platform)
@@ -109,6 +117,7 @@ internal sealed class AltimRuntime : IAsyncDisposable
             _tray = new TrayController(platform.Tray, _report);
             _tray.Activated += OnTrayActivated;
             _tray.MenuInvoked += OnMenuInvoked;
+            platform.SystemSuspending += OnSystemSuspending;
             platform.SystemResumed += OnSystemResumed;
             platform.ThemeChanged += OnPlatformThemeChanged;
 
@@ -186,6 +195,7 @@ internal sealed class AltimRuntime : IAsyncDisposable
 
         if (_platform?.Platform is { } platform)
         {
+            platform.SystemSuspending -= OnSystemSuspending;
             platform.SystemResumed -= OnSystemResumed;
             platform.ThemeChanged -= OnPlatformThemeChanged;
         }
@@ -216,6 +226,7 @@ internal sealed class AltimRuntime : IAsyncDisposable
         }
 
         _lifetime.ShutdownRequested -= OnShutdownRequested;
+        _report.Changed -= OnReportChanged;
 
         // The token source is cancelled but deliberately not disposed. Work that was in
         // flight when shutdown started still holds its token, and registering a
@@ -296,8 +307,10 @@ internal sealed class AltimRuntime : IAsyncDisposable
             _settings = new SettingsGateway(_storage.Settings);
             AltimSettings loaded = await _settings.GetAsync(ct).ConfigureAwait(false);
             _current = loaded;
+            _networkPolicy.Set(loaded.AllowNetworkCalls);
 
-            _services = ServiceRegistration.Build(_report, _platform!, _storage, _settings, loaded, _networkGate);
+            _services = ServiceRegistration.Build(
+                _report, _platform!, _storage, _settings, loaded, _networkGate, _networkPolicy);
             _providers = [.. _services.GetServices<IUsageProvider>()];
 
             _scheduler = _services.GetRequiredService<MonitorScheduler>();
@@ -460,29 +473,89 @@ internal sealed class AltimRuntime : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The housekeeping loop: down-sampling, compaction and emptying the write-ahead log.
+    /// </summary>
+    /// <param name="ct">Cancelled at shutdown.</param>
+    /// <remarks>
+    /// <para>
+    /// Periodic rather than once at start-up. Altim is a tray utility that is expected to
+    /// run for weeks, and a pass that only ran at launch meant a machine that is never
+    /// rebooted never down-sampled and never compacted — both of which are stated
+    /// behaviours with intervals measured in days.
+    /// </para>
+    /// <para>
+    /// The cadence is chosen for the log rather than for the retention work. Down-sampling
+    /// is a no-op until rows are 30 days old and compaction runs monthly, so the interval
+    /// only has to be short enough that an Altim that has gone quiet leaves a tidy log
+    /// behind it within a few minutes.
+    /// </para>
+    /// <para>
+    /// This does not hold a timer of its own: it is the only periodic work outside the
+    /// scheduler, and a <see cref="PeriodicTimer"/> that is awaited is one wake source
+    /// rather than a callback that can overlap itself.
+    /// </para>
+    /// </remarks>
     private async Task MaintainAsync(CancellationToken ct)
     {
-        if (_storage?.Retention is not { } retention)
+        await MaintainOnceAsync(ct).ConfigureAwait(false);
+
+        using var timer = new PeriodicTimer(MaintenanceInterval);
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+            {
+                await MaintainOnceAsync(ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown.
+        }
+    }
+
+    private async Task MaintainOnceAsync(CancellationToken ct)
+    {
+        StorageStack? storage = _storage;
+        if (storage is null)
         {
             return;
         }
 
         try
         {
-            DateTimeOffset now = DateTimeOffset.UtcNow;
-
-            RetentionResult result = await retention.DownsampleAsync(now, ct).ConfigureAwait(false);
-            if (!result.ChangedNothing)
+            if (storage.Retention is { } retention)
             {
-                AltimLog.Write(
-                    "storage",
-                    "Down-sampled " + result.CollapsedRows.ToString(System.Globalization.CultureInfo.InvariantCulture) +
-                    " rows into " + result.RetainedRows.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
+                DateTimeOffset now = DateTimeOffset.UtcNow;
+
+                RetentionResult result = await retention.DownsampleAsync(now, ct).ConfigureAwait(false);
+                if (!result.ChangedNothing)
+                {
+                    AltimLog.Write(
+                        "storage",
+                        "Down-sampled " + result.CollapsedRows.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                        " rows into " + result.RetainedRows.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
+                }
+
+                if (await retention.VacuumIfDueAsync(now, UsageRetention.DefaultVacuumInterval, ct).ConfigureAwait(false))
+                {
+                    AltimLog.Write("storage", "Compacted the database.");
+                }
             }
 
-            if (await retention.VacuumIfDueAsync(now, UsageRetention.DefaultVacuumInterval, ct).ConfigureAwait(false))
+            if (storage.Database is { } database)
             {
-                AltimLog.Write("storage", "Compacted the database.");
+                // Last, and only when nothing has written for a while: the log is bounded
+                // either way, and this is what takes an idle Altim's to nothing.
+                WalCheckpoint checkpoint = await database
+                    .CheckpointIfIdleAsync(WalCheckpointIdleWindow, ct)
+                    .ConfigureAwait(false);
+
+                if (checkpoint == WalCheckpoint.Truncated)
+                {
+                    AltimLog.Write("storage", "Emptied the write-ahead log.");
+                }
             }
         }
         catch (OperationCanceledException)
@@ -491,8 +564,8 @@ internal sealed class AltimRuntime : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // Retention is housekeeping. Failing it costs disk, never a reading.
-            AltimLog.Write("storage", "Retention pass failed", ex);
+            // Housekeeping. Failing it costs disk, never a reading.
+            AltimLog.Write("storage", "Maintenance pass failed", ex);
         }
     }
 
@@ -589,17 +662,10 @@ internal sealed class AltimRuntime : IAsyncDisposable
     {
         Altim.Core.Models.PixelRect? anchor = e.Anchor;
 
-        // Measured on Windows 11 26200: one left click on a version 4 icon produces two
-        // activations, NIN_SELECT and then WM_LBUTTONUP about 25ms later, and the tray host
-        // raises Clicked for both. Toggling on each one opens the panel and closes it again
-        // before it has been drawn, which reads as "the tray icon does nothing". Two
-        // activations this close together are one click.
-        long now = Environment.TickCount64;
-        long previous = Interlocked.Exchange(ref _lastActivation, now);
-        if (previous != 0 && now - previous < ActivationCoalescingMilliseconds)
-        {
-            return;
-        }
+        // One press, one activation. The shell's duplicate callback is collapsed inside
+        // WindowsTrayHost, where it belongs: it is a property of that host's message
+        // contract, not of this application, and de-duplicating here left every other
+        // consumer of ITrayHost to discover it for itself.
 
         // Raised on the tray host's own message loop thread.
         Dispatcher.UIThread.Post(() =>
@@ -668,13 +734,56 @@ internal sealed class AltimRuntime : IAsyncDisposable
         });
     }
 
+    /// <summary>
+    /// Rebuilds the tray menu when a degraded condition is recorded, which is the only
+    /// surface a process with no main window is guaranteed to have.
+    /// </summary>
+    /// <remarks>
+    /// Not every condition is known at start-up. The Linux notification service connects on
+    /// its first message, so whether notifications work is not knowable until one is sent;
+    /// building the menu once from what was known before the icon went up would leave the
+    /// rest permanently unreported. Raised on whichever thread recorded it, so the rebuild
+    /// is queued rather than awaited.
+    /// </remarks>
+    private void OnReportChanged(object? sender, EventArgs e)
+    {
+        TrayController? tray = _tray;
+        if (tray is null || Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await tray.RefreshMenuAsync(_shutdown.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Shutting down; the menu belongs to a process that is closing.
+            }
+            catch (Exception ex)
+            {
+                AltimLog.Write("tray", "Rebuilding the menu for a new condition failed", ex);
+            }
+        });
+    }
+
+    private void OnSystemSuspending(object? sender, EventArgs e)
+    {
+        MonitorScheduler? scheduler = _scheduler;
+        if (scheduler is null)
+        {
+            return;
+        }
+
+        AltimLog.Write("monitor", "System suspending.");
+        scheduler.Suspend();
+    }
+
     private void OnSystemResumed(object? sender, EventArgs e)
     {
-        // Nothing in the platform contract reports the machine going to sleep — IPlatformService
-        // carries SystemResumed and no counterpart — so the scheduler's suspended state is
-        // entered and left here, at the wake, which is the only moment this process hears
-        // about. Resume honours the user's "refresh on resume" setting and coalesces, so a
-        // wake that reports twice still produces one refresh.
         MonitorScheduler? scheduler = _scheduler;
         if (scheduler is null)
         {
@@ -682,7 +791,18 @@ internal sealed class AltimRuntime : IAsyncDisposable
         }
 
         AltimLog.Write("monitor", "System resumed.");
-        scheduler.Suspend();
+
+        // A wake with no suspend before it is an ordinary outcome, not a bug: a modern
+        // standby machine can sleep without sending the classic broadcast, and Altim may
+        // have started after the machine went to sleep. MonitorScheduler.Resume does
+        // nothing unless the scheduler is suspended — which is what stops a platform that
+        // reports a wake twice refreshing twice — so entering the state here is what makes
+        // the user's "refresh on resume" setting hold in the half-signal case too.
+        if (!scheduler.IsSuspended)
+        {
+            scheduler.Suspend();
+        }
+
         scheduler.Resume();
     }
 
@@ -722,6 +842,11 @@ internal sealed class AltimRuntime : IAsyncDisposable
     private void OnSettingsChanged(object? sender, AltimSettings e)
     {
         _current = e;
+
+        // Before anything else, and deliberately not on the dispatcher: the next scheduler
+        // tick can be on a worker already, and the whole point of the setting is that
+        // switching it off stops the next call rather than the next restart.
+        _networkPolicy.Set(e.AllowNetworkCalls);
 
         Dispatcher.UIThread.Post(() =>
         {

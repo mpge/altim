@@ -62,9 +62,7 @@ internal static class Program
     /// </summary>
     /// <returns>The configured builder.</returns>
     public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<App>()
-            .UsePlatformDetect()
-            .WithInterFont();
+        Configure(AppBuilder.Configure<App>());
 
     /// <summary>
     /// Builds the application for a process that owns the session.
@@ -72,7 +70,32 @@ internal static class Program
     /// <param name="instance">The single-instance guard, or null when none was taken.</param>
     /// <returns>The configured builder.</returns>
     private static AppBuilder BuildAvaloniaApp(SingleInstance? instance) =>
-        AppBuilder.Configure(() => new App(instance))
+        Configure(AppBuilder.Configure(() => new App(instance)));
+
+    /// <summary>
+    /// The configuration both entry points share, so the previewer and the headless test
+    /// host build the same application the process does.
+    /// </summary>
+    /// <param name="builder">The builder to configure.</param>
+    /// <returns>The same builder.</returns>
+    /// <remarks>
+    /// <para>
+    /// <see cref="MacOSPlatformOptions.ShowInDock"/> is the accessory-app switch, and it is
+    /// set here rather than left to the bundle's <c>LSUIElement</c> because Avalonia calls
+    /// <c>NSApplication.setActivationPolicy</c> during initialisation and that call wins
+    /// over the plist. Both are needed: the plist keeps the Dock tile from flashing up
+    /// before managed code runs, and this keeps Avalonia from putting it back. Without it
+    /// Altim is a tray utility with a Dock icon and an application menu bar it has no
+    /// windows for.
+    /// </para>
+    /// <para>
+    /// The option is inert off macOS, so it is applied unconditionally rather than behind a
+    /// platform test.
+    /// </para>
+    /// </remarks>
+    private static AppBuilder Configure(AppBuilder builder) =>
+        builder
             .UsePlatformDetect()
+            .With(new MacOSPlatformOptions { ShowInDock = false })
             .WithInterFont();
 }

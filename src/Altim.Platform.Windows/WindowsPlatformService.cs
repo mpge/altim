@@ -22,6 +22,20 @@ namespace Altim.Platform.Windows;
 /// both raises <see cref="SystemResumed"/> once.
 /// </para>
 /// <para>
+/// <b>Suspend is taken from one source only, and the asymmetry is the point.</b>
+/// <see cref="SystemSuspending"/> comes from <c>PBT_APMSUSPEND</c> and nothing else. The
+/// display switching <em>off</em> is deliberately not treated as the machine going to
+/// sleep, even though the display switching <em>on</em> is treated as a wake: a monitor
+/// that has blanked after an idle timeout is not a machine that has stopped, and pausing
+/// the scheduler there would stop recording an agent that is working away against a dark
+/// screen. An extra wake costs one refresh; a wrong suspend costs the history.
+/// </para>
+/// <para>
+/// The consequence is that a modern standby machine can report a resume with no suspend
+/// before it. <see cref="IPlatformService.SystemSuspending"/> documents that as allowed,
+/// and the composition root handles it.
+/// </para>
+/// <para>
 /// <see cref="SystemEvents"/> is a static event source that keeps its subscribers
 /// alive for the life of the process. Every handler attached here is detached in
 /// <see cref="Dispose"/>; without that, a platform service created per test or per
@@ -43,6 +57,7 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
 
     private IntPtr _displayStateRegistration;
     private long _lastResumeTicks;
+    private long _lastSuspendTicks;
     private bool _displayWasOff;
     private bool _taskbarDark;
     private bool _appDark;
@@ -77,6 +92,7 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
         _ownsTray = ownsTray;
         _power = new WindowsPowerEvents();
         _power.SystemResumed += OnPowerResume;
+        _power.SystemSuspending += OnPowerSuspend;
 
         _taskbarDark = WindowsTheme.TaskbarIsDark();
         _appDark = WindowsTheme.AppIsDark();
@@ -85,6 +101,9 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
         _tray.Window.MessageReceived += OnWindowMessage;
         RegisterForDisplayState();
     }
+
+    /// <inheritdoc />
+    public event EventHandler? SystemSuspending;
 
     /// <inheritdoc />
     public event EventHandler? SystemResumed;
@@ -130,6 +149,7 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
 
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _power.SystemResumed -= OnPowerResume;
+        _power.SystemSuspending -= OnPowerSuspend;
         _power.Dispose();
 
         UnregisterForDisplayState();
@@ -177,6 +197,12 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
             return;
         }
 
+        if (subtype == NativeMethods.PBT_APMSUSPEND)
+        {
+            RaiseSuspend();
+            return;
+        }
+
         if (subtype != NativeMethods.PBT_POWERSETTINGCHANGE || message.LParam == IntPtr.Zero)
         {
             return;
@@ -204,6 +230,8 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
 
     private void OnPowerResume(object? sender, EventArgs e) => RaiseResume();
 
+    private void OnPowerSuspend(object? sender, EventArgs e) => RaiseSuspend();
+
     private void RaiseResume()
     {
         if (_disposed)
@@ -219,6 +247,25 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
         }
 
         SystemResumed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RaiseSuspend()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        // The same coalescing rule as the wake: SystemEvents and the window's own broadcast
+        // both carry PBT_APMSUSPEND, so one sleep arrives twice.
+        long now = Environment.TickCount64;
+        long previous = Interlocked.Exchange(ref _lastSuspendTicks, now);
+        if (previous != 0 && now - previous < (long)ResumeCoalescingWindow.TotalMilliseconds)
+        {
+            return;
+        }
+
+        SystemSuspending?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)

@@ -22,6 +22,17 @@ public sealed class WindowsPowerEvents : IDisposable
     public WindowsPowerEvents() => SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
     /// <summary>
+    /// Raised when the machine is about to enter a low-power state. Not raised for the
+    /// status changes Windows sends when the battery state moves.
+    /// </summary>
+    /// <remarks>
+    /// Windows allows roughly two seconds between this and the machine actually
+    /// suspending, so handlers stop work rather than starting any. A modern standby
+    /// machine can sleep without ever raising it.
+    /// </remarks>
+    public event EventHandler? SystemSuspending;
+
+    /// <summary>
     /// Raised when the machine resumes from sleep. Not raised for a suspend, and not
     /// raised for the status changes Windows sends when the battery state moves.
     /// </summary>
@@ -41,9 +52,20 @@ public sealed class WindowsPowerEvents : IDisposable
 
     private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
     {
-        if (e.Mode == PowerModes.Resume)
+        switch (e.Mode)
         {
-            SystemResumed?.Invoke(this, EventArgs.Empty);
+            case PowerModes.Resume:
+                SystemResumed?.Invoke(this, EventArgs.Empty);
+                break;
+
+            case PowerModes.Suspend:
+                SystemSuspending?.Invoke(this, EventArgs.Empty);
+                break;
+
+            default:
+                // PowerModes.StatusChange is the battery moving, which is not a transition
+                // Altim reacts to.
+                break;
         }
     }
 }

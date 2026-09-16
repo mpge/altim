@@ -17,10 +17,15 @@ namespace Altim.App.Composition;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The container is built after storage and settings have been read, not before. Two
-/// registrations need the loaded settings to exist: the scheduler takes its cadences from
-/// them, and both providers take their network permission from them. Building the graph
-/// second means neither has to be reconfigured a moment after it was created.
+/// The container is built after storage and settings have been read, not before, because
+/// the scheduler takes its cadences from the loaded settings and its cadences are fixed at
+/// construction.
+/// </para>
+/// <para>
+/// Network permission does <em>not</em> work that way and deliberately so. It is a live
+/// reading through <see cref="LiveNetworkPolicy"/> rather than a value baked into each
+/// provider's options, because the setting can be changed while Altim runs and a permission
+/// frozen at start-up would go on calling the vendor until the next restart.
 /// </para>
 /// <para>
 /// Providers are registered as <see cref="IUsageProvider"/> so that
@@ -39,13 +44,18 @@ internal static class ServiceRegistration
     /// <param name="networkGate">
     /// The gate handed to both providers, forwarding to the live scheduler's rate limiter.
     /// </param>
+    /// <param name="networkPolicy">
+    /// The live "may Altim reach the vendor" flag, also handed to both providers. The
+    /// caller keeps it in step with the stored setting.
+    /// </param>
     public static ServiceProvider Build(
         StartupReport report,
         PlatformStack platform,
         StorageStack storage,
         SettingsGateway settings,
         AltimSettings loaded,
-        SchedulerNetworkGate networkGate)
+        SchedulerNetworkGate networkGate,
+        LiveNetworkPolicy networkPolicy)
     {
         ArgumentNullException.ThrowIfNull(report);
         ArgumentNullException.ThrowIfNull(platform);
@@ -53,6 +63,7 @@ internal static class ServiceRegistration
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(loaded);
         ArgumentNullException.ThrowIfNull(networkGate);
+        ArgumentNullException.ThrowIfNull(networkPolicy);
 
         var services = new ServiceCollection();
 
@@ -99,21 +110,25 @@ internal static class ServiceRegistration
         _ = services.AddSingleton(platform.AutoStart);
         _ = services.AddSingleton(networkGate);
         _ = services.AddSingleton<IRefreshGate>(networkGate);
+        _ = services.AddSingleton(networkPolicy);
+        _ = services.AddSingleton<INetworkPolicy>(networkPolicy);
 
         // Providers. Both are handed the forwarding network gate, which is what rate limits
         // Claude's headless usage summary and Codex's app-server call; nothing else in the
         // process supplies one, so without it those calls would run on every refresh.
         _ = services.AddSingleton<IUsageProvider>(_ => new ClaudeUsageProvider(
-            options: ClaudeOptions.Default with { AllowNetworkCalls = loaded.AllowNetworkCalls },
+            options: ClaudeOptions.Default,
             processMonitor: platform.Processes,
             timeProvider: TimeProvider.System,
-            networkGate: networkGate));
+            networkGate: networkGate,
+            networkPolicy: networkPolicy));
 
         _ = services.AddSingleton<IUsageProvider>(_ => new CodexUsageProvider(
-            options: CodexOptions.Default with { AllowNetworkCalls = loaded.AllowNetworkCalls },
+            options: CodexOptions.Default,
             processMonitor: platform.Processes,
             timeProvider: TimeProvider.System,
-            networkGate: networkGate));
+            networkGate: networkGate,
+            networkPolicy: networkPolicy));
 
         // The scheduler. Its cadences are fixed at construction, so a later change to the
         // refresh interval replaces the instance; see AltimRuntime.RebuildSchedulerAsync,

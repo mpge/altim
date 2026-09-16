@@ -54,6 +54,7 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
     private readonly CodexDoctorReader _doctor;
     private readonly IProcessMonitor _processMonitor;
     private readonly IRefreshGate? _networkGate;
+    private readonly INetworkPolicy? _networkPolicy;
     private readonly string? _home;
     private readonly TimeProvider _time;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -86,6 +87,12 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
     /// here instead. <b>Only</b> the app-server call is gated: the rollout tail and the
     /// state database are local files and are read on every refresh regardless.
     /// </param>
+    /// <param name="networkPolicy">
+    /// The live answer to "may Altim reach the vendor at all", read at the moment of the
+    /// call so that a user switching the setting off stops the next one. When null only
+    /// <see cref="CodexOptions.AllowNetworkCalls"/> decides. The two compose: both must
+    /// allow.
+    /// </param>
     public CodexUsageProvider(
         CodexOptions? options = null,
         ICodexAppServerClient? appServer = null,
@@ -93,7 +100,8 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
         IProcessMonitor? processMonitor = null,
         string? homeOverride = null,
         TimeProvider? timeProvider = null,
-        IRefreshGate? networkGate = null)
+        IRefreshGate? networkGate = null,
+        INetworkPolicy? networkPolicy = null)
     {
         _options = options ?? CodexOptions.Default;
         _appServer = appServer ?? new CodexAppServerClient();
@@ -102,6 +110,7 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
         _home = homeOverride ?? CodexPaths.ResolveHome();
         _time = timeProvider ?? TimeProvider.System;
         _networkGate = networkGate;
+        _networkPolicy = networkPolicy;
 
         _usage = new ProviderUsage(CodexProviderInfo.Id, ProviderStatus.Unknown, [], null, null, null);
     }
@@ -131,6 +140,13 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
 
     /// <summary>When <see cref="ServerReportedUsage"/> was read.</summary>
     public DateTimeOffset? ServerReportedUsageAt { get; private set; }
+
+    /// <summary>
+    /// Whether the live quota call is permitted right now: the constructed option and the
+    /// live policy must both allow it.
+    /// </summary>
+    private bool NetworkCallsAllowed =>
+        _options.AllowNetworkCalls && (_networkPolicy?.AllowsNetworkCalls ?? true);
 
     /// <summary>
     /// A process scanner that finds the Codex CLI by executable name only.
@@ -340,6 +356,17 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
         }
     }
 
+    /// <summary>
+    /// Drops everything the live call produced, so nothing the vendor reported outlives the
+    /// permission to ask for it.
+    /// </summary>
+    private void ForgetLiveReadings()
+    {
+        _lastLiveSnapshot = null;
+        ServerReportedUsage = null;
+        ServerReportedUsageAt = null;
+    }
+
     private void RememberLive(CodexLiveResult live, DateTimeOffset now)
     {
         if (live.Outcome is not CodexLiveOutcome.Succeeded)
@@ -411,8 +438,14 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
             return CodexLiveResult.NotDetected;
         }
 
-        if (!_options.AllowNetworkCalls)
+        if (!NetworkCallsAllowed)
         {
+            // Strict local-only. The remembered live reading came from the vendor, and
+            // Choose would go on presenting it for as long as no local snapshot outranked
+            // it — which, on a machine with no rollout snapshot at all, is forever. The
+            // user asked for local figures, so the server's are forgotten and the meters
+            // fall back to what the rollout tail says, or disappear.
+            ForgetLiveReadings();
             return CodexLiveResult.Skipped;
         }
 
@@ -493,7 +526,7 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
             return live.Outcome switch
             {
                 CodexLiveOutcome.NotDetected => "Codex CLI not found; no local quota snapshot either",
-                CodexLiveOutcome.Skipped when !_options.AllowNetworkCalls => "Network calls are off and no local quota snapshot was found",
+                CodexLiveOutcome.Skipped when !NetworkCallsAllowed => "Network calls are off and no local quota snapshot was found",
                 CodexLiveOutcome.Skipped => "No local quota snapshot found",
                 _ => "Live quota unavailable and no local snapshot was found",
             };
@@ -503,7 +536,7 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
         return live.Outcome switch
         {
             CodexLiveOutcome.NotDetected => "Codex CLI not found; showing a local snapshot from " + age,
-            CodexLiveOutcome.Skipped when !_options.AllowNetworkCalls => "Network calls are off; showing a local snapshot from " + age,
+            CodexLiveOutcome.Skipped when !NetworkCallsAllowed => "Network calls are off; showing a local snapshot from " + age,
             CodexLiveOutcome.Skipped when _authMode is CodexAuthMode.ApiKey =>
                 "Live quota is unavailable under API-key authentication; showing a local snapshot from " + age,
             CodexLiveOutcome.Skipped when _authMode is CodexAuthMode.NotAuthenticated =>

@@ -131,3 +131,18 @@ internal sealed class MovableTimeProvider : TimeProvider
 
     public void Advance(TimeSpan amount) => _now += amount;
 }
+
+/// <summary>
+/// The user's live network permission, as a test can move it.
+/// </summary>
+/// <remarks>
+/// The production implementation is <c>Altim.App.Services.LiveNetworkPolicy</c>, which the
+/// composition root keeps in step with the stored setting. Nothing here is a stand-in for
+/// behaviour: the point of the seam is that the flag can change while a provider is alive,
+/// so a test of it has to be able to change the flag while the provider is alive.
+/// </remarks>
+internal sealed class MutableNetworkPolicy : INetworkPolicy
+{
+    /// <inheritdoc />
+    public bool AllowsNetworkCalls { get; set; } = true;
+}

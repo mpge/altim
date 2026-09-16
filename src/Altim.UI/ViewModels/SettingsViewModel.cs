@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Altim.Core.Abstractions;
 using Altim.Core.Settings;
+using Altim.UI.Formatting;
 using Altim.UI.Services;
 using Altim.UI.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -35,6 +36,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
         nameof(SelectedSessionThreshold),
         nameof(SelectedWeeklyThreshold),
         nameof(ResetAlertsEnabled),
+        nameof(AllowNetworkCalls),
     ];
 
     private readonly ISettingsStore _store;
@@ -71,6 +73,10 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
 
     [ObservableProperty]
     private bool _resetAlertsEnabled;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsLocalOnlyNotice))]
+    private bool _allowNetworkCalls = AltimSettings.Default.AllowNetworkCalls;
 
     [ObservableProperty]
     private bool _saveFailed;
@@ -157,6 +163,30 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
         "Nothing is sent anywhere. Altim has no servers and no telemetry.",
     ];
 
+    /// <summary>The label on the live-quota toggle.</summary>
+    public string AllowNetworkCallsLabel => "Check live quota with the provider";
+
+    /// <summary>
+    /// What the live-quota toggle actually does, in the terms of the thing it does it to.
+    /// </summary>
+    /// <remarks>
+    /// Written to be true rather than reassuring. Altim has no servers of its own and makes
+    /// no vendor API calls itself; what it does is run the provider's own command line, and
+    /// that command contacts the vendor with the credentials the user already gave it. The
+    /// sentence says exactly that, because "allow network calls" on its own would leave a
+    /// privacy-minded reader guessing who is being called and with what.
+    /// </remarks>
+    public string AllowNetworkCallsDescription =>
+        "Asks each provider's own command line for the current figures. That command contacts "
+        + "the vendor using the sign-in you already gave it. Altim never contacts a vendor "
+        + "itself and sends nothing anywhere.";
+
+    /// <summary>Shown under the toggle while live quota checks are switched off.</summary>
+    public string LocalOnlyNotice => UsageFormat.LocalFiguresOnly;
+
+    /// <summary>True while the figures on screen come only from local files.</summary>
+    public bool ShowsLocalOnlyNotice => !AllowNetworkCalls;
+
     /// <summary>The label on the action that empties the history.</summary>
     public string ClearHistoryLabel => "Clear usage history";
 
@@ -217,6 +247,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
             SessionThresholdPercent = SelectedSessionThreshold.Value,
             WeeklyThresholdPercent = SelectedWeeklyThreshold.Value,
             NotifyOnWindowReset = ResetAlertsEnabled,
+            AllowNetworkCalls = AllowNetworkCalls,
         };
 
         _current = next;
@@ -327,6 +358,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
             SelectedSessionThreshold = FindThreshold(settings.SessionThresholdPercent);
             SelectedWeeklyThreshold = FindThreshold(settings.WeeklyThresholdPercent);
             ResetAlertsEnabled = settings.NotifyOnWindowReset;
+            AllowNetworkCalls = settings.AllowNetworkCalls;
         }
         finally
         {

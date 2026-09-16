@@ -1,4 +1,5 @@
 using System.Globalization;
+using Altim.Core.Abstractions;
 using Altim.Core.Models;
 using Altim.Providers.Claude;
 using Altim.Providers.Tests.Support;
@@ -147,6 +148,73 @@ public sealed class ClaudeUsageProviderTests
             new FakeProcessMonitor(),
             [workspace.Root],
             new FixedTimeProvider(Now));
+
+        _ = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(UsageArguments, runner.Invocations);
+    }
+
+    /// <summary>
+    /// The setting is live. A provider is built once and outlives every settings change, so
+    /// the permission has to be read at the moment of the call rather than copied into the
+    /// options at construction — which is what it used to be, and which meant switching the
+    /// setting off did nothing until Altim was restarted.
+    /// </summary>
+    [Fact]
+    public async Task SwitchingTheNetworkPolicyOffStopsTheNextHeadlessSummary()
+    {
+        using var workspace = new TempWorkspace();
+        _ = workspace.Write(ClaudePaths.StatusLineStateFileName, StatusLinePayload(Now));
+
+        var runner = new FakeCliRunner { CommandExists = true };
+        runner.RespondWithJson(
+            UsageArguments,
+            """{"num_turns":0,"total_cost_usd":0,"result":"Current week (Opus): 12% used"}""");
+
+        var policy = new MutableNetworkPolicy { AllowsNetworkCalls = true };
+
+        using var provider = new ClaudeUsageProvider(
+            ClaudeOptions.Default,
+            runner,
+            new FakeProcessMonitor(),
+            [workspace.Root],
+            new FixedTimeProvider(Now),
+            networkPolicy: policy);
+
+        ProviderUsage first = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(UsageArguments, runner.Invocations);
+        Assert.Contains(first.Metrics, m => m.Key == "seven_day_opus");
+
+        runner.Invocations.Clear();
+        policy.AllowsNetworkCalls = false;
+
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+        ProviderUsage second = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(UsageArguments, runner.Invocations);
+
+        // And the figures it produced go with it. The Opus weekly has no other source, so
+        // leaving it on screen would be a meter Altim can no longer confirm or refresh.
+        Assert.DoesNotContain(second.Metrics, m => m.Key == "seven_day_opus");
+    }
+
+    /// <summary>
+    /// A provider constructed with network calls off stays off whatever the policy says, so
+    /// an embedder or a test that asked for local-only cannot be overridden by a setting.
+    /// </summary>
+    [Fact]
+    public async Task TheConstructedOptionAndTheLivePolicyBothHaveToAllowTheCall()
+    {
+        using var workspace = new TempWorkspace();
+        var runner = new FakeCliRunner { CommandExists = true };
+
+        using var provider = new ClaudeUsageProvider(
+            ClaudeOptions.Default with { AllowNetworkCalls = false },
+            runner,
+            new FakeProcessMonitor(),
+            [workspace.Root],
+            new FixedTimeProvider(Now),
+            networkPolicy: new MutableNetworkPolicy { AllowsNetworkCalls = true });
 
         _ = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
 

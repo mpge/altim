@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Altim.App.Diagnostics;
 
 namespace Altim.App;
@@ -19,7 +20,15 @@ namespace Altim.App;
 /// </para>
 /// <para>
 /// Both names are session-local rather than global, so two users signed in at once get one
-/// Altim each.
+/// Altim each. On Windows that is what an unprefixed name means; on macOS and Linux .NET
+/// backs these primitives with per-user files, which gives the same property by a different
+/// route.
+/// </para>
+/// <para>
+/// <b>The two halves degrade independently.</b> The mutex is the guard and the event is only
+/// how a second launch asks the first to show itself. A platform that will hand out one and
+/// not the other gets the half it can: an Altim that is still single-instance but whose
+/// second launch exits silently is a much smaller loss than two Altims.
 /// </para>
 /// </remarks>
 internal sealed class SingleInstance : IDisposable
@@ -28,15 +37,20 @@ internal sealed class SingleInstance : IDisposable
     private const string SurfaceEventName = "Altim.Surface";
 
     private readonly Mutex _mutex;
-    private readonly EventWaitHandle _surface;
+    private readonly EventWaitHandle? _surface;
     private readonly ManualResetEventSlim _stop = new(initialState: false);
-    private readonly Thread _listener;
+    private readonly Thread? _listener;
     private bool _disposed;
 
-    private SingleInstance(Mutex mutex, EventWaitHandle surface)
+    private SingleInstance(Mutex mutex, EventWaitHandle? surface)
     {
         _mutex = mutex;
         _surface = surface;
+
+        if (surface is null)
+        {
+            return;
+        }
 
         _listener = new Thread(Listen)
         {
@@ -77,12 +91,9 @@ internal sealed class SingleInstance : IDisposable
                 mutex.Dispose();
                 return false;
             }
-
-            var surface = new EventWaitHandle(initialState: false, EventResetMode.AutoReset, SurfaceEventName);
-            instance = new SingleInstance(mutex, surface);
-            return true;
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or NotSupportedException or WaitHandleCannotBeOpenedException)
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or NotSupportedException
+                                      or PlatformNotSupportedException or WaitHandleCannotBeOpenedException)
         {
             mutex?.Dispose();
             AltimLog.Write("startup", "The single-instance guard could not be created; starting anyway", ex);
@@ -90,10 +101,17 @@ internal sealed class SingleInstance : IDisposable
         }
         catch (AbandonedMutexException)
         {
-            // The previous owner died without releasing. The session is ours.
+            // The previous owner died without releasing. The session is ours, and the
+            // handle is ours too: an abandoned mutex is acquired by the waiter that
+            // observes it.
             instance = null;
             return true;
         }
+
+        // The session is held. Whether the surfacing channel can also be opened is a
+        // separate question, and a failure there does not give the session back.
+        instance = new SingleInstance(mutex, TryCreateSurfaceEvent());
+        return true;
     }
 
     /// <summary>
@@ -104,7 +122,7 @@ internal sealed class SingleInstance : IDisposable
     {
         try
         {
-            if (EventWaitHandle.TryOpenExisting(SurfaceEventName, out EventWaitHandle? surface))
+            if (TryOpenSurfaceEvent(out EventWaitHandle? surface))
             {
                 using (surface)
                 {
@@ -112,7 +130,8 @@ internal sealed class SingleInstance : IDisposable
                 }
             }
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or WaitHandleCannotBeOpenedException)
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or NotSupportedException
+                                      or PlatformNotSupportedException or WaitHandleCannotBeOpenedException)
         {
             AltimLog.Write("startup", "Signalling the running instance failed", ex);
         }
@@ -133,14 +152,14 @@ internal sealed class SingleInstance : IDisposable
 
         try
         {
-            _surface.Set();
+            _surface?.Set();
         }
         catch (ObjectDisposedException)
         {
             // Already gone.
         }
 
-        _ = _listener.Join(TimeSpan.FromSeconds(1));
+        _ = _listener?.Join(TimeSpan.FromSeconds(1));
 
         try
         {
@@ -151,13 +170,79 @@ internal sealed class SingleInstance : IDisposable
             // Not held, or already released. Either way the process is going away.
         }
 
-        _surface.Dispose();
+        _surface?.Dispose();
         _mutex.Dispose();
         _stop.Dispose();
     }
 
+    /// <summary>
+    /// Creates the event a second launch signals, or reports that this platform will not.
+    /// </summary>
+    /// <returns>The event, or <see langword="null"/> when none could be created.</returns>
+    private static EventWaitHandle? TryCreateSurfaceEvent()
+    {
+        try
+        {
+            return new EventWaitHandle(initialState: false, EventResetMode.AutoReset, SurfaceEventName);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or NotSupportedException
+                                      or PlatformNotSupportedException or WaitHandleCannotBeOpenedException)
+        {
+            AltimLog.Write(
+                "startup",
+                "A second launch will not be able to surface this instance's panel; it will exit quietly",
+                ex);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Opens the running instance's surfacing event.
+    /// </summary>
+    /// <param name="surface">The opened event, or null when there was none to open.</param>
+    /// <returns>True when an existing event was opened.</returns>
+    /// <remarks>
+    /// <para>
+    /// Two implementations, because .NET only offers <c>TryOpenExisting</c> on Windows. Off
+    /// Windows the named primitive is create-or-attach in a single call and there is no way
+    /// to ask for only the attach, so the constructor is used and <c>createdNew</c> is read
+    /// back to tell the two apart.
+    /// </para>
+    /// <para>
+    /// Creating one here means nobody was listening: the owner released the session between
+    /// <see cref="TryAcquire"/> reporting it held and this call. That is reported as "no
+    /// signal delivered" and the freshly created event is dropped rather than left behind
+    /// for the next launch to attach to and find nobody on.
+    /// </para>
+    /// </remarks>
+    private static bool TryOpenSurfaceEvent([NotNullWhen(true)] out EventWaitHandle? surface)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return EventWaitHandle.TryOpenExisting(SurfaceEventName, out surface);
+        }
+
+        var opened = new EventWaitHandle(
+            initialState: false, EventResetMode.AutoReset, SurfaceEventName, out bool createdNew);
+
+        if (createdNew)
+        {
+            opened.Dispose();
+            surface = null;
+            return false;
+        }
+
+        surface = opened;
+        return true;
+    }
+
     private void Listen()
     {
+        if (_surface is null)
+        {
+            return;
+        }
+
         WaitHandle[] handles = [_surface, _stop.WaitHandle];
 
         while (!_disposed)

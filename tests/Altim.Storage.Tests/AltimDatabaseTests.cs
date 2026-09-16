@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Xunit;
 
@@ -289,6 +290,102 @@ public sealed class AltimDatabaseTests
         var connection = new SqliteConnection(builder.ToString());
         connection.Open();
         return connection;
+    }
+
+    /// <summary>
+    /// The log is bounded while Altim is working, which is the half a caller cannot ask for.
+    /// </summary>
+    /// <remarks>
+    /// The defect this covers: SQLite checkpoints the write-ahead log automatically but does
+    /// not shrink it — it rewinds and writes over the same bytes — so the file settles at
+    /// whatever high-water mark it ever reached and stays there. Against a database of a few
+    /// hundred kilobytes that produced a multi-megabyte log. <c>journal_size_limit</c> is
+    /// what turns the reset into a truncation, and it is only in force if it was set after
+    /// the connection entered WAL mode, which is the mistake this asserts against.
+    /// </remarks>
+    [Fact]
+    public async Task TheWriteAheadLogStaysBoundedUnderSustainedWriting()
+    {
+        using var temp = new TempDatabase();
+        AltimDatabase database = temp.Open();
+
+        Assert.Equal("wal", Convert.ToString(temp.Scalar("PRAGMA journal_mode"), CultureInfo.InvariantCulture));
+
+        string walPath = temp.FilePath + "-wal";
+
+        // Many small transactions, which is the shape Altim writes in: one row at a time as
+        // a reading changes, never a bulk load.
+        for (int i = 0; i < 2000; i++)
+        {
+            using WriteLease lease = await database.LeaseWriterAsync(Ct);
+            using SqliteCommand command = lease.Connection.CreateCommand();
+            command.CommandText =
+                "INSERT INTO usage_sample (provider_id, metric_key, captured_at, used_percent) " +
+                "VALUES ('claude', 'five_hour', $at, $percent)";
+            _ = command.Parameters.AddWithValue("$at", i);
+            _ = command.Parameters.AddWithValue("$percent", i % 100);
+            _ = command.ExecuteNonQuery();
+        }
+
+        long walBytes = File.Exists(walPath) ? new FileInfo(walPath).Length : 0;
+
+        // SQLite's own default would allow four megabytes here. The assertion is deliberately
+        // loose — the log is allowed to be anywhere under the checkpoint threshold plus a
+        // little slack — because the point is the order of magnitude, not an exact size.
+        Assert.True(walBytes < 2 * 1024 * 1024, $"The write-ahead log reached {walBytes} bytes.");
+    }
+
+    /// <summary>
+    /// And it goes to nothing once nothing is writing, which is the half a caller does ask
+    /// for.
+    /// </summary>
+    [Fact]
+    public async Task AnIdleDatabaseHasItsWriteAheadLogEmptied()
+    {
+        using var temp = new TempDatabase();
+        AltimDatabase database = temp.Open();
+
+        using (WriteLease lease = await database.LeaseWriterAsync(Ct))
+        {
+            using SqliteCommand command = lease.Connection.CreateCommand();
+            command.CommandText =
+                "INSERT INTO usage_sample (provider_id, metric_key, captured_at, used_percent) " +
+                "VALUES ('claude', 'five_hour', 1, 10)";
+            _ = command.ExecuteNonQuery();
+        }
+
+        string walPath = temp.FilePath + "-wal";
+        Assert.True(new FileInfo(walPath).Length > 0);
+
+        // A window of zero: the write has just happened, so anything longer would make this
+        // a test of the clock.
+        Assert.Equal(WalCheckpoint.Truncated, await database.CheckpointIfIdleAsync(TimeSpan.Zero, Ct));
+        Assert.Equal(0, new FileInfo(walPath).Length);
+
+        // And the row is in the database rather than only in the log that was just emptied,
+        // which is the thing a checkpoint must never get wrong.
+        temp.Close();
+        Assert.Equal(1, temp.CountRows("usage_sample"));
+    }
+
+    /// <summary>A database that has just been written to is left alone.</summary>
+    [Fact]
+    public async Task ADatabaseThatWasJustWrittenToIsNotCheckpointed()
+    {
+        using var temp = new TempDatabase();
+        AltimDatabase database = temp.Open();
+
+        using (WriteLease lease = await database.LeaseWriterAsync(Ct))
+        {
+            using SqliteCommand command = lease.Connection.CreateCommand();
+            command.CommandText =
+                "INSERT INTO usage_sample (provider_id, metric_key, captured_at, used_percent) " +
+                "VALUES ('claude', 'five_hour', 1, 10)";
+            _ = command.ExecuteNonQuery();
+        }
+
+        Assert.Equal(WalCheckpoint.Skipped, await database.CheckpointIfIdleAsync(TimeSpan.FromMinutes(5), Ct));
+        Assert.True(new FileInfo(temp.FilePath + "-wal").Length > 0);
     }
 
     private static void Execute(SqliteConnection connection, string sql)

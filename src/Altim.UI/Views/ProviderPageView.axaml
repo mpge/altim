@@ -157,6 +157,12 @@
                      Theme="{DynamicResource AltimCaptionMetricText}"
                      Text="{Binding Provider.LastRefreshedText}" />
         </Grid>
+
+        <!-- Where the numbers above came from, when the live check is switched off. -->
+        <TextBlock IsVisible="{Binding Provider.ShowsLocalOnlyNotice}"
+                   Theme="{DynamicResource AltimCaptionText}"
+                   TextWrapping="Wrap"
+                   Text="{Binding Provider.LocalOnlyText}" />
       </StackPanel>
 
     </StackPanel>

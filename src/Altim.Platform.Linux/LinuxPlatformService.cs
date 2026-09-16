@@ -19,6 +19,13 @@ namespace Altim.Platform.Linux;
 /// <see cref="GetTrayAnchorAsync"/>.
 /// </para>
 /// <para>
+/// <b>One subscription carries both halves of a sleep.</b> logind's <c>PrepareForSleep</c>
+/// is emitted with <c>true</c> before the machine suspends and <c>false</c> when it comes
+/// back, so <see cref="SystemSuspending"/> and <see cref="SystemResumed"/> come from the
+/// same match rule. Unlike Windows and macOS there is no second source and no display-state
+/// signal to confuse it with.
+/// </para>
+/// <para>
 /// <b>Two buses.</b> <c>PrepareForSleep</c> is a system-bus signal from logind;
 /// <c>SettingChanged</c> is a session-bus signal from the portal. Subscribing on the wrong
 /// bus is accepted and then never fires, so each subscription names its bus at the call site
@@ -56,6 +63,7 @@ public sealed class LinuxPlatformService : IPlatformService, IDisposable
     private DBusConnection? _systemBus;
     private DBusConnection? _sessionBus;
     private long _lastResumeTicks;
+    private long _lastSuspendTicks;
     private volatile bool _dark;
     private bool _disposed;
 
@@ -84,6 +92,9 @@ public sealed class LinuxPlatformService : IPlatformService, IDisposable
         _ownsTray = ownsTray;
         Ready = ConnectAsync(_shutdown.Token);
     }
+
+    /// <inheritdoc />
+    public event EventHandler? SystemSuspending;
 
     /// <inheritdoc />
     public event EventHandler? SystemResumed;
@@ -358,13 +369,20 @@ public sealed class LinuxPlatformService : IPlatformService, IDisposable
             return;
         }
 
-        // The signal fires twice per sleep. True is "about to suspend"; only the return
-        // matters here, and the scheduler refreshes once on it.
+        // The signal fires twice per sleep, and Linux is the one platform that gets both
+        // halves from one subscription: true is "about to suspend", false is "back". The
+        // scheduler pauses on the first and refreshes once on the second.
         if (notification.Value)
         {
+            RaiseSuspend();
             return;
         }
 
+        RaiseResume();
+    }
+
+    private void RaiseResume()
+    {
         long now = Environment.TickCount64;
         long previous = Interlocked.Exchange(ref _lastResumeTicks, now);
         if (previous != 0 && now - previous < (long)ResumeCoalescingWindow.TotalMilliseconds)
@@ -373,6 +391,18 @@ public sealed class LinuxPlatformService : IPlatformService, IDisposable
         }
 
         SystemResumed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RaiseSuspend()
+    {
+        long now = Environment.TickCount64;
+        long previous = Interlocked.Exchange(ref _lastSuspendTicks, now);
+        if (previous != 0 && now - previous < (long)ResumeCoalescingWindow.TotalMilliseconds)
+        {
+            return;
+        }
+
+        SystemSuspending?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnSettingChanged(Notification<uint?> notification)

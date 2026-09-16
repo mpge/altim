@@ -113,6 +113,24 @@
       <StackPanel Spacing="{DynamicResource AltimSpace12}">
         <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding ProvidersHeading}" />
 
+        <!--
+          The one setting that changes what leaves the machine, so it says who is contacted
+          and with whose credentials rather than "allow network calls". Switching it off
+          turns the notice on, in the same words the provider page uses.
+        -->
+        <StackPanel Spacing="{DynamicResource AltimSpace4}">
+          <ToggleSwitch Content="{Binding AllowNetworkCallsLabel}" IsChecked="{Binding AllowNetworkCalls}" />
+          <TextBlock Theme="{DynamicResource AltimCaptionText}"
+                     Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                     TextWrapping="Wrap"
+                     Text="{Binding AllowNetworkCallsDescription}" />
+          <TextBlock IsVisible="{Binding ShowsLocalOnlyNotice}"
+                     Margin="0,4,0,0"
+                     Theme="{DynamicResource AltimCaptionText}"
+                     TextWrapping="Wrap"
+                     Text="{Binding LocalOnlyNotice}" />
+        </StackPanel>
+
         <ItemsControl ItemsSource="{Binding Providers}">
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:ProviderViewModel">

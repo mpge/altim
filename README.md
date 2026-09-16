@@ -46,6 +46,68 @@ Local-first by default. Altim reads usage metadata only, stores it in a local SQ
 database, and never transmits prompts, source code, repository contents, conversation
 contents, commands or filenames anywhere. See [PRIVACY.md](PRIVACY.md).
 
+## Performance
+
+Numbers, not adjectives. Everything below was measured on **Windows 11 26200, 16 cores, NVIDIA
+discrete graphics, 1920x1080 at 100%**, against real provider stores on that machine — 28.3 GB
+of Codex rollouts across 2,518 files and 1.3 GB of Claude Code transcripts across 2,069 — with
+an agent actively working throughout, which is the expensive case rather than the flattering
+one.
+
+| | Budget | Shipping build | `dotnet build` |
+|---|---|---|---|
+| Cold start to tray icon | < 800ms | **260ms** | 0.9–1.2s |
+| Popup open, already warm | < 100ms | **8.4ms**, then under 1ms | 4–43ms |
+| Idle CPU | < 2% of one core | **1.4%** idle, 2.4% under load | same within noise |
+| Idle working set | < 120MB | **107MB** | 156MB |
+| Database | < 5MB/year | **270KB** after 7.4 hours; see below | same file |
+
+"Shipping build" is `dotnet publish -c Release -r win-x64`, which compiles ahead of time.
+`dotnet build` produces a framework-dependent build that loads 77 managed assemblies and JIT
+compiles them; it is what you get from `dotnet run`, and it is 49MB heavier and three to four
+times slower to the tray icon. Both are honest numbers for what they are.
+
+**The working-set budget used to say 80MB and no build has ever met it.** It is now 120MB,
+against a measured 107MB. Most of that is mapped framework, Avalonia, Skia and graphics-driver
+pages; the live managed heap is 7MB. The hidden popup window costs 2.7MB of it, the provider
+caches almost nothing, and the GC configuration nothing at all — all three were measured before
+the number was changed. [ARCHITECTURE.md](ARCHITECTURE.md#the-working-set-budget-was-wrong-and-this-is-where-the-memory-goes)
+has the full breakdown, including the one change that would reach 80MB and why it has not been
+made.
+
+**Idle CPU** is a share of *one* core, not of the machine, because "0.1% of the machine" means
+different things on a four-core laptop and a sixteen-core desktop and is not a property of the
+program. 1.4% of one core is what the process costs with both provider stores empty and nothing
+happening at all — it is Avalonia's floor for holding a live hidden window, not Altim's work.
+Under continuous agent activity, with the filesystem watchers firing, it reaches about 2.4%.
+
+**Database growth** has two figures and they mean different things. The file held **270KB for
+2,373 samples** after 7.4 hours of continuous agent activity — about 114 bytes per sample
+including its index. Rows are written only when a value changes, so that rate is a ceiling
+rather than a cadence. Past 30 days they are down-sampled to one row per metric per hour, which
+is what bounds the long run: five metrics at 24 rows a day is **about 4.4MB a year**, on top of
+a rolling window of at most a month of raw samples. The write-ahead log in front of it is
+capped at roughly 1MB while Altim is working and emptied once two minutes pass with no write —
+SQLite's own default would leave it sitting at 3.9MB for ever.
+
+### How to measure it yourself
+
+- **Start-up, popup open and first readings** are timed by the application and written to
+  `%APPDATA%\Altim\altim.log`. Launching Altim a second time signals the running instance to
+  surface its panel, which is a repeatable way to time an open without touching the mouse.
+- **Working set and CPU** come from the process itself: `(Get-Process Altim).WorkingSet64`, and
+  `TotalProcessorTime` sampled three minutes apart divided by the elapsed wall time for the
+  share of one core. Measure a minute after start at the earliest — the first pass over a
+  provider store is the expensive one, and it is deliberately not on the start-up path. For the
+  idle floor rather than the working figure, point `CODEX_HOME` and `CLAUDE_CONFIG_DIR` at empty
+  directories, which leaves the process with nothing to react to.
+- **Where the memory is** needs the committed regions rather than the totals: walk the process
+  with `VirtualQueryEx` and bucket by `MEM_IMAGE` / `MEM_MAPPED` / `MEM_PRIVATE`, then ask
+  `QueryWorkingSetEx` which of those pages are actually resident. The managed share of it is
+  `dotnet-counters --counters System.Runtime`, and a `dotnet-gcdump` report gives live objects
+  by type.
+- **Database and log** are the file sizes in `%APPDATA%\Altim`.
+
 ## Building
 
 Requires the **.NET 10 SDK**. Nothing else — the UI, database and platform integrations come

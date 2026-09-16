@@ -77,7 +77,8 @@ public interface IPlatformService      // tray host, screen geometry, theme, pow
 {
     ITrayHost Tray { get; }
     ValueTask<PixelRect?> GetTrayAnchorAsync();
-    event EventHandler? SystemResumed;
+    event EventHandler? SystemSuspending;   // pause the scheduler; may not arrive
+    event EventHandler? SystemResumed;      // resume it and refresh once
     event EventHandler? ThemeChanged;
 }
 
@@ -119,7 +120,16 @@ their own timers, so the process has a single wake source and a single place to 
 - **Polling is the floor, not the plan.** A `PeriodicTimer` at 60s covers anything watchers miss.
   Missed ticks coalesce, so a laptop waking from sleep produces one refresh, not a backlog.
 - **Network-touching calls are rate-limited separately** and never run faster than once a minute.
-- The scheduler pauses on suspend, resumes on wake, and refreshes once on resume.
+  They are also permission-gated: `INetworkPolicy` is read at the moment of the call rather than
+  copied into a provider's options, because a provider is built once and outlives every settings
+  change, and a permission frozen at start-up goes on calling the vendor until the next restart.
+- The scheduler pauses on `SystemSuspending`, resumes on `SystemResumed`, and refreshes once on
+  resume. **A wake with no suspend before it is normal**, not a fault: a modern standby machine
+  can sleep without sending the classic broadcast. The composition root enters the suspended
+  state itself in that case, so the "refresh on resume" setting holds either way.
+- **The display going off is not a suspend**, though the display coming on *is* treated as a
+  wake. The asymmetry is deliberate: an extra wake costs one refresh, while a wrong suspend
+  stops recording an agent that is working against a dark monitor.
 - While the popup or dashboard is open, the cadence tightens to 10s; on close it relaxes again.
 
 Provider work happens off the UI thread and returns immutable records. Failures are contained per
@@ -162,6 +172,16 @@ CREATE TABLE notification_state (
   PRIMARY KEY (provider_id, metric_key, threshold)
 );
 ```
+
+The write-ahead log is bounded, which it is not by default. SQLite checkpoints automatically at
+1000 pages but does not shrink the log afterwards — it rewinds and overwrites the same bytes — so
+the file settles at whatever high-water mark it ever reached and stays there: measured at 3.9 MB
+in front of a 240 KB database. Altim checkpoints at 256 pages, sets `journal_size_limit` **after**
+entering WAL mode so a reset truncates rather than rewinds, and runs a `TRUNCATE` checkpoint from
+the maintenance pass once nothing has written for two minutes. None of that trades durability:
+`synchronous` stays `NORMAL`, a checkpoint only moves already-committed frames and flushes before
+resetting, and a process that is killed still has its writes replayed from the log on the next
+open.
 
 No project names, prompts, commands or file paths are stored. Samples are written only when a value
 changes, and are down-sampled after 30 days to hourly rows: each hour keeps its **peak** percentage,
@@ -216,7 +236,7 @@ straight to the working-area corner.
 | Popup | positioned borderless window | positioned borderless window | working-area corner; no anchor exists in the protocol |
 | Notifications | `Microsoft.WindowsAppSDK` `AppNotificationManager` | `UNUserNotificationCenter` interop | `org.freedesktop.Notifications` over `Tmds.DBus.Protocol` |
 | Autostart | `HKCU\...\Run`, **reporting state from `StartupApproved`** | `SMAppService` (the selector is `mainAppService`), macOS 13+, bundle required; only *enabled* reports true, "requires approval" does not | `~/.config/autostart/*.desktop`, disable via `Hidden=true` |
-| Power/session | `Microsoft.Win32.SystemEvents` | `NSWorkspace.shared.notificationCenter` (not the default centre) | logind `PrepareForSleep` on the **system** bus |
+| Power/session | `Microsoft.Win32.SystemEvents` plus `PBT_APMSUSPEND` / `GUID_CONSOLE_DISPLAY_STATE` | `NSWorkspace.shared.notificationCenter` (not the default centre): `WillSleep`, `DidWake`, `ScreensDidWake` | logind `PrepareForSleep` on the **system** bus — one signal, `true` to sleep and `false` to wake |
 | Theme | `ColorValuesChanged` | **`NSDistributedNotificationCenter`** — appearance is *not* posted to the workspace centre | portal `org.freedesktop.appearance` on the **session** bus; may resolve late |
 
 macOS uses **three** notification centres, and picking the wrong one fails silently rather than
@@ -234,14 +254,32 @@ clicking the tray deactivates the panel and would immediately reopen it, so deac
 while the foreground window is the shell's tray window; Windows 11 hides new tray icons in the
 overflow by default, which first-run onboarding explains rather than tries to defeat.
 
-Two Windows details were established by measurement rather than documentation, and the code depends
-on them:
+Four Windows details were established by measurement rather than documentation. The code depends on
+the first three; the fourth is a defect that is recorded rather than fixed.
 
 - **Asking for the icon's rectangle does not fail while the icon sits in the overflow.** On
   Windows 11 26200 it succeeds and returns the *chevron's* rectangle, which is geometrically
   indistinguishable from a promoted icon. Altim therefore decides promotion from the shell's own
   per-icon record plus a hit test against the flyout window, and reports no anchor when the icon is
   hidden, so the panel falls to the next positioning tier instead of opening next to the chevron.
+- **One left click produces three callbacks, in the wrong order.** A version 4 icon is
+  documented to report primary activation as `NIN_SELECT` instead of the button messages.
+  Windows 11 26200 sends `WM_LBUTTONDOWN`, `WM_LBUTTONUP` and *then* `NIN_SELECT`, inside four
+  milliseconds — the message that is supposed to have been replaced arrives first. Right click
+  is the same shape: `WM_RBUTTONDOWN`, `WM_RBUTTONUP`, then `WM_CONTEXTMENU`. `WindowsTrayHost`
+  collapses the primary-activation family to one `Clicked` per press. The menu path needs no
+  guard because Windows refuses a second `TrackPopupMenuEx` while one is already tracking, so
+  the duplicate is inert — verified, rather than assumed.
+- **The panel's shadow inset covers the top half of the tray icon, and it swallows clicks.**
+  The window is larger than the visible panel so the shadow has room to fall, and the panel is
+  positioned 8 DIPs above the icon, which puts the window's bottom edge 24 DIPs *past* the
+  icon's top. Measured with `WindowFromPoint` on a bottom taskbar at 100%: the panel window owns
+  the pixels from y=1044 to y=1055 over the icon and the shell owns 1056 down. A click on the
+  lower half of the icon toggles the panel as it should; a click on the upper half lands on
+  transparent window and does nothing. It is not fixable by placement without moving the panel
+  24 DIPs further from the icon than DESIGN.md asks for, and Avalonia 12.1.2 exposes no window
+  procedure hook to answer `WM_NCHITTEST` with `HTTRANSPARENT` — `Win32Properties` is internal.
+  Left as it stands and recorded here, because both fixes are decisions rather than repairs.
 - **A broadcast cannot reach a message-only window.** The icon lives on the message-only window as
   intended, but Explorer's restart notice is a broadcast, so a second never-shown top-level window
   receives it, owns the native menu (bringing a menu to the foreground needs a top-level owner) and
@@ -254,19 +292,96 @@ systray protocol at all.
 
 ## Performance targets
 
-Measured and published in the README; they are budgets, not aspirations.
+Measured and published in the README; they are budgets, not aspirations. **They apply to the
+shipping build**, which is the Native AOT publish — see below for why that distinction is load
+bearing rather than a let-out.
 
-| Metric | Budget |
-|---|---|
-| Cold start to tray icon visible | < 800ms |
-| Popup open (already warm) | < 100ms |
-| Idle CPU | < 0.1% average |
-| Idle working set | < 80MB |
-| Database growth | < 5MB/year at default cadence |
+| Metric | Budget | Measured |
+|---|---|---|
+| Cold start to tray icon visible | < 800ms | 260ms |
+| Popup open (already warm) | < 100ms | 8.4ms first open, under 1ms after |
+| Idle CPU | < 2% of one core | 1.4% idle, 2.4% while an agent writes |
+| Idle working set | **< 120MB** | 107MB |
+| Database growth | < 5MB/year at default cadence | on track; see the README |
 
 Techniques: no `MainWindow`, `ShutdownMode.OnExplicitShutdown`, lazy dashboard, workstation
 non-concurrent GC with `ConserveMemory=5` and 1MB regions, `PeriodicTimer` over `DispatcherTimer`
 for background work, diagnostics excluded from Release.
+
+The CPU budget used to read "< 0.1% average" with no denominator, which is not a property of
+the program: the same binary doing the same work passes it on a sixteen-core machine and fails
+it on a four-core one. It is now a share of one core, which is both machine-independent and the
+thing that actually costs a battery. The measured floor is 1.4% of one core with both provider
+stores empty and nothing at all happening, which is what a process holding a live hidden window
+costs before Altim does any work of its own; it rises to about 2.4% while an agent is writing
+transcripts continuously and the filesystem watchers are firing, which is the cadence working
+rather than a leak.
+
+### The working-set budget was wrong, and this is where the memory goes
+
+It was 80MB. Nothing built has ever met it, and the number was an aspiration written before
+anything ran. It has been replaced with a budget the product meets, and the measurements that
+set it are recorded here so the next person does not have to take the number on trust.
+
+Measured on Windows 11 26200, 16 cores, NVIDIA discrete graphics, against the real provider
+stores on that machine (28.3GB of Codex rollouts, 1.3GB of Claude transcripts), four minutes
+after start:
+
+| Build | Working set | Private | Threads |
+|---|---|---|---|
+| Framework-dependent `dotnet build` | 156MB | 105MB | 29 |
+| **Native AOT publish — what ships** | **107MB** | 99MB | 26 |
+| Native AOT, both provider stores empty | 89MB | 78MB | 25 |
+
+Where the 107MB is, from a walk of the process's committed regions cross-referenced against its
+resident pages:
+
+| | Working set | Committed |
+|---|---|---|
+| Image (mapped executables) | 55MB | 289MB reserved address space |
+| Private | 49MB | 63MB |
+| Other file- and pagefile-backed sections | 3MB | 58MB |
+
+- **55MB of image pages.** 14MB of it is Altim's own AOT binary; the rest is Skia, ICU,
+  HarfBuzz, SQLite, DirectWrite and — 10.5MB of it — the NVIDIA user-mode driver, most of that
+  shared with every other process that has it mapped. The framework-dependent build spends
+  another 18MB here on `System.Private.CoreLib`, `coreclr`, `clrjit` and 77 managed assemblies,
+  which is what AOT removes.
+- **49MB private.** The managed heap is **7MB live** against 34MB committed; the rest is runtime
+  structures, native allocators and thread stacks.
+
+Committed is much larger than resident in every row, which is the normal shape of a reserved
+address space rather than memory anyone is paying for.
+
+Four candidate explanations were tested. Three are not the cause and one is:
+
+- **The hidden popup window is not it.** Never priming the window at all saved 2.7MB. Avalonia
+  brings its rendering stack up whether or not a top level exists, so keeping the panel alive —
+  which ARCHITECTURE.md requires, because screen geometry is unreachable without it — costs
+  almost nothing. This was the most likely suspect and it is wrong.
+- **The provider caches are not the bulk of it, but they are not nothing.** Pointing both
+  providers at empty stores measures 89MB against 107MB, so the real 28.3GB and 1.3GB stores
+  are worth about 18MB of working set. Almost none of that is managed: the live heap is 7MB
+  either way, which is the incremental scanner working as designed. It is the pages touched
+  reading file tails plus the message-identity set that has to outlive a pass, and it is the
+  price of reading the tails rather than the files.
+- **The GC configuration is not it.** An aggressive compacting gen2 collection with LOH
+  compaction, run after the expensive first scan, returned 1.2MB.
+
+**The fourth is the answer: the GPU rendering stack.** Running Avalonia with
+`Win32RenderingMode.Software` — no D3D11, no DXGI, no ANGLE, no vendor user-mode driver —
+measures **80MB working set, 49MB private and 13 threads**, against 107MB, 99MB and 26. That is
+the whole of the gap, and it closes it exactly.
+
+**It has not been taken, and the reason is not inertia.** On this machine the trade looks free:
+the popup is pixel-identical between the two modes, including its shadow and transparency, the
+dashboard renders correctly including the history chart, and the first popup open is 8.4ms
+against 9.1ms. What cannot be tested here is the case the change would actually hurt — software
+rasterisation costs pixels, so a 1400x900 dashboard being resized on a 4K display is several
+megapixels per frame on the CPU where it is currently free. Choosing the rendering backend for
+the whole application on the evidence of one 1080p display with a discrete GPU is not a trade to
+make silently. The measurement is recorded here so it can be made deliberately, and it is one
+line in `Program.cs` when it is.
 
 ## Testing
 
@@ -287,9 +402,15 @@ on 2-core hosts.
    main package was absent, and the self-contained payload for the pinned version omits a resource
    library that registration requires. Packaging must resolve this, and notification failure must
    degrade to "Altim runs and does not notify", never to a failed start.
-1. **macOS interop is written without a macOS host to test on.** It is isolated behind `ITrayHost`
-   with a documented fallback to Avalonia's tray icon plus a native menu, and is marked unverified
-   until someone runs it.
+1. **macOS and Linux interop are written without a macOS or Linux host to test on.** Both are
+   isolated behind `IPlatformService` and `ITrayHost`, both are selected by a run-time platform
+   check in the composition root, and both are marked unverified until someone runs them. What
+   *is* verified from here is that neither stack throws when it is constructed on the wrong
+   operating system — every one of their types is compiled into every build and is inert rather
+   than absent off its own platform, and `ForeignPlatformStackTests` builds the same services in
+   the same order the composition root does and asserts each reports itself unavailable. That
+   catches the failure that would matter most, a constructor turning a degraded capability into
+   a failure to start, and it catches nothing else.
 2. **Provider formats are internal and disclaimed by their vendors.** Every field is optional at the
    parse boundary; a shape change degrades one metric to unavailable instead of breaking the app.
 3. **The live Codex quota call requires the vendor CLI and the network**, so it is optional, rate

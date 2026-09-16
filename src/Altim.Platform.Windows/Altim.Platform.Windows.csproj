@@ -43,6 +43,28 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" />
   </ItemGroup>
 
+  <!-- Microsoft.WindowsAppSDK brings the MSIX build tooling with it, and its MRT Core
+       half runs MakePri.exe to index resources into a .pri file. MakePri.exe is a
+       Windows x86 binary, so on a Linux agent the inner Windows build fails at
+       MSB6003 with "Exec format error" — which is what turned this project's second
+       target framework into a Linux CI failure.
+
+       EnableCoreMrtTooling=false skips that step. It is safe here for a reason
+       specific to this project rather than a general one: Altim is an unpackaged
+       desktop application, this assembly has no .resw, .resjson or image resources to
+       index, and the only thing it takes from the Windows App SDK is
+       AppNotificationManager, whose registration reads nothing out of a .pri. The
+       PRI expansion target still runs and is a no-op without a MakePri path.
+
+       Scoped to non-Windows hosts on purpose. The Windows build — the one that is
+       shipped, published with Native AOT and run — is left byte for byte as it was,
+       so this cannot change what a user installs. -->
+  <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <EnableCoreMrtTooling>false</EnableCoreMrtTooling>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+  </PropertyGroup>
+
   <!-- The tray icon is loaded from a file at run time rather than from an embedded
        resource, because the shell wants an HICON at exactly the size the current
        DPI asks for and GDI+ decodes a file directly. The renderings macOS uses are

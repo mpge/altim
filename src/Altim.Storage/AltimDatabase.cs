@@ -35,6 +35,37 @@ public sealed class AltimDatabase : IDisposable
     private const int CommandTimeoutSeconds = 30;
     private const int BusyTimeoutMilliseconds = 5_000;
 
+    /// <summary>
+    /// How many write-ahead pages may accumulate before SQLite checkpoints on its own.
+    /// </summary>
+    /// <remarks>
+    /// SQLite's default is 1000 pages, which at the default 4 KiB page is a four-megabyte
+    /// log in front of a database measured in hundreds of kilobytes. Altim's writes are a
+    /// handful of small rows a minute, so a quarter of that still checkpoints far less often
+    /// than once a second under the heaviest load the application can produce, and it keeps
+    /// the log an order of magnitude smaller than the file it belongs to.
+    /// </remarks>
+    private const int WalAutoCheckpointPages = 256;
+
+    /// <summary>
+    /// The size the write-ahead log is truncated back to after a checkpoint resets it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the setting the defect actually turned on. A checkpoint does not shrink the
+    /// log: SQLite rewinds it and writes over the same bytes, so the file stays at its
+    /// high-water mark for the life of the database and a log that reached the checkpoint
+    /// threshold once stays that size for ever. <c>journal_size_limit</c> is what makes the
+    /// reset truncate instead of rewind.
+    /// </para>
+    /// <para>
+    /// Half a megabyte rather than zero, so the ordinary cycle re-uses a file that is
+    /// already the right size and only a log that grew past the resting size pays for the
+    /// truncation.
+    /// </para>
+    /// </remarks>
+    private const int WalSizeLimitBytes = 512 * 1024;
+
     // Someone else's database is not worth waiting on. A provider read happens on a
     // scheduler tick, and a tick that stalls for half a minute because another
     // application is mid-write is worse than a tick that reports nothing this time.
@@ -53,6 +84,7 @@ public sealed class AltimDatabase : IDisposable
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly SqliteConnection _writer;
     private readonly string _readConnectionString;
+    private long _lastWriteTicks = Environment.TickCount64;
     private int _disposed;
 
     private AltimDatabase(string databasePath, SqliteConnection writer, string readConnectionString,
@@ -348,7 +380,76 @@ public sealed class AltimDatabase : IDisposable
             throw new ObjectDisposedException(nameof(AltimDatabase));
         }
 
+        Volatile.Write(ref _lastWriteTicks, Environment.TickCount64);
         return new WriteLease(this, _writer);
+    }
+
+    /// <summary>
+    /// Empties the write-ahead log and truncates it to nothing, if nothing has written for
+    /// long enough that doing so costs no one anything.
+    /// </summary>
+    /// <param name="idleFor">
+    /// How long the writer must have been untouched. A checkpoint blocks writers while it
+    /// runs, so this exists to keep it away from a burst of samples.
+    /// </param>
+    /// <param name="ct">Cancels the wait for the writer, not a checkpoint already running.</param>
+    /// <returns>The outcome, for a caller that wants to log it.</returns>
+    /// <remarks>
+    /// <para>
+    /// <c>wal_autocheckpoint</c> plus <c>journal_size_limit</c> already bound the log while
+    /// Altim is working. This is what takes it to zero afterwards: an Altim that has been
+    /// sitting in the tray overnight leaves no log at all rather than half a megabyte of
+    /// one.
+    /// </para>
+    /// <para>
+    /// <b>Durability is unaffected.</b> A checkpoint copies frames that are already
+    /// committed into the database and flushes before it resets the log; nothing
+    /// uncommitted is touched and nothing committed can be lost by it. <c>TRUNCATE</c>
+    /// waits for readers rather than evicting them, and a reader that will not clear
+    /// returns <c>SQLITE_BUSY</c>, which leaves the log exactly as it was and is reported
+    /// here as <see cref="WalCheckpoint.Busy"/> rather than raised.
+    /// </para>
+    /// </remarks>
+    public async ValueTask<WalCheckpoint> CheckpointIfIdleAsync(TimeSpan idleFor, CancellationToken ct)
+    {
+        if (IsDisposed)
+        {
+            return WalCheckpoint.Skipped;
+        }
+
+        if (Environment.TickCount64 - Volatile.Read(ref _lastWriteTicks) < (long)idleFor.TotalMilliseconds)
+        {
+            return WalCheckpoint.Skipped;
+        }
+
+        WriteLease lease;
+        try
+        {
+            lease = await LeaseWriterAsync(ct).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return WalCheckpoint.Skipped;
+        }
+
+        using (lease)
+        {
+            try
+            {
+                using SqliteCommand command = lease.Connection.CreateCommand();
+                command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE)";
+
+                // The first column is 1 when a reader or writer stopped the log being
+                // reset. The log is untouched in that case and the next pass tries again.
+                using SqliteDataReader reader = command.ExecuteReader();
+                bool blocked = reader.Read() && !reader.IsDBNull(0) && reader.GetInt64(0) != 0;
+                return blocked ? WalCheckpoint.Busy : WalCheckpoint.Truncated;
+            }
+            catch (SqliteException error) when (error.SqliteErrorCode is SqliteBusy or SqliteLocked)
+            {
+                return WalCheckpoint.Busy;
+            }
+        }
     }
 
     /// <summary>
@@ -392,6 +493,10 @@ public sealed class AltimDatabase : IDisposable
 
     internal void ReleaseWriter()
     {
+        // Measured from the end of the write rather than the start, so a long transaction
+        // does not make the database look idle the moment it commits.
+        Volatile.Write(ref _lastWriteTicks, Environment.TickCount64);
+
         try
         {
             _writeGate.Release();
@@ -434,10 +539,23 @@ public sealed class AltimDatabase : IDisposable
         // busy_timeout first: converting a fresh file to WAL needs the file to itself for
         // a moment, and two instances starting together would otherwise have one of them
         // fail on that very first statement.
+        // busy_timeout, then WAL, then the two settings that bound the log. Both have to
+        // come after journal_mode: journal_size_limit applies to whichever journal the
+        // connection is using at the time it is set, and setting it before WAL mode is
+        // entered bounds the rollback journal and leaves the log unbounded.
+        //
+        // Neither weakens durability. synchronous stays NORMAL, so a commit is still not
+        // flushed to the platter and a power cut can still lose the last transactions —
+        // unchanged from before. A process that is killed loses nothing either way: its
+        // writes are in the log, the kernel still has them, and the next open replays them.
+        // A checkpoint only moves committed frames into the database and fsyncs before
+        // resetting, so checkpointing more often makes the file safer, not less.
         command.CommandText = $"""
             PRAGMA busy_timeout = {BusyTimeoutMilliseconds};
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = NORMAL;
+            PRAGMA wal_autocheckpoint = {WalAutoCheckpointPages};
+            PRAGMA journal_size_limit = {WalSizeLimitBytes};
             PRAGMA foreign_keys = ON;
             """;
         command.ExecuteNonQuery();

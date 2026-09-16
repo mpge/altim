@@ -31,6 +31,30 @@ namespace Altim.Platform.Windows;
 /// id into the high word of <c>lParam</c>.
 /// </para>
 /// <para>
+/// <b>One press raises <see cref="Clicked"/> once.</b> A single left click on a version 4
+/// icon on Windows 11 26200 produces three callbacks within four milliseconds, traced from
+/// the running application:
+/// </para>
+/// <code>
+/// 13:32:21.187  0x0201  WM_LBUTTONDOWN
+/// 13:32:21.188  0x0202  WM_LBUTTONUP
+/// 13:32:21.191  0x0400  NIN_SELECT
+/// </code>
+/// <para>
+/// Version 4 is documented to replace the button messages with <c>NIN_SELECT</c>; this shell
+/// sends both, and - the part worth writing down, because guessing it the other way round
+/// produces a fix that does not fix anything - it sends <c>WM_LBUTTONUP</c> <em>first</em>.
+/// The shell also sends <c>NIN_KEYSELECT</c> twice when the icon is selected with the space
+/// bar. All of them are primary activation, so the first is raised and the rest are dropped;
+/// see <see cref="IsNewPrimaryActivation"/>.
+/// </para>
+/// <para>
+/// Collapsing them here rather than in a caller is deliberate: the duplicate is a property of
+/// this shell's callback, every consumer of <see cref="ITrayHost"/> would otherwise have to
+/// know about it, and a consumer that toggles something would open and close it within one
+/// press - which is exactly what it did.
+/// </para>
+/// <para>
 /// Events are raised on the message loop thread. Subscribers marshal to their own
 /// thread and must not block, because the tray stops responding while a handler runs.
 /// </para>
@@ -41,6 +65,18 @@ public sealed class WindowsTrayHost : ITrayHost
 
     /// <summary>The shell truncates at 128 characters including the terminator.</summary>
     private const int TooltipLimit = 127;
+
+    /// <summary>
+    /// How long after a primary activation has been reported the shell's repeats of it are
+    /// still arriving.
+    /// </summary>
+    /// <remarks>
+    /// Measured at 4ms on Windows 11 26200 and reported at about 25ms elsewhere, so 200ms is
+    /// an order of magnitude of headroom. It is also well under the system double-click time,
+    /// which defaults to 500ms - below that interval Windows itself treats two presses as one
+    /// gesture rather than as two clicks, so nothing a user means as a second click is lost.
+    /// </remarks>
+    private const long DuplicateActivationMilliseconds = 200;
 
     private readonly TrayWindow _window;
     private readonly TrayIconLoader _icons;
@@ -55,6 +91,7 @@ public sealed class WindowsTrayHost : ITrayHost
     private uint _dpi;
     private volatile bool _added;
     private int _lastAnchorHResult;
+    private long _lastActivationTicks;
     private bool _disposed;
 
     /// <summary>
@@ -485,6 +522,7 @@ public sealed class WindowsTrayHost : ITrayHost
     private void OnTrayCallback(WindowMessage message)
     {
         uint notification = (uint)(message.LParam.ToInt64() & 0xFFFF);
+
         var point = new POINT
         {
             x = NativeMethods.LowInt16(message.WParam),
@@ -496,7 +534,11 @@ public sealed class WindowsTrayHost : ITrayHost
             case NativeMethods.NIN_SELECT:
             case NativeMethods.NIN_KEYSELECT:
             case NativeMethods.WM_LBUTTONUP:
-                Clicked?.Invoke(this, new TrayClickEventArgs(ResolveAnchor(point)));
+                if (IsNewPrimaryActivation())
+                {
+                    Clicked?.Invoke(this, new TrayClickEventArgs(ResolveAnchor(point)));
+                }
+
                 break;
 
             case NativeMethods.WM_CONTEXTMENU:
@@ -511,6 +553,43 @@ public sealed class WindowsTrayHost : ITrayHost
             default:
                 break;
         }
+    }
+
+    /// <summary>
+    /// Decides whether a primary-activation callback is a new press or one of the shell's
+    /// repeats of a press already reported.
+    /// </summary>
+    /// <returns>True when <see cref="Clicked"/> should be raised for it.</returns>
+    /// <remarks>
+    /// <para>
+    /// Every code that means "the user activated the icon" - <c>NIN_SELECT</c>,
+    /// <c>NIN_KEYSELECT</c> and <c>WM_LBUTTONUP</c> - is treated as one family, and the
+    /// family raises at most once per window. Discriminating on which code arrived would be
+    /// more precise and is not possible: the shell sends the pair in the opposite order to
+    /// the documented one, and it is the message that is <em>supposed</em> to have been
+    /// replaced that arrives first.
+    /// </para>
+    /// <para>
+    /// The clock advances only when a click is actually raised, so however many repeats the
+    /// shell sends, the next press is due exactly
+    /// <see cref="DuplicateActivationMilliseconds"/> after the one the user saw rather than
+    /// after the last echo of it.
+    /// </para>
+    /// <para>
+    /// Runs on the message-loop thread, like everything else in the callback, so the state
+    /// needs no synchronisation.
+    /// </para>
+    /// </remarks>
+    private bool IsNewPrimaryActivation()
+    {
+        long now = Environment.TickCount64;
+        if (_lastActivationTicks != 0 && now - _lastActivationTicks < DuplicateActivationMilliseconds)
+        {
+            return false;
+        }
+
+        _lastActivationTicks = now;
+        return true;
     }
 
     private unsafe void TrackMenu(IReadOnlyList<TrayMenuItem> items, PixelRect? anchor, TaskCompletionSource? completion)

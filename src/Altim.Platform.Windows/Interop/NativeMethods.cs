@@ -106,6 +106,12 @@ internal static unsafe partial class NativeMethods
     internal const int PBT_APMRESUMESUSPEND = 0x0007;
 
     /// <summary>
+    /// Power broadcast subtype for the machine about to enter a low-power state. Sent by an
+    /// S3 sleep; a modern standby machine can go to sleep without ever sending it.
+    /// </summary>
+    internal const int PBT_APMSUSPEND = 0x0004;
+
+    /// <summary>
     /// Console display state. On a modern standby machine this is the transition that
     /// actually marks a wake; the classic APM resume broadcasts can be absent.
     /// </summary>

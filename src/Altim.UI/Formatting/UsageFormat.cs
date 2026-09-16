@@ -37,6 +37,17 @@ public static class UsageFormat
     /// <summary>Shown when a provider has not produced a reading yet.</summary>
     public const string NotRefreshedYet = "Not refreshed yet";
 
+    /// <summary>
+    /// Shown wherever the figures on screen were read from local files alone, because the
+    /// user has switched off the live quota check.
+    /// </summary>
+    /// <remarks>
+    /// One constant rather than one sentence per page, so the settings toggle and the
+    /// provider it affects cannot end up saying different things about the same state.
+    /// </remarks>
+    public const string LocalFiguresOnly =
+        "Live quota checks are off. These figures come from local files and may be behind.";
+
     /// <summary>Shown on a provider page with no live agent session.</summary>
     public const string NoActivity = "No agent activity right now";
 

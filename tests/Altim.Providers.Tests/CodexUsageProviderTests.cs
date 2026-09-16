@@ -1,4 +1,5 @@
 using System.Globalization;
+using Altim.Core.Abstractions;
 using Altim.Core.Models;
 using Altim.Providers.Codex;
 using Altim.Providers.Codex.AppServer;
@@ -440,6 +441,69 @@ public sealed class CodexUsageProviderTests
         Assert.Empty(usage.Metrics);
         Assert.Null(usage.Tokens);
         Assert.Empty(await provider.GetSessionsAsync(TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// The setting is live: a provider outlives every settings change, so switching the
+    /// permission off has to stop the next call rather than the next restart.
+    /// </summary>
+    [Fact]
+    public async Task SwitchingTheNetworkPolicyOffStopsTheNextLiveCall()
+    {
+        using TempWorkspace workspace = CreateHomeWithRollout();
+        var stub = new StubAppServerClient(new CodexLiveResult(CodexLiveOutcome.Succeeded, LiveSnapshot(77d, Now), null));
+        var runner = new FakeCliRunner { CommandExists = true };
+        runner.RespondWithJson("doctor --json", """{"schemaVersion":1,"auth_mode":"chatgpt"}""");
+
+        var policy = new MutableNetworkPolicy { AllowsNetworkCalls = true };
+
+        using var provider = new CodexUsageProvider(
+            CodexOptions.Default,
+            stub,
+            runner,
+            new FakeProcessMonitor(),
+            workspace.Root,
+            new FixedTimeProvider(Now),
+            networkPolicy: policy);
+
+        ProviderUsage live = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, stub.CallCount);
+        Assert.Equal(77d, Assert.Single(live.Metrics).UsedPercent);
+
+        policy.AllowsNetworkCalls = false;
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+        ProviderUsage local = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, stub.CallCount);
+
+        // The server's answer is forgotten rather than kept as the current reading: the
+        // local rollout tail is now the only source, and the status line says so.
+        Assert.Equal(41.5d, Assert.Single(local.Metrics).UsedPercent);
+        Assert.NotNull(local.StatusDetail);
+        Assert.Contains("Network calls are off", local.StatusDetail, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A provider constructed with network calls off stays off whatever the policy says.
+    /// </summary>
+    [Fact]
+    public async Task TheConstructedOptionAndTheLivePolicyBothHaveToAllowTheCall()
+    {
+        using TempWorkspace workspace = CreateHomeWithRollout();
+        var stub = new StubAppServerClient(CodexLiveResult.Failed);
+
+        using var provider = new CodexUsageProvider(
+            CodexOptions.Default with { AllowNetworkCalls = false },
+            stub,
+            new FakeCliRunner { CommandExists = true },
+            new FakeProcessMonitor(),
+            workspace.Root,
+            new FixedTimeProvider(Now),
+            networkPolicy: new MutableNetworkPolicy { AllowsNetworkCalls = true });
+
+        _ = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, stub.CallCount);
     }
 
     [Fact]

@@ -70,6 +70,9 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
     private bool _hasSessions;
 
     [ObservableProperty]
+    private bool _showsLocalOnlyNotice;
+
+    [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RetryCommand))]
     private bool _isBusy;
 
@@ -100,6 +103,7 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         _provider = provider;
         _timeProvider = timeProvider;
         _settings = settings;
+        _showsLocalOnlyNotice = !settings.AllowNetworkCalls;
 
         Id = provider.Id;
         DisplayName = provider.DisplayName;
@@ -298,13 +302,23 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         PacingText = UsageFormat.Pacing(deltaPercent);
     }
 
+    /// <summary>The sentence shown while the figures come from local files alone.</summary>
+    public string LocalOnlyText => UsageFormat.LocalFiguresOnly;
+
     /// <summary>Applies new thresholds without taking a fresh reading.</summary>
     /// <param name="settings">The settings the meters tick against.</param>
+    /// <remarks>
+    /// Also carries the live-quota permission, which is why this runs on a settings change
+    /// and not only on a reading: switching the check off has to say so on the page before
+    /// the next refresh arrives, or the user is looking at server-derived numbers under a
+    /// setting that claims they are local.
+    /// </remarks>
     public void ApplySettings(AltimSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
         _settings = settings;
+        ShowsLocalOnlyNotice = !settings.AllowNetworkCalls;
         RebuildMetrics(CurrentUsage);
     }
 

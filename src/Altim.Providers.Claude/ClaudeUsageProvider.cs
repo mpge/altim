@@ -59,6 +59,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
     private readonly IProcessMonitor _processMonitor;
     private readonly IReadOnlyList<string> _configRoots;
     private readonly TimeProvider _time;
+    private readonly INetworkPolicy? _networkPolicy;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _command;
 
@@ -101,6 +102,12 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
     /// status line and the transcripts are local files and are read on every refresh
     /// regardless.
     /// </param>
+    /// <param name="networkPolicy">
+    /// The live answer to "may Altim reach the vendor at all", read at the moment of the
+    /// call so that a user switching the setting off stops the next one. When null only
+    /// <see cref="ClaudeOptions.AllowNetworkCalls"/> decides. The two compose: both must
+    /// allow.
+    /// </param>
     public ClaudeUsageProvider(
         ClaudeOptions? options = null,
         ICliRunner? cliRunner = null,
@@ -108,7 +115,8 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         IReadOnlyList<string>? configRoots = null,
         TimeProvider? timeProvider = null,
         string command = "claude",
-        IRefreshGate? networkGate = null)
+        IRefreshGate? networkGate = null,
+        INetworkPolicy? networkPolicy = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
 
@@ -121,6 +129,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         _configRoots = configRoots ?? ClaudePaths.ResolveConfigRoots();
         _time = timeProvider ?? TimeProvider.System;
         NetworkGate = networkGate;
+        _networkPolicy = networkPolicy;
 
         _usage = new ProviderUsage(ClaudeProviderInfo.Id, ProviderStatus.Unknown, [], null, null, null);
     }
@@ -139,6 +148,13 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
 
     /// <summary>The gate the headless summary call goes through, when one was supplied.</summary>
     private IRefreshGate? NetworkGate { get; }
+
+    /// <summary>
+    /// Whether the headless usage summary is permitted right now: the constructed option
+    /// and the live policy must both allow it.
+    /// </summary>
+    private bool NetworkCallsAllowed =>
+        _options.AllowNetworkCalls && (_networkPolicy?.AllowsNetworkCalls ?? true);
 
     /// <summary>
     /// A process scanner that finds the Claude Code CLI by executable name only.
@@ -487,7 +503,20 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
 
     private async Task RefreshSummaryAsync(bool cliPresent, DateTimeOffset now, CancellationToken ct)
     {
-        if (!cliPresent || !_options.AllowNetworkCalls)
+        if (!NetworkCallsAllowed)
+        {
+            // Strict local-only. The summary is the only source for the Opus-only and
+            // Sonnet-only weekly windows, and it is a cached answer from a call the user
+            // has since forbidden. Keeping it would leave meters on screen that Altim can
+            // no longer confirm and will never refresh again, so it is dropped and those
+            // windows read as not reported. The status line and the transcripts are local
+            // files and are unaffected.
+            _summary = ClaudeUsageSummary.Empty;
+            _summaryReadAt = null;
+            return;
+        }
+
+        if (!cliPresent)
         {
             return;
         }

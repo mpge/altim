@@ -121,6 +121,22 @@ public sealed record AltimSettings
     /// being silently estimated. Network-touching calls are rate limited separately and
     /// never run more than once a minute even when this is true.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Neither call is Altim reaching a vendor itself. Each runs the provider's <em>own</em>
+    /// command line, which contacts the vendor with the credentials the user already gave
+    /// it; Altim never opens a credential file and never calls a vendor endpoint. The
+    /// settings page says exactly that rather than "allow network calls", because the
+    /// shorter wording leaves a privacy-minded reader guessing who is being contacted.
+    /// </para>
+    /// <para>
+    /// Changing this takes effect on the next refresh, not on the next restart. Providers
+    /// are constructed once and outlive every settings change, so the permission reaches
+    /// them through <see cref="Core.Abstractions.INetworkPolicy"/> and is read at the moment
+    /// of the call. Switching it off also discards what those calls had already produced —
+    /// a figure the user has just forbidden Altim to refresh is not a current reading.
+    /// </para>
+    /// </remarks>
     public bool AllowNetworkCalls { get; init; } = true;
 
     private static int Clamp(int percent) =>

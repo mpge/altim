@@ -21,9 +21,21 @@
        Windows-specific in it sits behind the same WINDOWS symbol.
 
        On any other host the condition is false, the framework stays plain net10.0
-       from Directory.Build.props, and the app builds and runs with the fallback
-       stack in Composition/PlatformStack.cs. -->
-  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+       from Directory.Build.props, and the app builds and runs against the macOS and
+       Linux halves of Composition/PlatformStack.cs, which are ordinary net10.0
+       assemblies and need no inner build of their own.
+
+       AltimPortableBuild=true forces that face on a Windows host, which is the only
+       way to compile the shape the Linux CI job compiles without a Linux machine.
+       It is a verification switch and nothing sets it by default:
+
+           dotnet build src/Altim.App -c Release -p:AltimPortableBuild=true
+               -p:BaseIntermediateOutputPath=[scratch]/obj/ -p:BaseOutputPath=[scratch]/bin/
+
+       The output paths are redirected because restore writes the chosen framework
+       into obj/project.assets.json, and sharing it with the normal build makes each
+       one invalidate the other. -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$(AltimPortableBuild)' != 'true'">
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <!-- GetClassNameW writes into a caller supplied buffer; the composition root

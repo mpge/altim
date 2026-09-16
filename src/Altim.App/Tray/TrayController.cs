@@ -4,6 +4,7 @@ using Altim.App.Diagnostics;
 using Altim.Core.Abstractions;
 using Altim.Core.Models;
 using Altim.Core.Usage;
+using Altim.Platform.MacOS;
 #if WINDOWS
 using Altim.Platform.Windows;
 #endif
@@ -121,8 +122,20 @@ internal sealed class TrayController : IDisposable
             }
 #endif
 
-            // The documented behaviour for a host that cannot raise a menu on demand: the
-            // entries are attached and the platform presents them on secondary activation.
+            if (_host is MacOSTrayHost macOS)
+            {
+                // The same split, for the same reason. AppKit can raise a status item's menu
+                // on demand, so MacOSTrayHost.ShowMenuAsync presents one immediately —
+                // falling through to it here would open a menu at launch with nobody having
+                // clicked anything. SetMenuAsync attaches the entries instead, and the host
+                // presents them itself on the next secondary activation.
+                await macOS.SetMenuAsync(items, ct).ConfigureAwait(false);
+                return;
+            }
+
+            // The documented behaviour for a host that cannot raise a menu on demand, which
+            // is Avalonia's TrayIcon on Linux: the entries are attached and the desktop
+            // presents them on secondary activation.
             await _host.ShowMenuAsync(items, null, ct).ConfigureAwait(false);
         }
         catch (Exception ex)

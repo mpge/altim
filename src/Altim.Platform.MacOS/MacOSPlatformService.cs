@@ -25,6 +25,15 @@ namespace Altim.Platform.MacOS;
 /// coalesced so one wake raises <see cref="SystemResumed"/> once.
 /// </para>
 /// <para>
+/// <b><c>WillSleep</c> is the counterpart, and only <c>WillSleep</c>.</b>
+/// <c>NSWorkspaceWillSleepNotification</c> is posted from the same workspace centre before
+/// the machine suspends, and it raises <see cref="SystemSuspending"/>.
+/// <c>NSWorkspaceScreensDidSleepNotification</c> is deliberately <em>not</em> observed even
+/// though its waking twin is: a display that has gone dark is not a machine that has
+/// stopped, and pausing the scheduler there would stop recording an agent still working.
+/// The asymmetry is the same one the Windows service makes, for the same reason.
+/// </para>
+/// <para>
 /// <b>Appearance comes from a third centre, and that is deliberate.</b> macOS posts
 /// <c>AppleInterfaceThemeChangedNotification</c> to
 /// <c>NSDistributedNotificationCenter.defaultCenter</c> — it is a system-wide broadcast, not
@@ -55,6 +64,9 @@ public sealed class MacOSPlatformService : IPlatformService, IObjCCallbackSink, 
     /// <summary>Posted by <c>NSWorkspace</c> when the machine wakes from sleep.</summary>
     private const string DidWakeNotification = "NSWorkspaceDidWakeNotification";
 
+    /// <summary>Posted by <c>NSWorkspace</c> just before the machine suspends.</summary>
+    private const string WillSleepNotification = "NSWorkspaceWillSleepNotification";
+
     /// <summary>Posted by <c>NSWorkspace</c> when the displays wake, which S0 sleep may be all of.</summary>
     private const string ScreensDidWakeNotification = "NSWorkspaceScreensDidWakeNotification";
 
@@ -66,6 +78,7 @@ public sealed class MacOSPlatformService : IPlatformService, IObjCCallbackSink, 
     private readonly bool _ownsTray;
 
     private long _lastResumeTicks;
+    private long _lastSuspendTicks;
     private bool _dark;
     private bool _disposed;
 
@@ -100,6 +113,9 @@ public sealed class MacOSPlatformService : IPlatformService, IObjCCallbackSink, 
         _dark = ReadDarkAppearance();
         RegisterObservers();
     }
+
+    /// <inheritdoc />
+    public event EventHandler? SystemSuspending;
 
     /// <inheritdoc />
     public event EventHandler? SystemResumed;
@@ -189,6 +205,10 @@ public sealed class MacOSPlatformService : IPlatformService, IObjCCallbackSink, 
                 RaiseResume();
                 break;
 
+            case WillSleepNotification:
+                RaiseSuspend();
+                break;
+
             case InterfaceThemeChangedNotification:
                 RaiseThemeChanged();
                 break;
@@ -246,6 +266,7 @@ public sealed class MacOSPlatformService : IPlatformService, IObjCCallbackSink, 
             IntPtr workspaceCentre = WorkspaceNotificationCentre();
             AddObserver(workspaceCentre, DidWakeNotification);
             AddObserver(workspaceCentre, ScreensDidWakeNotification);
+            AddObserver(workspaceCentre, WillSleepNotification);
 
             AddObserver(DistributedNotificationCentre(), InterfaceThemeChangedNotification);
         });
@@ -338,6 +359,18 @@ public sealed class MacOSPlatformService : IPlatformService, IObjCCallbackSink, 
         }
 
         SystemResumed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RaiseSuspend()
+    {
+        long now = Environment.TickCount64;
+        long previous = Interlocked.Exchange(ref _lastSuspendTicks, now);
+        if (previous != 0 && now - previous < (long)ResumeCoalescingWindow.TotalMilliseconds)
+        {
+            return;
+        }
+
+        SystemSuspending?.Invoke(this, EventArgs.Empty);
     }
 
     private void RaiseThemeChanged()
