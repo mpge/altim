@@ -1,0 +1,132 @@
+using Altim.App.Diagnostics;
+using Altim.App.Services;
+using Altim.Core.Abstractions;
+using Altim.Core.Monitoring;
+using Altim.Core.Settings;
+using Altim.Providers.Claude;
+using Altim.Providers.Codex;
+using Altim.Storage;
+using Altim.UI.Services;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Altim.App.Composition;
+
+/// <summary>
+/// The container. Every registration is an explicit factory, so nothing in Altim is
+/// constructed by reflection and the whole graph survives trimming and Native AOT.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The container is built after storage and settings have been read, not before. Two
+/// registrations need the loaded settings to exist: the scheduler takes its cadences from
+/// them, and both providers take their network permission from them. Building the graph
+/// second means neither has to be reconfigured a moment after it was created.
+/// </para>
+/// <para>
+/// Providers are registered as <see cref="IUsageProvider"/> so that
+/// <c>GetServices&lt;IUsageProvider&gt;()</c> is the whole list, which is what makes adding
+/// a provider a one-line change here and no change at all in the interface.
+/// </para>
+/// </remarks>
+internal static class ServiceRegistration
+{
+    /// <summary>Builds the container.</summary>
+    /// <param name="report">The degraded conditions collected so far.</param>
+    /// <param name="platform">The native stack: tray, notifications, autostart, processes.</param>
+    /// <param name="storage">The database and everything built on it.</param>
+    /// <param name="settings">The settings seam the interface binds to.</param>
+    /// <param name="loaded">The settings as they were read at start-up.</param>
+    /// <param name="networkGate">
+    /// The gate handed to both providers, forwarding to the live scheduler's rate limiter.
+    /// </param>
+    public static ServiceProvider Build(
+        StartupReport report,
+        PlatformStack platform,
+        StorageStack storage,
+        SettingsGateway settings,
+        AltimSettings loaded,
+        SchedulerNetworkGate networkGate)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(platform);
+        ArgumentNullException.ThrowIfNull(storage);
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(loaded);
+        ArgumentNullException.ThrowIfNull(networkGate);
+
+        var services = new ServiceCollection();
+
+        // Clock and diagnostics.
+        _ = services.AddSingleton(TimeProvider.System);
+        _ = services.AddSingleton(report);
+
+        // Storage. The database itself is registered when it opened; the history service and
+        // the settings backend are registered either way, because their degraded forms
+        // satisfy the same contracts.
+        if (storage.Database is { } database)
+        {
+            _ = services.AddSingleton(database);
+        }
+
+        if (storage.NotificationState is { } notificationState)
+        {
+            _ = services.AddSingleton(notificationState);
+        }
+
+        if (storage.Retention is { } retention)
+        {
+            _ = services.AddSingleton(retention);
+        }
+
+        _ = services.AddSingleton(storage.History);
+        _ = services.AddSingleton(settings);
+        _ = services.AddSingleton<ISettingsStore>(settings);
+
+        // Platform. The tray host is reached through IPlatformService and is owned by it, so
+        // it is deliberately not registered separately: two owners is how a tray icon ends
+        // up disposed twice or not at all.
+        if (platform.Platform is { } platformService)
+        {
+            _ = services.AddSingleton(platformService);
+        }
+
+        if (platform.Processes is { } processes)
+        {
+            _ = services.AddSingleton(processes);
+        }
+
+        _ = services.AddSingleton(platform.Notifications);
+        _ = services.AddSingleton(platform.AutoStart);
+        _ = services.AddSingleton(networkGate);
+        _ = services.AddSingleton<IRefreshGate>(networkGate);
+
+        // Providers. Both are handed the forwarding network gate, which is what rate limits
+        // Claude's headless usage summary and Codex's app-server call; nothing else in the
+        // process supplies one, so without it those calls would run on every refresh.
+        _ = services.AddSingleton<IUsageProvider>(_ => new ClaudeUsageProvider(
+            options: ClaudeOptions.Default with { AllowNetworkCalls = loaded.AllowNetworkCalls },
+            processMonitor: platform.Processes,
+            timeProvider: TimeProvider.System,
+            networkGate: networkGate));
+
+        _ = services.AddSingleton<IUsageProvider>(_ => new CodexUsageProvider(
+            options: CodexOptions.Default with { AllowNetworkCalls = loaded.AllowNetworkCalls },
+            processMonitor: platform.Processes,
+            timeProvider: TimeProvider.System,
+            networkGate: networkGate));
+
+        // The scheduler. Its cadences are fixed at construction, so a later change to the
+        // refresh interval replaces the instance; see AltimRuntime.RebuildSchedulerAsync,
+        // and SchedulerNetworkGate for why the providers survive that.
+        _ = services.AddSingleton(provider => new MonitorScheduler(
+            provider.GetServices<IUsageProvider>(),
+            provider.GetRequiredService<TimeProvider>(),
+            MonitorSchedulerOptions.FromSettings(loaded)));
+
+        return services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateOnBuild = false,
+            ValidateScopes = false,
+        });
+    }
+}

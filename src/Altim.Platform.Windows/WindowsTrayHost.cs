@@ -160,6 +160,29 @@ public sealed class WindowsTrayHost : ITrayHost
             ct);
     }
 
+    /// <summary>
+    /// Stores the entries the icon's own secondary activation presents, without presenting
+    /// a menu now.
+    /// </summary>
+    /// <param name="items">
+    /// The entries, in order, flat. Use <see cref="TrayMenuItem.Separator"/> for a rule.
+    /// </param>
+    /// <param name="ct">Cancels the call before the entries are stored.</param>
+    /// <remarks>
+    /// A right click is handled inside this host, on the message loop thread, because
+    /// tracking a menu is synchronous and modal and there is no useful event to raise first.
+    /// It presents whatever entries were stored last, and <see cref="ShowMenuAsync"/> is the
+    /// only thing that stores them — which would mean a composition root had to pop a menu
+    /// at start-up before the first right click could work. This stores without presenting.
+    /// </remarks>
+    public ValueTask SetMenuAsync(IReadOnlyList<TrayMenuItem> items, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        return _window.InvokeAsync(() => _menuItems = items, ct);
+    }
+
     /// <inheritdoc />
     public ValueTask ShowMenuAsync(IReadOnlyList<TrayMenuItem> items, PixelRect? anchor, CancellationToken ct = default)
     {
