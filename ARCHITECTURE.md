@@ -127,6 +127,10 @@ their own timers, so the process has a single wake source and a single place to 
   resume. **A wake with no suspend before it is normal**, not a fault: a modern standby machine
   can sleep without sending the classic broadcast. The composition root enters the suspended
   state itself in that case, so the "refresh on resume" setting holds either way.
+  **In one case the wake costs two reads rather than one**: a poll tick that came due while the
+  scheduler was suspended is signalled whether or not the loop was there to skip it, so an
+  unconsumed one is taken up the moment resume clears the flag. It costs a single extra read and
+  settles itself, and it is written down here rather than rounded off in the paragraph above.
 - **The display going off is not a suspend**, though the display coming on *is* treated as a
   wake. The asymmetry is deliberate: an extra wake costs one refresh, while a wrong suspend
   stops recording an agent that is working against a dark monitor.
