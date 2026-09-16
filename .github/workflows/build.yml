@@ -1,0 +1,50 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A run is only useful if it finishes; cancel superseded ones.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore Altim.sln
+
+      # Warnings are errors, so a clean build is part of the contract.
+      # The Windows platform project multi-targets a Windows TFM; its reference
+      # assemblies come from NuGet, so this builds on Linux too.
+      - name: Build
+        run: dotnet build Altim.sln -c Release --no-restore
+
+      # Headless Avalonia tests need no display server on Linux with Avalonia 12.
+      # Do not add --nologo: these projects run on Microsoft.Testing.Platform,
+      # which rejects VSTest flags and would print help instead of running.
+      - name: Test
+        run: dotnet test Altim.sln -c Release --no-build
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: '**/TestResults/**'
+          if-no-files-found: ignore

@@ -30,6 +30,13 @@
     <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
   </ItemGroup>
 
+  <!-- Linux only: notifications, logind sleep/wake, appearance portal.
+       Already arrives transitively with Avalonia.FreeDesktop; pinned so the Linux
+       platform project can reference it directly. -->
+  <ItemGroup>
+    <PackageVersion Include="Tmds.DBus.Protocol" Version="0.95.1" />
+  </ItemGroup>
+
   <!-- Debug only -->
   <ItemGroup>
     <PackageVersion Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.1" />
