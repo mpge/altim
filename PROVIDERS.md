@@ -247,6 +247,32 @@ would ingest other people's secrets. Altim records an executable name and a bool
 
 ---
 
+## Implementation status
+
+Wired up today:
+
+| Provider | Reading |
+|---|---|
+| Claude Code | status-line state file (documented), headless `/usage` summary, transcript token history including subagents, `claude agents --json` sessions |
+| Codex | app-server `account/rateLimits/read` and `account/usage/read`, rollout tail fallback, read-only state database for recent threads, `codex doctor --json` for paths and auth mode |
+
+Deliberately not read yet, and why:
+
+| Source | Reason |
+|---|---|
+| `codex exec --json` turn usage | obtaining it means *running* a turn; a passive monitor must not spend a user's quota |
+| `account/rateLimits/updated` push | needs a long-lived subscription, which conflicts with one scheduler owning all timing. Polling is gated at 60s instead |
+| Claude Code OpenTelemetry export | requires injecting environment variables into the user's tool and running a collector |
+| `cost-state` and `quotaLimits` transcript entries | present in 7 and 4 files out of 2,069; too rare to build on, useful later as a cross-check |
+| `stats-cache.json` | measured seven months stale with zero costs; a version gate is not worth the wrong-number risk |
+| session registry files | observed claiming an idle session whose process id had been recycled; the CLI's own listing is authoritative |
+| Compressed rollouts (`.zst`) | skipped rather than guessed at |
+| Account tier from the global config | not needed until Altim shows plan-specific limits |
+
+Helper processes can only be excluded by executable name, not by inspecting arguments, because
+reading another process's command line would ingest other tools' secrets. That is why session
+detection prefers each vendor's own listing command.
+
 ## Privacy: what Altim reads and ignores
 
 Session files contain prompts, model reasoning, file contents, command output, patches, repository
