@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- WinExe so Windows starts the process without a console window. On Linux
+         and macOS the SDK treats this exactly like Exe. -->
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>Altim.App</RootNamespace>
+    <AssemblyName>Altim</AssemblyName>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Altim.UI\Altim.UI.csproj" />
+    <ProjectReference Include="..\Altim.Storage\Altim.Storage.csproj" />
+    <ProjectReference Include="..\Altim.Providers\Altim.Providers.csproj" />
+    <ProjectReference Include="..\Altim.Providers.Claude\Altim.Providers.Claude.csproj" />
+    <ProjectReference Include="..\Altim.Providers.Codex\Altim.Providers.Codex.csproj" />
+    <!-- All three platform projects are referenced unconditionally; each resolves
+         to its portable net10.0 face, so this builds on every OS. The composition
+         root picks one at run time with OperatingSystem.IsWindows() and friends. -->
+    <ProjectReference Include="..\Altim.Platform.Windows\Altim.Platform.Windows.csproj" />
+    <ProjectReference Include="..\Altim.Platform.MacOS\Altim.Platform.MacOS.csproj" />
+    <ProjectReference Include="..\Altim.Platform.Linux\Altim.Platform.Linux.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <!-- The Avalonia developer tools are compiled in for Debug and stripped from
+       every other configuration, so Release carries no diagnostics surface. -->
+  <ItemGroup>
+    <PackageReference Include="AvaloniaUI.DiagnosticsSupport">
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">none</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

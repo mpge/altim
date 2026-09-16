@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Altim.Core depends on the BCL and nothing else. That is what keeps the
+       business logic testable and portable across every host platform. -->
+
+</Project>

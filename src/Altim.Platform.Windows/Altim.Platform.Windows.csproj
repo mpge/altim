@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Two target frameworks.
+
+       net10.0                        portable facade. This is the one every
+                                      other project binds to, so Altim.App stays
+                                      plain net10.0 and the solution restores and
+                                      builds unchanged on Linux and macOS agents.
+
+       net10.0-windows10.0.19041.0    the real implementation. Registry,
+                                      Shell_NotifyIcon, Microsoft.Win32.SystemEvents
+                                      and (later) the Windows App SDK notification
+                                      APIs all live behind the WINDOWS compilation
+                                      symbol here, so CA1416 is satisfied by the
+                                      target framework instead of by suppressions.
+
+       EnableWindowsTargeting (set in Directory.Build.props) makes the Windows
+       reference assemblies restore from nuget.org as
+       Microsoft.Windows.SDK.NET.Ref, so the Windows inner build also compiles on
+       non-Windows CI. -->
+
+  <PropertyGroup>
+    <TargetFramework />
+    <TargetFrameworks>net10.0;net10.0-windows10.0.19041.0</TargetFrameworks>
+    <SupportedOSPlatformVersion Condition="$(TargetFramework.Contains('-windows'))">10.0.19041.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Altim.Core\Altim.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TargetFramework.Contains('-windows'))">
+    <PackageReference Include="Microsoft.Win32.SystemEvents" />
+  </ItemGroup>
+
+</Project>

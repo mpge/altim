@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- NSStatusItem, UNUserNotificationCenter and SMAppService are reached through
+       objc_msgSend, so no macOS-flavoured target framework is required. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Altim.Core\Altim.Core.csproj" />
+  </ItemGroup>
+
+</Project>

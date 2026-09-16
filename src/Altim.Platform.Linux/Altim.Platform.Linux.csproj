@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- StatusNotifierItem, org.freedesktop.Notifications and XDG autostart are
+       reached over D-Bus and the filesystem, so plain net10.0 is enough. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Altim.Core\Altim.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Altim.Providers\Altim.Providers.csproj" />
+  </ItemGroup>
+
+</Project>

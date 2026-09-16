@@ -1,0 +1,52 @@
+<Project>
+
+  <!-- Applies to every project in the repository. Individual projects clear
+       TargetFramework and set TargetFrameworks when they need to multi-target. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <!-- Quality gates. Warnings are errors everywhere, including code style. -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!-- Native AOT readiness: every project is analysed for trim/AOT safety. -->
+  <PropertyGroup>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <!-- Avalonia: compiled bindings everywhere, no reflection-based binding. -->
+  <PropertyGroup>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <!-- Deterministic builds. ContinuousIntegrationBuild additionally normalises
+       source paths, so it is only switched on when a CI provider sets $(CI). -->
+  <PropertyGroup>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+  <!-- Lets Altim.Platform.Windows' Windows-flavoured target framework build on
+       Linux and macOS CI agents; the Windows reference pack is a NuGet package. -->
+  <PropertyGroup>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <NeutralLanguage>en</NeutralLanguage>
+    <Company>Altim</Company>
+    <Product>Altim</Product>
+  </PropertyGroup>
+
+</Project>

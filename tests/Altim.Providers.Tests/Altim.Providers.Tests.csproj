@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Altim.Providers\Altim.Providers.csproj" />
+    <ProjectReference Include="..\..\src\Altim.Providers.Claude\Altim.Providers.Claude.csproj" />
+    <ProjectReference Include="..\..\src\Altim.Providers.Codex\Altim.Providers.Codex.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+  </ItemGroup>
+
+</Project>
