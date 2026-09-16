@@ -21,13 +21,21 @@ public sealed class MonitorSchedulerTests
         Assert.Equal(TimeSpan.FromSeconds(60), scheduler.CurrentInterval);
         scheduler.Start();
 
+        // Fifty-nine seconds is not a tick and the sixtieth second is. That is read as
+        // one refresh once the sixtieth second's refresh has finished, rather than as
+        // "nothing yet" after a pause: the count only ever goes up, so finding one here is
+        // proof that the fifty-nine seconds before it produced none.
         time.Advance(TimeSpan.FromSeconds(59));
-        await TestWaits.SettleAsync();
-        Assert.Equal(0, provider.RefreshCount);
-
         time.Advance(TimeSpan.FromSeconds(1));
         await provider.RefreshCompleted.Task.WithCeiling();
         Assert.Equal(1, provider.RefreshCount);
+
+        // And the one after it is a further sixty seconds away, not sooner.
+        provider.ResetSignals();
+        time.Advance(TimeSpan.FromSeconds(59));
+        time.Advance(TimeSpan.FromSeconds(1));
+        await provider.RefreshCompleted.Task.WithCeiling();
+        Assert.Equal(2, provider.RefreshCount);
     }
 
     [Fact]
@@ -50,10 +58,10 @@ public sealed class MonitorSchedulerTests
         scheduler.SetUiVisible(false);
         Assert.Equal(TimeSpan.FromSeconds(60), scheduler.CurrentInterval);
 
+        // Ten seconds no longer buys a refresh and sixty does. One further refresh across
+        // the whole sixty seconds is what says the tightened cadence was really dropped;
+        // a scheduler still running at ten would have counted six by now.
         time.Advance(TimeSpan.FromSeconds(10));
-        await TestWaits.SettleAsync();
-        Assert.Equal(1, provider.RefreshCount);
-
         time.Advance(TimeSpan.FromSeconds(50));
         await provider.RefreshCompleted.Task.WithCeiling();
         Assert.Equal(2, provider.RefreshCount);
@@ -72,17 +80,20 @@ public sealed class MonitorSchedulerTests
         time.Advance(TimeSpan.FromMilliseconds(700));
         scheduler.Hint("claude");
         scheduler.Hint(null);
-        await TestWaits.SettleAsync();
-        Assert.Equal(0, provider.RefreshCount);
 
+        // The window opened on the first hint and closes 750ms after it however many
+        // hints landed inside it. Four hints, one refresh.
         time.Advance(TimeSpan.FromMilliseconds(50));
         await provider.RefreshCompleted.Task.WithCeiling();
         Assert.Equal(1, provider.RefreshCount);
 
-        // And nothing further until the next hint or the polling floor.
+        // And nothing further until the next hint or the polling floor, which is the tick
+        // at sixty seconds. Two refreshes by the time that one has finished, not three.
+        provider.ResetSignals();
         time.Advance(TimeSpan.FromSeconds(30));
-        await TestWaits.SettleAsync();
-        Assert.Equal(1, provider.RefreshCount);
+        time.Advance(TimeSpan.FromSeconds(29) + TimeSpan.FromMilliseconds(250));
+        await provider.RefreshCompleted.Task.WithCeiling();
+        Assert.Equal(2, provider.RefreshCount);
     }
 
     [Fact]
@@ -135,8 +146,12 @@ public sealed class MonitorSchedulerTests
         time.Advance(TimeSpan.FromMinutes(5));
         scheduler.Hint("claude");
         time.Advance(TimeSpan.FromSeconds(1));
-        await TestWaits.SettleAsync();
 
+        // Five minutes of ticks and a hint, all of them swallowed. Read behind StopAsync
+        // rather than after a pause: it cancels the run, waits for the loop to unwind and
+        // then for every provider gate, so anything the suspend had let through has
+        // finished and counted by the time it returns.
+        await scheduler.StopAsync().AsTask().WithCeiling();
         Assert.Equal(0, provider.RefreshCount);
     }
 
@@ -153,24 +168,37 @@ public sealed class MonitorSchedulerTests
         scheduler.Suspend();
         scheduler.Resume();
         await provider.RefreshCompleted.Task.WithCeiling();
-        await TestWaits.SettleAsync();
 
         Assert.False(scheduler.IsSuspended);
         Assert.Equal(1, provider.RefreshCount);
 
-        // A platform that reports the resume twice must not refresh twice.
+        // A platform that reports the resume twice must not refresh twice. Read at the
+        // next poll tick: a second resume refresh would have counted well before that.
+        provider.ResetSignals();
         scheduler.Resume();
-        await TestWaits.SettleAsync();
-        Assert.Equal(1, provider.RefreshCount);
+        time.Advance(TimeSpan.FromSeconds(60));
+        await provider.RefreshCompleted.Task.WithCeiling();
+        Assert.Equal(2, provider.RefreshCount);
     }
 
     [Fact]
     public async Task RefreshesForOneProviderNeverOverlap()
     {
         var time = new TestTimeProvider();
-        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var provider = new FakeUsageProvider("claude", time) { RefreshGate = gate.Task };
-        await using var scheduler = new MonitorScheduler([provider], time);
+        var wedge = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new FakeUsageProvider("claude", time) { RefreshGate = wedge.Task };
+
+        // The wedge is what holds this refresh open, and it has to be the only thing that
+        // does. On the default thirty-second budget the three minutes advanced below take
+        // the scheduler past ProviderTimeout: it abandons the call, hands the gate to it,
+        // and gets the gate back the moment the abandoned call unwinds — after which a
+        // later tick entering the provider is correct behaviour, not an overlap, and
+        // whether it happens comes down to which thread pool item ran first. Abandonment
+        // has its own test below; this one is about the gate.
+        await using var scheduler = new MonitorScheduler(
+            [provider],
+            time,
+            MonitorSchedulerOptions.Default with { ProviderTimeout = TimeSpan.FromMinutes(10) });
         scheduler.Start();
 
         time.Advance(TimeSpan.FromSeconds(60));
@@ -180,13 +208,61 @@ public sealed class MonitorSchedulerTests
         time.Advance(TimeSpan.FromSeconds(60));
         time.Advance(TimeSpan.FromSeconds(60));
         time.Advance(TimeSpan.FromSeconds(60));
-        await TestWaits.SettleAsync();
+
+        // A tick is queued, so no test can await one. These two take the same per-provider
+        // path an hour of ticks would, and they return a task: both have run all the way
+        // to their decision, and both were dropped, before the count is read.
+        await scheduler.RefreshAllAsync(TestContext.Current.CancellationToken);
+        await scheduler.RefreshAsync("claude", TestContext.Current.CancellationToken);
 
         Assert.Equal(1, provider.RefreshCount);
         Assert.Equal(1, provider.PeakConcurrentRefreshes);
 
-        gate.SetResult();
+        wedge.SetResult();
         await provider.RefreshCompleted.Task.WithCeiling();
+        Assert.Equal(1, provider.PeakConcurrentRefreshes);
+    }
+
+    [Fact]
+    public async Task AnAbandonedRefreshHoldsTheGateUntilTheProviderActuallyUnwinds()
+    {
+        var time = new TestTimeProvider();
+        var wedge = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new FakeUsageProvider("codex", time)
+        {
+            RefreshGate = wedge.Task,
+            HonoursCancellation = false,
+        };
+        var collector = new UsageCollector();
+        await using var scheduler = new MonitorScheduler([provider], time);
+        scheduler.UsageUpdated += collector.Handle;
+        scheduler.Start();
+
+        time.Advance(TimeSpan.FromSeconds(60));
+        await provider.RefreshEntered.Task.WithCeiling();
+
+        // The budget runs out. The scheduler stops waiting and says so, but the call is
+        // still inside the provider, so the gate it was holding stays taken: reading a
+        // provider that is already in a call is exactly the overlap all of this exists to
+        // prevent, and a timeout is not permission to do it.
+        time.Advance(MonitorSchedulerOptions.Default.ProviderTimeout);
+        await collector.WaitForAsync(1).WithCeiling();
+        Assert.Equal(ProviderStatus.Error, Assert.Single(collector.Received).Status);
+
+        await scheduler.RefreshAllAsync(TestContext.Current.CancellationToken);
+        await scheduler.RefreshAsync("codex", TestContext.Current.CancellationToken);
+        Assert.Equal(1, provider.RefreshCount);
+        Assert.Equal(1, provider.PeakConcurrentRefreshes);
+
+        // It finally unwinds. The gate comes back with it — through a continuation on the
+        // abandoned call, so there is no event to wait on — and the provider is read
+        // again. Never twice at once, which is the part that matters.
+        wedge.SetResult();
+        await provider.RefreshCompleted.Task.WithCeiling();
+        await TestWaits.UntilAsync(
+            () => scheduler.RefreshAsync("codex", TestContext.Current.CancellationToken).AsTask(),
+            () => provider.RefreshCount > 1);
+
         Assert.Equal(1, provider.PeakConcurrentRefreshes);
     }
 
@@ -350,9 +426,10 @@ public sealed class MonitorSchedulerTests
         await scheduler.StopAsync();
         Assert.False(scheduler.IsRunning);
 
+        // Five minutes of ticks go by with the scheduler stopped. Read at the first
+        // refresh after it is started again: if any of those five had got through, this
+        // would not be the first.
         time.Advance(TimeSpan.FromMinutes(5));
-        await TestWaits.SettleAsync();
-        Assert.Equal(0, provider.RefreshCount);
 
         scheduler.Start();
         time.Advance(TimeSpan.FromSeconds(60));
@@ -368,22 +445,23 @@ public sealed class MonitorSchedulerTests
         await using var scheduler = new MonitorScheduler([provider], time);
         scheduler.Start();
 
+        // Asleep for less than one period, so nothing but the wake itself can refresh
+        // here. A tick that comes due while suspended is skipped when the loop reaches it,
+        // but the timer signals it whether the loop is there to be told or not, and one
+        // left unconsumed is picked up as soon as the resume clears the flag — a second
+        // refresh that says nothing about the wake. What a suspend does to ticks is
+        // SuspendStopsEveryScheduledRefresh's subject.
         scheduler.Suspend();
-
-        // Five ticks go by with the machine asleep. They coalesce into nothing, because a
-        // laptop coming out of sleep must not produce a backlog.
-        time.Advance(TimeSpan.FromMinutes(5));
-        await TestWaits.SettleAsync();
-        Assert.Equal(0, provider.RefreshCount);
+        time.Advance(TimeSpan.FromSeconds(30));
 
         scheduler.Resume();
         await provider.RefreshCompleted.Task.WithCeiling();
-        await TestWaits.SettleAsync();
         Assert.Equal(1, provider.RefreshCount);
 
-        // And the poll timer is still the poll timer afterwards.
+        // And the poll timer is still the poll timer afterwards: it was never stopped, so
+        // the tick it was already counting down to lands on its original schedule.
         provider.ResetSignals();
-        time.Advance(TimeSpan.FromSeconds(60));
+        time.Advance(TimeSpan.FromSeconds(30));
         await provider.RefreshCompleted.Task.WithCeiling();
         Assert.Equal(2, provider.RefreshCount);
     }
@@ -428,7 +506,13 @@ public sealed class MonitorSchedulerTests
         var wedge = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var provider = new FakeUsageProvider("claude", time) { RefreshGate = wedge.Task };
         var collector = new UsageCollector();
-        await using var scheduler = new MonitorScheduler([provider], time);
+
+        // As in RefreshesForOneProviderNeverOverlap: the wedge holds this refresh open,
+        // not the provider budget quietly running out underneath it.
+        await using var scheduler = new MonitorScheduler(
+            [provider],
+            time,
+            MonitorSchedulerOptions.Default with { ProviderTimeout = TimeSpan.FromMinutes(10) });
         scheduler.UsageUpdated += collector.Handle;
         scheduler.Start();
 
@@ -441,12 +525,36 @@ public sealed class MonitorSchedulerTests
         provider.RefreshGate = null;
         scheduler.Hint("claude");
         time.Advance(TimeSpan.FromMilliseconds(750));
-        await TestWaits.SettleAsync();
+
+        // The hinted refresh is queued, so it is proven dropped by an explicit refresh
+        // down the same path, which returns a task and can be awaited.
+        await scheduler.RefreshAsync("claude", TestContext.Current.CancellationToken);
         Assert.Equal(1, provider.RefreshCount);
 
         wedge.SetResult();
         await collector.WaitForAsync(2).WithCeiling();
         Assert.Equal(2, provider.RefreshCount);
+    }
+
+    [Fact]
+    public async Task ARefreshRequestedAsOneIsLeavingIsNotLost()
+    {
+        var time = new TestTimeProvider();
+        var provider = new FakeUsageProvider("claude", time);
+        var collector = new UsageCollector();
+        await using var scheduler = new MonitorScheduler([provider], time);
+        scheduler.UsageUpdated += collector.Handle;
+        scheduler.Start();
+
+        const int Ticks = 3000;
+        for (int tick = 1; tick <= Ticks; tick++)
+        {
+            time.Advance(TimeSpan.FromSeconds(60));
+            await collector.WaitForAsync(tick).WithCeiling();
+        }
+
+        Assert.Equal(Ticks, provider.RefreshCount);
+        Assert.Equal(Ticks, collector.Count);
     }
 
     [Fact]
@@ -466,8 +574,9 @@ public sealed class MonitorSchedulerTests
 
         time.Advance(TimeSpan.FromSeconds(60));
         await provider.RefreshEntered.Task.WithCeiling();
-        await TestWaits.SettleAsync();
 
+        // Being inside the provider is downstream of the budget's timer being armed, so
+        // the advance below is certain to find it. No pause is needed to make that true.
         time.Advance(MonitorSchedulerOptions.Default.ProviderTimeout);
         await collector.WaitForAsync(1).WithCeiling();
 
@@ -619,11 +728,16 @@ public sealed class MonitorSchedulerTests
         // reading itself, so the event must not turn into a second refresh.
         time.Advance(TimeSpan.FromSeconds(60));
         await provider.RefreshCompleted.Task.WithCeiling();
-        time.Advance(TimeSpan.FromMilliseconds(750));
-        await TestWaits.SettleAsync();
 
-        Assert.Equal(1, provider.RefreshCount);
-        Assert.Equal(1, collector.Count);
+        // The debounce window the push would have opened closes here. Read at the next
+        // poll tick instead of after a pause: a refresh born of the push would have
+        // counted long before that tick's reading arrived.
+        time.Advance(TimeSpan.FromMilliseconds(750));
+        time.Advance(TimeSpan.FromSeconds(59) + TimeSpan.FromMilliseconds(250));
+        await collector.WaitForAsync(2).WithCeiling();
+
+        Assert.Equal(2, provider.RefreshCount);
+        Assert.Equal(2, collector.Count);
     }
 
     [Fact]
@@ -636,11 +750,13 @@ public sealed class MonitorSchedulerTests
         await scheduler.DisposeAsync();
 
         // A filesystem event that was already in flight when the process started closing.
+        // Disposal stopped the loop, waited for in-flight work and disposed the timers
+        // before returning, and every call below is a synchronous no-op against that, so
+        // there is nothing pending for a pause to let through and none is taken.
         scheduler.Hint("claude");
         scheduler.Hint();
         provider.RaiseUsageChanged();
         time.Advance(TimeSpan.FromMinutes(5));
-        await TestWaits.SettleAsync();
 
         Assert.Equal(0, provider.RefreshCount);
 
@@ -660,16 +776,23 @@ public sealed class MonitorSchedulerTests
         scheduler.Hint("claude");
         await scheduler.StopAsync();
 
+        // StopAsync disarmed the hint window and the poll timer and waited for in-flight
+        // work before returning, so the open hint window dies with it.
         time.Advance(TimeSpan.FromMilliseconds(750));
-        await TestWaits.SettleAsync();
         Assert.Equal(0, provider.RefreshCount);
 
         // A resume with no run to attach to would otherwise refresh with no way to cancel
         // it.
         scheduler.Suspend();
         scheduler.Resume();
-        await TestWaits.SettleAsync();
         Assert.Equal(0, provider.RefreshCount);
+
+        // Started again, the first tick is the first refresh: nothing the stopped
+        // scheduler was asked to do got through behind these assertions either.
+        scheduler.Start();
+        time.Advance(TimeSpan.FromSeconds(60));
+        await provider.RefreshCompleted.Task.WithCeiling();
+        Assert.Equal(1, provider.RefreshCount);
     }
 
     [Fact]

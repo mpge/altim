@@ -15,9 +15,12 @@ namespace Altim.Core.Monitoring;
 /// filesystem hint, a push from a provider's own watcher, a resume from sleep, and an
 /// explicit call. All five funnel through the same per-provider path, which holds a
 /// per-provider gate, so refreshes of one provider never overlap no matter which of them
-/// fires. A refresh that finds the gate taken is not dropped: it marks the registration
-/// dirty and the in-flight refresh runs once more as it leaves, so a change that landed
-/// while a read was in progress is not hidden until the next relaxed tick.
+/// fires. A refresh that finds the gate taken is not dropped: it is recorded against the
+/// refresh in flight, which runs once more before it leaves, so a change that landed while
+/// a read was in progress is not hidden until the next relaxed tick. Recording a request
+/// and giving the gate back are decided together rather than in sequence, because a
+/// request that lands between those two steps would otherwise be recorded against a
+/// refresh that is never going to look again.
 /// </para>
 /// <para>
 /// The tick queues its refreshes rather than awaiting them. One provider taking a second
@@ -471,8 +474,6 @@ public sealed class MonitorScheduler : IAsyncDisposable
             {
                 registration.Provider.UsageChanged -= push;
             }
-
-            registration.Gate.Dispose();
         }
     }
 
@@ -607,26 +608,34 @@ public sealed class MonitorScheduler : IAsyncDisposable
     private async Task RefreshProviderAsync(ProviderRegistration registration, CancellationToken ct)
     {
         // Non-blocking: a refresh already in flight for this provider means this one is
-        // recorded rather than run, and the one in flight picks it up as it leaves. That
-        // is what keeps refreshes of one provider from overlapping without losing the
-        // change that asked for this one.
-        if (!registration.TryEnter())
+        // recorded against it rather than run, and the one in flight serves the record
+        // before it leaves. That is what keeps refreshes of one provider from overlapping
+        // without losing the change that asked for this one.
+        if (!registration.TryBeginRefresh())
         {
-            registration.MarkDirty();
             return;
         }
 
         bool gateHandedOff = false;
+        bool released = false;
         try
         {
-            registration.BeginRefresh();
             while (true)
             {
-                registration.ClearDirty();
                 gateHandedOff = await RefreshOnceAsync(registration, ct).ConfigureAwait(false);
 
-                if (gateHandedOff || !registration.IsDirty || ct.IsCancellationRequested || _disposed)
+                if (gateHandedOff || ct.IsCancellationRequested || _disposed)
                 {
+                    break;
+                }
+
+                // Serving a record and letting the turn go are one decision, taken
+                // together. Split them and a request arriving in between is lost: it finds
+                // the turn still taken, records itself against a refresh that has already
+                // decided it is leaving, and nothing ever looks again.
+                if (!registration.TryContinueRefresh())
+                {
+                    released = true;
                     break;
                 }
             }
@@ -642,10 +651,11 @@ public sealed class MonitorScheduler : IAsyncDisposable
         }
         finally
         {
-            registration.EndRefresh();
-            if (!gateHandedOff)
+            if (!gateHandedOff && !released)
             {
-                registration.Exit();
+                // Shutting down, disposed, or thrown out of. Anything recorded goes with
+                // it: there is no run left for it to belong to.
+                registration.Release();
             }
         }
     }
@@ -751,7 +761,7 @@ public sealed class MonitorScheduler : IAsyncDisposable
 
                 (ProviderRegistration registration, CancellationTokenSource linked, CancellationTokenSource timeout) =
                     ((ProviderRegistration, CancellationTokenSource, CancellationTokenSource))state!;
-                registration.Exit();
+                registration.Release();
                 linked.Dispose();
                 timeout.Dispose();
             },
@@ -856,31 +866,51 @@ public sealed class MonitorScheduler : IAsyncDisposable
         }
 
         // Concurrently: shutdown waits once for everything to unwind, not once per
-        // provider, and gives up on anything that ignores cancellation.
-        var waits = new Task<bool>[registrations.Length];
+        // provider, and gives up on anything that ignores cancellation. Observed rather
+        // than taken: waiting here must not claim a turn a refresh is about to want.
+        var waits = new Task[registrations.Length];
         for (int i = 0; i < registrations.Length; i++)
         {
-            waits[i] = registrations[i].WaitForIdleAsync(Options.ShutdownTimeout);
+            waits[i] = WaitForIdleAsync(registrations[i]);
         }
 
-        bool[] entered = await Task.WhenAll(waits).ConfigureAwait(false);
-        for (int i = 0; i < entered.Length; i++)
+        await Task.WhenAll(waits).ConfigureAwait(false);
+    }
+
+    private async Task WaitForIdleAsync(ProviderRegistration registration)
+    {
+        try
         {
-            if (entered[i])
-            {
-                registrations[i].Exit();
-            }
+            await registration.WaitForIdleAsync(Options.ShutdownTimeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // A provider that ignores its cancellation token is left running rather than
+            // allowed to hold the process open.
         }
     }
 
+    /// <summary>
+    /// One provider's turn to be refreshed, and the record of anything that asked for a
+    /// refresh while that turn was being taken.
+    /// </summary>
+    /// <remarks>
+    /// The turn and the record are one piece of state behind one lock, never two things
+    /// read in sequence. Taking a turn, recording a request against the turn in progress,
+    /// and deciding on the way out whether to serve a record or hand the turn back are each
+    /// one decision, so a request is always either served by the refresh in flight or run
+    /// by the caller that made it, and never dropped between the two. The lock covers a
+    /// field read and a field write, and is never held across an await or a call into a
+    /// provider.
+    /// </remarks>
     private sealed class ProviderRegistration(IUsageProvider provider)
     {
-        private int _dirty;
-        private int _refreshing;
+        private readonly object _sync = new();
+        private TaskCompletionSource _idle = Settled();
+        private bool _busy;
+        private bool _requested;
 
         public IUsageProvider Provider { get; } = provider;
-
-        public SemaphoreSlim Gate { get; } = new(1, 1);
 
         /// <summary>
         /// The handler subscribed to <see cref="IUsageProvider.UsageChanged"/>, kept so it
@@ -889,60 +919,103 @@ public sealed class MonitorScheduler : IAsyncDisposable
         public EventHandler<ProviderUsage>? Push { get; set; }
 
         /// <summary>True while the scheduler is inside a refresh of this provider.</summary>
-        public bool IsRefreshing => Volatile.Read(ref _refreshing) != 0;
+        public bool IsRefreshing
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _busy;
+                }
+            }
+        }
 
         /// <summary>
-        /// True when something asked for a refresh while one was in flight. The refresh in
-        /// flight runs once more rather than leaving that change unseen.
+        /// Takes the turn, or records a request against whoever has it.
         /// </summary>
-        public bool IsDirty => Volatile.Read(ref _dirty) != 0;
-
-        public void MarkDirty() => Volatile.Write(ref _dirty, 1);
-
-        public void ClearDirty() => Volatile.Write(ref _dirty, 0);
-
-        public void BeginRefresh() => Volatile.Write(ref _refreshing, 1);
-
-        public void EndRefresh() => Volatile.Write(ref _refreshing, 0);
-
-        public bool TryEnter()
+        /// <returns>
+        /// True when the caller now owns the refresh. False when one was already in flight,
+        /// in which case this request is recorded and that refresh will serve it.
+        /// </returns>
+        public bool TryBeginRefresh()
         {
-            try
+            lock (_sync)
             {
-                return Gate.Wait(0);
+                if (_busy)
+                {
+                    _requested = true;
+                    return false;
+                }
+
+                _busy = true;
+                _requested = false;
+                if (_idle.Task.IsCompleted)
+                {
+                    _idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                }
+
+                return true;
             }
-            catch (ObjectDisposedException)
+        }
+
+        /// <summary>
+        /// Serves a recorded request, or gives the turn back.
+        /// </summary>
+        /// <returns>
+        /// True when a request was recorded and the caller keeps the turn to run once more.
+        /// False when nothing was waiting and the turn has been handed back.
+        /// </returns>
+        public bool TryContinueRefresh()
+        {
+            lock (_sync)
             {
+                if (_requested)
+                {
+                    _requested = false;
+                    return true;
+                }
+
+                ReleaseLocked();
                 return false;
             }
         }
 
-        public void Exit()
+        /// <summary>
+        /// Gives the turn back without serving anything recorded against it: shutdown, or a
+        /// provider call that was abandoned and has finally unwound. Safe to call twice.
+        /// </summary>
+        public void Release()
         {
-            try
+            lock (_sync)
             {
-                _ = Gate.Release();
-            }
-            catch (ObjectDisposedException)
-            {
-                // Disposed during shutdown; the count no longer matters.
-            }
-            catch (SemaphoreFullException)
-            {
-                // Released twice by a shutdown racing an abandoned call. Harmless.
+                ReleaseLocked();
             }
         }
 
-        public async Task<bool> WaitForIdleAsync(TimeSpan timeout)
+        /// <summary>Completes once no refresh is in flight, or fails as a timeout.</summary>
+        public Task WaitForIdleAsync(TimeSpan timeout)
         {
-            try
+            Task idle;
+            lock (_sync)
             {
-                return await Gate.WaitAsync(timeout).ConfigureAwait(false);
+                idle = _idle.Task;
             }
-            catch (ObjectDisposedException)
-            {
-                return false;
-            }
+
+            return idle.WaitAsync(timeout);
+        }
+
+        private static TaskCompletionSource Settled()
+        {
+            var source = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            source.SetResult();
+            return source;
+        }
+
+        private void ReleaseLocked()
+        {
+            _busy = false;
+            _requested = false;
+            _ = _idle.TrySetResult();
         }
     }
 }
