@@ -161,8 +161,24 @@ Where a desktop cannot do something, Altim degrades visibly rather than pretendi
 
 ## Packaging
 
-Windows and macOS through Velopack, Linux as AppImage with `.deb`/`.rpm` to follow. Lands with the
-packaging milestone.
+| Platform | Artefacts | State |
+|---|---|---|
+| Windows | `Setup.exe`, portable zip, delta updates | built, installed, run and uninstalled on Windows 11 |
+| Linux | AppImage, `.deb`, `.rpm` | packages built and their metadata checked; **never installed or run** |
+| macOS | universal `.app`, DMG | **never executed** — no macOS host |
+
+Scripts live in [`packaging/`](packaging/), with a README covering how to produce each artefact by
+hand and what a maintainer needs in order to sign them. A version tag builds all three through
+`.github/workflows/release.yml` and attaches them to a draft release.
+
+Nothing is signed yet. Windows installers are unsigned until a certificate exists, and the macOS
+signing and notarisation steps skip cleanly when the Apple secrets are absent, so the workflow runs
+end to end without them and produces an unsigned bundle.
+
+The `.deb` dependency list is **hand-maintained on purpose**: only one of the nine X11 and
+fontconfig libraries Avalonia needs is visible to automatic dependency detection, because the rest
+are loaded by name at runtime. A generated list under-declares, and the package then installs
+cleanly and fails to start.
 
 ## License
 

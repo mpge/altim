@@ -2,6 +2,7 @@ using Altim.App.Diagnostics;
 using Altim.Storage;
 using Avalonia;
 using Avalonia.Controls;
+using Velopack;
 
 namespace Altim.App;
 
@@ -31,6 +32,13 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // First statement, before anything else looks at the process. The installer runs
+        // this same executable with its own arguments to perform install and uninstall
+        // hooks; this call services them and exits. Reaching the single-instance check
+        // first would start a tray icon inside the installer and hold it until it timed
+        // out, and the packaging tool refuses a binary that does not carry this call.
+        VelopackApp.Build().Run();
+
         if (!SingleInstance.TryAcquire(out SingleInstance? instance))
         {
             _ = SingleInstance.SignalExisting();

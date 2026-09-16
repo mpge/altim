@@ -1,0 +1,317 @@
+name: Release
+
+# Tag-driven. Pushing v1.2.3 builds all three platforms and leaves a DRAFT release
+# behind for a human to read, check and publish. Nothing here publishes a release,
+# moves a tag, or writes to the repository.
+#
+# build.yml is the pull-request gate and stays separate on purpose: it must stay
+# fast and run on every push, and this one takes an ahead-of-time compile and two
+# macOS publishes. They share no steps worth merging.
+#
+# What this workflow does NOT do, and does not pretend to do:
+#   - sign anything on Windows unless WINDOWS_SIGN_PARAMS is set
+#   - sign or notarise anything on macOS unless the Apple secrets are set
+#   - sign the Linux packages at all
+# Every one of those is skipped cleanly and reported in the release notes, so an
+# unsigned release is obvious rather than silent. packaging/README.md lists the
+# secrets to add.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, without the leading v (e.g. 0.1.0).'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Never cancel a release build half way through a publish.
+  cancel-in-progress: false
+
+jobs:
+  # One job whose only output is the version string, so that three builders and a
+  # release job cannot disagree about what they are building.
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          version="${version#v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)*$'; then
+            echo "::error::'$version' is not SemVer2. Velopack and CFBundleShortVersionString both refuse it."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Building $version"
+
+  build:
+    name: ${{ matrix.name }}
+    needs: version
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      # One platform failing must not throw away the other two; a partial draft
+      # release is still worth inspecting, and the missing job can be re-run.
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows (x64)
+            platform: windows
+            runs-on: windows-latest
+            artifact: windows-x64
+          - name: Linux (x64)
+            platform: linux
+            runs-on: ubuntu-latest
+            artifact: linux-x64
+          - name: macOS (universal)
+            platform: macos
+            runs-on: macos-latest
+            artifact: macos-universal
+
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      # Lifted to the job so that `if:` conditions can read them. A secret that was
+      # never set is an empty string here, which is what every skip below tests.
+      WINDOWS_SIGN_PARAMS: ${{ secrets.WINDOWS_SIGN_PARAMS }}
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+      MACOS_NOTARY_APP_PASSWORD: ${{ secrets.MACOS_NOTARY_APP_PASSWORD }}
+      MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # ---------------------------------------------------------------- Windows
+      - name: Install the Velopack CLI
+        if: matrix.platform == 'windows'
+        run: dotnet tool install --global vpk --version 1.2.0
+
+      # Velopack generates delta packages by diffing against the previous release,
+      # which it can only do if the previous release is on disk when it packs. This
+      # downloads the published feed into the output directory first. It fails on
+      # the very first release, when there is nothing to download, and that failure
+      # is expected and ignored: the result is a correct full-only release.
+      - name: Download the previous release for delta generation
+        if: matrix.platform == 'windows'
+        continue-on-error: true
+        run: >
+          vpk download github
+          --repoUrl https://github.com/${{ github.repository }}
+          --token ${{ secrets.GITHUB_TOKEN }}
+          --outputDir dist/windows/win-x64
+
+      - name: Build the Windows installer
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $params = @{
+            Version   = $env:VERSION
+            Runtime   = 'win-x64'
+            OutputDir = 'dist/windows/win-x64'
+          }
+          if ($env:WINDOWS_SIGN_PARAMS) { $params.SignParams = $env:WINDOWS_SIGN_PARAMS }
+          ./packaging/windows/build-windows.ps1 @params
+
+      - name: Note that the Windows artefacts are unsigned
+        if: matrix.platform == 'windows' && env.WINDOWS_SIGN_PARAMS == ''
+        run: echo "::warning::WINDOWS_SIGN_PARAMS is not set. Setup.exe and Altim.exe are unsigned and SmartScreen will warn on first run."
+
+      # ------------------------------------------------------------------ Linux
+      - name: Build the AppImage, .deb and .rpm
+        if: matrix.platform == 'linux'
+        # Invoked through bash rather than as ./packaging/... so that a missing
+        # executable bit in the index cannot turn into a "Permission denied" release.
+        run: bash packaging/linux/build-linux.sh --version "$VERSION" --rid linux-x64
+
+      # The dependency list is hand-maintained because nothing can derive it: the
+      # X11 libraries Avalonia needs are dlopen'd and no scanner sees them. Print
+      # what actually landed in the package so a review does not have to take the
+      # configuration's word for it.
+      - name: Show the declared package dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          set -euo pipefail
+          for deb in dist/linux/*.deb; do
+            echo "== $deb"
+            dpkg-deb --field "$deb" Depends Recommends
+          done
+          for rpm in dist/linux/*.rpm; do
+            echo "== $rpm"
+            rpm -qpR "$rpm" || true
+          done
+
+      # ------------------------------------------------------------------ macOS
+      - name: Import the Developer ID certificate
+        if: matrix.platform == 'macos' && env.MACOS_CERTIFICATE_P12 != ''
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/altim-signing.keychain-db"
+          password="$(openssl rand -base64 24)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+          # Prepend rather than replace: dropping the login keychain from the
+          # search list breaks other tooling on the runner.
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
+      - name: Build the app bundle and DMG
+        if: matrix.platform == 'macos'
+        run: bash packaging/macos/build-macos.sh --version "$VERSION" --arch universal
+
+      - name: Note that the macOS artefacts are unsigned
+        if: matrix.platform == 'macos' && env.MACOS_SIGNING_IDENTITY == ''
+        run: echo "::warning::MACOS_SIGNING_IDENTITY is not set. The DMG is unsigned and un-notarised; Gatekeeper will refuse to open it after download."
+
+      - name: Remove the signing keychain
+        if: always() && matrix.platform == 'macos' && env.MACOS_CERTIFICATE_P12 != ''
+        run: security delete-keychain "$RUNNER_TEMP/altim-signing.keychain-db" || true
+
+      # --------------------------------------------------------------- Artefacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/windows/**
+            dist/linux/**
+            dist/macos/**
+          if-no-files-found: error
+          retention-days: 14
+
+  draft-release:
+    name: Draft release
+    needs: [version, build]
+    # A platform that failed still leaves a draft worth looking at; the release
+    # notes below say which artefacts are present.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect the artefacts
+        id: collect
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          # .nupkg, RELEASES, releases.win.json and assets.win.json are Velopack's
+          # update feed. They are attached deliberately: the updater reads them
+          # straight off the release, and a release without them is one that no
+          # installed copy can update from. The lower-case json names are matched
+          # separately because this runner's filesystem is case sensitive and
+          # 'RELEASES*' does not match 'releases.win.json'.
+          find artifacts -type f \
+            \( -name '*.exe' -o -name '*.zip' -o -name '*.nupkg' \
+               -o -name 'RELEASES*' -o -name 'releases*.json' -o -name 'assets*.json' \
+               -o -name '*.AppImage' -o -name '*.deb' \
+               -o -name '*.rpm' -o -name '*.dmg' \) \
+            -exec cp -n {} upload/ \;
+          ( cd upload && sha256sum * > SHA256SUMS.txt )
+          ls -lh upload
+          echo "count=$(find upload -type f | wc -l)" >> "$GITHUB_OUTPUT"
+
+      - name: Write the release notes
+        shell: bash
+        env:
+          SIGNED_WINDOWS: ${{ secrets.WINDOWS_SIGN_PARAMS != '' }}
+          SIGNED_MACOS: ${{ secrets.MACOS_SIGNING_IDENTITY != '' }}
+          NOTARISED_MACOS: ${{ secrets.MACOS_NOTARY_APPLE_ID != '' && secrets.MACOS_SIGNING_IDENTITY != '' }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Altim ${{ needs.version.outputs.version }}"
+            echo
+            echo "### Downloads"
+            echo
+            echo "| Platform | File | What it is |"
+            echo "|---|---|---|"
+            echo "| Windows | \`Altim-win-Setup.exe\` | Installer. Installs per user, no administrator prompt. |"
+            echo "| Windows | \`Altim-win-Portable.zip\` | Unzip and run. No installer, no updates. |"
+            echo "| Linux | \`Altim-*-x86_64.AppImage\` | \`chmod +x\` and run. Works on any glibc desktop with X11. |"
+            echo "| Linux | \`altim_*_amd64.deb\` | Debian and Ubuntu. |"
+            echo "| Linux | \`altim-*.x86_64.rpm\` | Fedora and RHEL. |"
+            echo "| macOS | \`Altim-*-universal.dmg\` | Universal, Apple silicon and Intel. |"
+            echo
+            echo "\`.nupkg\` and \`RELEASES\` are the Velopack update feed for installed Windows copies. You do not need to download them."
+            echo
+            echo "### Code signing"
+            echo
+            if [ "$SIGNED_WINDOWS" = "true" ]; then
+              echo "- **Windows:** signed."
+            else
+              echo "- **Windows: not signed.** SmartScreen will show \"Windows protected your PC\" on first run. More info -> Run anyway."
+            fi
+            if [ "$NOTARISED_MACOS" = "true" ]; then
+              echo "- **macOS:** signed with a Developer ID and notarised."
+            elif [ "$SIGNED_MACOS" = "true" ]; then
+              echo "- **macOS: signed but not notarised.** Gatekeeper will still refuse a downloaded copy."
+            else
+              echo "- **macOS: not signed and not notarised.** Gatekeeper will refuse to open it. Right-click -> Open, or \`xattr -dr com.apple.quarantine /Applications/Altim.app\`."
+            fi
+            echo "- **Linux: not signed.** No GPG signature and no APT or DNF repository; verify with \`SHA256SUMS.txt\`."
+            echo
+            echo "### Notes"
+            echo
+            echo "- Windows notifications need a complete Windows App Runtime installation (framework, main and singleton packages). Where it is absent or partial, Altim runs normally and shows no toasts."
+            echo "- macOS and Linux builds are **unverified**: their native integrations have never been run on real hardware. See ARCHITECTURE.md, Risks."
+            echo
+            echo "---"
+            echo "Built from \`${{ github.sha }}\` by [\`${{ github.workflow }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+          } > notes.md
+          cat notes.md
+
+      # Draft, always. A human reads the notes, checks the artefacts and presses
+      # publish; this workflow never makes a release visible on its own.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.version.outputs.tag }}"
+          if gh release view "$tag" --json isDraft --jq .isDraft >/dev/null 2>&1; then
+            echo "Release $tag already exists; replacing its notes and assets."
+            gh release edit "$tag" --draft --notes-file notes.md
+            gh release upload "$tag" upload/* --clobber
+          else
+            gh release create "$tag" upload/* \
+              --draft \
+              --title "Altim ${{ needs.version.outputs.version }}" \
+              --notes-file notes.md \
+              --target "${{ github.sha }}"
+          fi
+          echo "Draft release $tag is ready at ${{ github.server_url }}/${{ github.repository }}/releases"

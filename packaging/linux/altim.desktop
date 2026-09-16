@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Altim
+GenericName=AI usage monitor
+Comment=AI usage, at a glance.
+Exec=altim
+Icon=altim
+Terminal=false
+Categories=Utility;System;Monitor;
+Keywords=ai;usage;tokens;claude;codex;monitor;
+StartupNotify=false
+StartupWMClass=Altim
+X-GNOME-UsesNotifications=true

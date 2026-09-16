@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened runtime entitlements. Only used when a Developer ID identity is
+  available; an unsigned build never sees this file.
+
+  These three are what the .NET runtime needs under the hardened runtime, and no
+  more. There is no sandbox entitlement here on purpose: Altim reads provider
+  transcripts from paths outside its container (~/.codex, ~/.claude), which a
+  sandboxed app cannot do without a user-granted bookmark for each one. A Developer
+  ID app distributed outside the App Store is not required to be sandboxed.
+
+  allow-jit               CoreCLR maps executable pages for JIT compiled code.
+  allow-unsigned-executable-memory
+                          the same pages are written before they are executed, which
+                          is what the hardened runtime otherwise refuses.
+  disable-library-validation
+                          the bundle loads its own unsigned-at-build-time native
+                          libraries (libSkiaSharp, libHarfBuzzSharp, libe_sqlite3,
+                          libAvaloniaNative). They are signed by build-macos.sh with
+                          the same identity, but library validation compares Team
+                          IDs at load time and .NET's own host loading path trips it.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>

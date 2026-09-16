@@ -123,15 +123,10 @@
   <!-- Velopack is the Windows installer and updater. It is referenced here rather
        than in a platform project because the one call it needs — VelopackApp.Build().Run()
        as the first statement in Main — belongs to the entry point, and because the
-       package is inert on the platforms that do not use it.
-
-       VersionOverride, not Version: this repository manages package versions centrally
-       and the pin belongs in Directory.Packages.props as
-       <PackageVersion Include="Velopack" Version="1.2.0" />. Move it there and delete
-       the attribute; it is written this way only so that packaging could land without
-       editing a file it does not own. -->
+       package is inert on the platforms that do not use it. The version is pinned
+       centrally in Directory.Packages.props with everything else. -->
   <ItemGroup>
-    <PackageReference Include="Velopack" VersionOverride="1.2.0" />
+    <PackageReference Include="Velopack" />
   </ItemGroup>
 
   <!-- The Avalonia developer tools are compiled in for Debug and stripped from

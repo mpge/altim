@@ -1,0 +1,9 @@
+# Packaging scripts have to reach Linux and macOS with LF endings. A CRLF AppRun
+# is a "bad interpreter" error inside an AppImage, which is a confusing way to
+# find out that a file was committed from Windows.
+*.sh        text eol=lf
+AppRun      text eol=lf
+*.desktop   text eol=lf
+*.yaml      text eol=lf
+*.plist     text eol=lf
+*.ps1       text eol=crlf

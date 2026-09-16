@@ -24,6 +24,11 @@
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
   </ItemGroup>
 
+  <!-- Packaging and updates -->
+  <ItemGroup>
+    <PackageVersion Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+
   <!-- Windows only -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.Win32.SystemEvents" Version="10.0.12" />

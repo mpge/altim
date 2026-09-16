@@ -1,0 +1,23 @@
+#!/bin/sh
+# AppImage entry point.
+#
+# The payload is a self-contained .NET publish, so the ELF binary already carries
+# an $ORIGIN rpath and finds its own runtime next to it. Nothing here touches
+# LD_LIBRARY_PATH, and that is deliberate: prepending the bundle's directory would
+# shadow the host's X11, fontconfig and OpenSSL libraries with whatever happened to
+# be on the build machine, which is the classic way an AppImage runs everywhere
+# except the one desktop the user actually has.
+#
+# HERE is resolved from this script rather than from $APPDIR, because an extracted
+# AppDir is also run directly during development and $APPDIR is only set by the
+# AppImage runtime.
+#
+# The runtime also exports APPIMAGE, holding the absolute path of the .AppImage
+# file itself. Altim does not read it yet, and until it does, "start at login" from
+# inside an AppImage writes an autostart entry pointing at this mount point, which
+# does not survive a reboot. See packaging/README.md, "Known gaps".
+set -eu
+
+HERE="$(dirname "$(readlink -f "$0")")"
+
+exec "${HERE}/usr/bin/Altim" "$@"

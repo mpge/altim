@@ -1,0 +1,211 @@
+# nfpm configuration for the Altim .deb and .rpm.
+#
+# ---------------------------------------------------------------------------
+# Why nfpm, and why the dependency lists below are written by hand
+# ---------------------------------------------------------------------------
+# nfpm performs no dependency scanning. What is in `depends:` is what ends up in
+# the package, byte for byte. That is the reason it is used here rather than
+# dpkg-buildpackage or fpm.
+#
+# The usual toolchains derive Depends from `dpkg-shlibdeps`, which reads ELF
+# DT_NEEDED entries — the libraries the loader resolves at start-up. Avalonia does
+# not link X11 that way. Avalonia.X11 dlopen()s its X libraries by soname from
+# managed code, so none of them appear in any DT_NEEDED entry anywhere in the
+# payload.
+#
+# Measured, not assumed. Scanning every DT_NEEDED entry of all 19 ELF files in a
+# linux-x64 publish yields exactly this set:
+#
+#   ld-linux-x86-64.so.2  libc.so.6      libdl.so.2       libfontconfig.so.1
+#   libgcc_s.so.1         liblttng-ust.so.0  libm.so.6    libmscordaccore.so
+#   libpthread.so.0       librt.so.1     libstdc++.so.6
+#
+# Of the nine libraries Altim actually needs, **one** is in that list —
+# libfontconfig.so.1, and only because libSkiaSharp.so links it directly. The
+# other eight are string literals inside Avalonia.X11.dll: libX11.so.6,
+# libXext.so.6, libXi.so.6, libXrandr.so.2, libXcursor.so.1, libXfixes.so.3,
+# libICE.so.6 and libSM.so.6. ICU, OpenSSL and Kerberos are dlopen'd by the .NET
+# native shims in the same way and are equally invisible.
+#
+# So a generated list contains one of nine. The package installs cleanly, dpkg
+# reports success, and the application exits at start-up on a machine without
+# them — which on a minimal or headless-derived desktop image is the normal case,
+# not an exotic one.
+#
+# Verify a built package rather than trusting this comment:
+#   dpkg-deb --field dist/linux/altim_<version>_amd64.deb Depends
+#   rpm -qpR dist/linux/altim-<version>.x86_64.rpm
+#
+# Anyone adding a native dependency to Altim must add it here too. There is no
+# tool that will notice for you.
+#
+# ---------------------------------------------------------------------------
+# @PLACEHOLDERS@
+# ---------------------------------------------------------------------------
+# build-linux.sh substitutes @ARCH@, @VERSION@ and @PAYLOAD@ with sed and writes
+# the result to dist/.nfpm.yaml, which is the file nfpm actually reads.
+#
+# Not environment variables: nfpm expands ${VAR} in some scalar fields (arch,
+# version) but NOT in contents[].src, where it hands the literal string to the
+# filesystem and fails with "GetFileAttributesEx ${NFPM_PAYLOAD}/: no such file".
+# Measured, on nfpm 2.47.0. One substitution mechanism for all three is less
+# surprising than two, so all three are sed.
+#
+# To run nfpm by hand against this file:
+#   sed -e 's|@ARCH@|amd64|' -e 's|@VERSION@|0.1.0|' -e "s|@PAYLOAD@|$PWD/dist/.publish/linux-x64|" packaging/linux/nfpm.yaml > /tmp/nfpm.yaml
+#   nfpm package --config /tmp/nfpm.yaml --packager deb --target dist/linux
+# ---------------------------------------------------------------------------
+
+name: altim
+arch: @ARCH@
+platform: linux
+version: @VERSION@
+release: "1"
+section: utils
+priority: optional
+maintainer: Altim <packaging@altim.dev>
+vendor: Altim
+homepage: https://altim.dev
+license: MIT
+description: |
+  AI usage, at a glance.
+  Altim is a local-first desktop monitor for AI coding agent usage. It sits in the
+  status area and reports what each provider is consuming, how long until the next
+  reset, and whether an agent is working right now. It reads usage metadata from
+  local files only and never transmits prompts, source code or conversation
+  contents anywhere.
+
+# Debian and Ubuntu.
+#
+# Group 1 is the .NET 10 self-contained runtime. Group 2 is Avalonia's X11 backend
+# and the fontconfig that Skia links. Alternatives are spelled out because the
+# package names move between releases and a hard pin turns "does not start" into
+# "will not install" on the next distribution version.
+depends:
+  # .NET runtime
+  - libc6
+  - libgcc-s1
+  - libstdc++6
+  - zlib1g
+  - libicu76 | libicu75 | libicu74 | libicu72 | libicu71 | libicu70 | libicu67 | libicu66
+  - libssl3t64 | libssl3 | libssl1.1
+  - libgssapi-krb5-2
+  # Avalonia X11 — every one of these is dlopen'd and invisible to ldd
+  - libx11-6
+  - libice6
+  - libsm6
+  - libxext6
+  - libxi6
+  - libxrandr2
+  - libxcursor1
+  - libxfixes3
+  # linked by libSkiaSharp.so; the only one a generated list would have found
+  - libfontconfig1
+
+recommends:
+  # Avalonia.X11 dlopen()s libGL.so.1 for the GPU render path and falls back to
+  # software rasterisation without it, so this is a recommendation: Altim still
+  # starts and still draws.
+  - libgl1
+  # The status icon is a StatusNotifierItem and notifications are
+  # org.freedesktop.Notifications; both are session-bus calls made directly
+  # through Tmds.DBus.Protocol, so libnotify is deliberately NOT listed. Without
+  # a session bus Altim runs and shows no icon.
+  - dbus
+
+# Relative paths below are resolved against nfpm's working directory, which
+# build-linux.sh sets to the repository root before invoking it. @PAYLOAD@ is
+# substituted with an absolute path.
+contents:
+  # The whole self-contained publish, kept together under /usr/lib rather than
+  # scattered: it is one application's private runtime, not shared libraries.
+  - src: @PAYLOAD@/
+    dst: /usr/lib/altim
+    type: tree
+
+  # /proc/self/exe follows the symlink, so the apphost still resolves its own
+  # directory to /usr/lib/altim and finds the runtime beside it.
+  - src: /usr/lib/altim/Altim
+    dst: /usr/bin/altim
+    type: symlink
+
+  # Modes are declared rather than inherited. nfpm's `tree` type copies the
+  # source file's permissions, which on a payload published from a Windows host
+  # means 0664 and a non-executable Altim; build-linux.sh normalises the tree
+  # with chmod before packaging, and these entries pin the rest.
+  - src: packaging/linux/altim.desktop
+    dst: /usr/share/applications/altim.desktop
+    file_info:
+      mode: 0644
+
+  - src: assets/icons/altim-16.png
+    dst: /usr/share/icons/hicolor/16x16/apps/altim.png
+    file_info:
+      mode: 0644
+  - src: assets/icons/altim-24.png
+    dst: /usr/share/icons/hicolor/24x24/apps/altim.png
+    file_info:
+      mode: 0644
+  - src: assets/icons/altim-32.png
+    dst: /usr/share/icons/hicolor/32x32/apps/altim.png
+    file_info:
+      mode: 0644
+  - src: assets/icons/altim-48.png
+    dst: /usr/share/icons/hicolor/48x48/apps/altim.png
+    file_info:
+      mode: 0644
+  - src: assets/icons/altim-64.png
+    dst: /usr/share/icons/hicolor/64x64/apps/altim.png
+    file_info:
+      mode: 0644
+  - src: assets/icons/altim-128.png
+    dst: /usr/share/icons/hicolor/128x128/apps/altim.png
+    file_info:
+      mode: 0644
+  - src: assets/icons/altim-256.png
+    dst: /usr/share/icons/hicolor/256x256/apps/altim.png
+    file_info:
+      mode: 0644
+  - src: assets/icons/altim-512.png
+    dst: /usr/share/icons/hicolor/512x512/apps/altim.png
+    file_info:
+      mode: 0644
+
+  - src: LICENSE
+    dst: /usr/share/doc/altim/copyright
+    file_info:
+      mode: 0644
+
+overrides:
+  rpm:
+    # Fedora, RHEL and openSUSE disagree about package names for the same
+    # libraries, so the X11 set is required by soname, which every rpm distribution
+    # provides identically. The .NET group has no stable soname to ask for
+    # (libicu's changes every release), so those stay package names and follow
+    # Fedora/RHEL spelling.
+    depends:
+      - glibc
+      - libstdc++
+      - libz.so.1()(64bit)
+      - libicu
+      - openssl-libs
+      - krb5-libs
+      - libX11.so.6()(64bit)
+      - libICE.so.6()(64bit)
+      - libSM.so.6()(64bit)
+      - libXext.so.6()(64bit)
+      - libXi.so.6()(64bit)
+      - libXrandr.so.2()(64bit)
+      - libXcursor.so.1()(64bit)
+      - libXfixes.so.3()(64bit)
+      - libfontconfig.so.1()(64bit)
+    recommends:
+      - mesa-libGL
+      - dbus
+
+rpm:
+  group: Applications/System
+  compression: lzma
+
+deb:
+  compression: xz

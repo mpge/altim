@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template. build-macos.sh substitutes @SHORT_VERSION@ and @BUNDLE_VERSION@ and
+  writes the result into Altim.app/Contents/Info.plist.
+
+  LSUIElement is the half of the accessory-app story that the plist owns: it stops
+  the Dock tile and the menu bar appearing in the moment between launch and the
+  first line of managed code. It is not sufficient on its own. Avalonia calls
+  NSApplication.setActivationPolicy during initialisation and that call wins over
+  the plist, which is why Program.cs also passes
+  MacOSPlatformOptions { ShowInDock = false }. Remove either one and Altim becomes
+  a tray utility with a Dock icon and an application menu it has no windows for.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Altim</string>
+    <key>CFBundleExecutable</key>
+    <string>Altim</string>
+    <key>CFBundleIconFile</key>
+    <string>Altim</string>
+    <key>CFBundleIdentifier</key>
+    <string>dev.altim.Altim</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Altim</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@SHORT_VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@BUNDLE_VERSION@</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+
+    <!-- SMAppService's mainAppService selector, which is how Altim registers
+         itself to start at login, is macOS 13 and later. Nothing in the app has
+         a lower floor, so the bundle declares 13.0 rather than letting a macOS 12
+         user install something whose autostart silently does nothing. -->
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+
+    <!-- Accessory app: no Dock tile, no menu bar, no application switcher entry. -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright (c) 2026 mpge. MIT licensed.</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+</dict>
+</plist>
