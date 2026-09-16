@@ -4,6 +4,16 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
 
+  <!-- The shape tests reflect over every type a reader returns, which the trim and AOT
+       analysers cannot follow. A test project is never AOT published, so the analysers are
+       off here and stay on for everything they actually protect. -->
+  <PropertyGroup>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>false</EnableAotAnalyzer>
+    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\Altim.Providers\Altim.Providers.csproj" />
     <ProjectReference Include="..\..\src\Altim.Providers.Claude\Altim.Providers.Claude.csproj" />

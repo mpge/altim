@@ -4,4 +4,11 @@
     <ProjectReference Include="..\Altim.Providers\Altim.Providers.csproj" />
   </ItemGroup>
 
+  <!-- The Codex state database is opened read-only to find which sessions were active
+       recently, so the offline fallback tails a handful of files instead of walking a
+       28 GB session tree. Same package and same central version as Altim.Storage. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+  </ItemGroup>
+
 </Project>
