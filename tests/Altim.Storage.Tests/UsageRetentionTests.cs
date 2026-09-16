@@ -292,17 +292,31 @@ public sealed class UsageRetentionTests
         Arrange(temp);
 
         // Collapsing a month of history and rewriting the whole file are the two heaviest
-        // things Altim does to its database.
-        ValueTask<RetentionResult> downsampling = retention.DownsampleAsync(Now, Ct);
-        Assert.False(downsampling.IsCompleted);
+        // things Altim does to its database, and neither may run on the caller — a
+        // dashboard opening a chart would freeze for the duration.
+        //
+        // Holding the writer is what makes this deterministic. Each of these needs it, so
+        // while the lease is held none of them can finish; a task that is still pending
+        // therefore proves the work left this thread. Asserting "not yet completed" without
+        // the lease is a race the machine wins whenever it is fast enough, which is exactly
+        // how this test passed on a developer machine and failed on a CI runner.
+        ValueTask<RetentionResult> downsampling;
+        ValueTask compacting;
+        ValueTask<bool> due;
+
+        using (await database.LeaseWriterAsync(Ct))
+        {
+            downsampling = retention.DownsampleAsync(Now, Ct);
+            compacting = retention.VacuumAsync(Ct);
+            due = retention.VacuumIfDueAsync(Now, TimeSpan.FromDays(30), Ct);
+
+            Assert.False(downsampling.IsCompleted);
+            Assert.False(compacting.IsCompleted);
+            Assert.False(due.IsCompleted);
+        }
+
         _ = await downsampling;
-
-        ValueTask compacting = retention.VacuumAsync(Ct);
-        Assert.False(compacting.IsCompleted);
         await compacting;
-
-        ValueTask<bool> due = retention.VacuumIfDueAsync(Now, TimeSpan.FromDays(30), Ct);
-        Assert.False(due.IsCompleted);
         _ = await due;
     }
 
