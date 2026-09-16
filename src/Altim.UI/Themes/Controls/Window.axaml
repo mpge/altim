@@ -9,7 +9,14 @@
   is wider - AltimPopupWindowWidth, 320 plus the shadow inset on both sides - because the
   window is transparent room for the shadow to fall into and the panel is the thing the user
   sees. Positioning code therefore anchors the window, not the panel, and must subtract
-  AltimPopupShadowMargin to line the panel up with the tray icon.
+  the inset to line the panel up with the tray icon.
+
+  That inset reaches the panel through PopupChrome.ShadowInset rather than straight out of
+  AltimPopupShadowMargin, and this theme is what puts the token into it. Placement trims the
+  property on whichever edge is currently pointing at the tray icon, because room reserved
+  for a shadow is still window, and a window over a tray icon swallows the clicks meant for
+  it. Whatever sets the property owns Width with it: PART_PopupPanel is a fixed 320, so a
+  window sized for one inset and carrying another centres the panel and misplaces it.
 
   The panel does not clip to its bounds. A BoxShadow is drawn outside them, so clipping
   erases the one shadow in the system; and since ClipToBounds is a rectangular clip it never
@@ -29,7 +36,8 @@
   as working while doing nothing.
 -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:views="using:Altim.UI.Views">
 
   <ControlTheme x:Key="{x:Type Window}" TargetType="Window">
     <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
@@ -68,6 +76,7 @@
     <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
     <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
     <Setter Property="Width" Value="{DynamicResource AltimPopupWindowWidth}" />
+    <Setter Property="views:PopupChrome.ShadowInset" Value="{DynamicResource AltimPopupShadowMargin}" />
     <Setter Property="Template">
       <ControlTemplate TargetType="Window">
         <Panel>
@@ -80,7 +89,7 @@
                 <Border Name="PART_PopupPanel"
                         ClipToBounds="False"
                         Width="{DynamicResource AltimPopupWidth}"
-                        Margin="{DynamicResource AltimPopupShadowMargin}"
+                        Margin="{TemplateBinding (views:PopupChrome.ShadowInset)}"
                         Background="{DynamicResource AltimPopupBackgroundBrush}"
                         BorderBrush="{DynamicResource AltimBorderBrush}"
                         BorderThickness="{DynamicResource AltimBorderThickness}"

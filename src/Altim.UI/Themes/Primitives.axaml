@@ -92,7 +92,8 @@
        taller by the inset above and below: the panel is the 320 DESIGN.md specifies and
        the rest of the window is transparent room for the one shadow to fall into. The
        composition root positions the WINDOW, so it must subtract the inset to line the
-       panel up with the tray icon. See AltimPopupShadowMargin below. -->
+       panel up with the tray icon. This is the width for the whole inset; placement trims
+       one edge and owns the width while it does. See AltimPopupShadowMargin below. -->
   <x:Double x:Key="AltimPopupWindowWidth">368</x:Double>
   <x:Double x:Key="AltimStatusDotSize">6</x:Double>
   <x:Double x:Key="AltimLegendDotSize">8</x:Double>
@@ -163,7 +164,13 @@
        This inset is the difference between the window and the panel. The panel is 320
        wide; the window is 320 + 24 + 24 = 368 and starts 16 above the panel's top edge.
        Anything positioning that window against a tray icon must offset by this inset, or
-       the transparent margin lines up with the icon and the panel sits 24px off. -->
+       the transparent margin lines up with the icon and the panel sits 24px off.
+
+       It reaches the panel through PopupChrome.ShadowInset, which the popup window theme
+       sets from here. Placement cuts the property back to the 8pt gap on whichever edge
+       faces the tray icon, because reserved room is still window and a window over a tray
+       icon swallows the clicks meant for it. This stays the design's value: it is what the
+       shadow needs, and three of the four edges always get it. -->
   <Thickness x:Key="AltimPopupShadowMargin">24,16,24,32</Thickness>
 
   <!-- The absence of that shadow, as a token. A style that turns the shadow off has to set

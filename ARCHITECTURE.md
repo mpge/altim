@@ -29,7 +29,7 @@ Altim.Providers           provider contracts + shared JSONL/process helpers
 Altim.Providers.Claude     Claude Code integration
 Altim.Providers.Codex      OpenAI Codex integration
 Altim.Storage              SQLite: schema, migrations, history, settings
-Altim.UI                   Avalonia views, view models, design system, custom controls
+Altim.UI                   Avalonia views, view models, design system, custom controls, popup geometry
 Altim.Platform.Windows     Shell_NotifyIcon host, AppNotification, Run key, power events
 Altim.Platform.MacOS       NSStatusItem interop, UNUserNotificationCenter, SMAppService
 Altim.Platform.Linux       StatusNotifierItem, org.freedesktop.Notifications, XDG autostart
@@ -221,6 +221,13 @@ Positioning uses a three-tier anchor: exact tray rect where the OS gives one, cu
 click time, then the working-area corner. Screen coordinates are physical pixels while window size
 is in device-independent units, so all arithmetic uses the *target* screen's scaling — including
 margins — and clamps to the working area. Positioning happens after layout, not before `Show()`.
+It is `PopupPlacement` in `Altim.UI`, a pure function over rectangles with no window in it, which
+is what lets a taskbar on each of the four edges be asserted without four displays.
+
+The placement also owns the window's shadow inset, and returns it with the position. The window is
+the panel plus that inset, the inset is transparent, and transparent window still hit tests — so on
+whichever edge faces the tray icon it is trimmed back to the gap the panel already keeps from it.
+See the Windows notes below for the defect that came from not doing this.
 
 Two platform caveats the arithmetic has to respect. **macOS screen coordinates start at the bottom
 left**, so a status item's frame is flipped before it reaches the shared placement code. **Linux
@@ -255,7 +262,8 @@ while the foreground window is the shell's tray window; Windows 11 hides new tra
 overflow by default, which first-run onboarding explains rather than tries to defeat.
 
 Four Windows details were established by measurement rather than documentation. The code depends on
-the first three; the fourth is a defect that is recorded rather than fixed.
+all four; the third was a shipped defect, and what it cost is why the fix is described rather than
+just applied.
 
 - **Asking for the icon's rectangle does not fail while the icon sits in the overflow.** On
   Windows 11 26200 it succeeds and returns the *chevron's* rectangle, which is geometrically
@@ -270,16 +278,23 @@ the first three; the fourth is a defect that is recorded rather than fixed.
   collapses the primary-activation family to one `Clicked` per press. The menu path needs no
   guard because Windows refuses a second `TrackPopupMenuEx` while one is already tracking, so
   the duplicate is inert — verified, rather than assumed.
-- **The panel's shadow inset covers the top half of the tray icon, and it swallows clicks.**
+- **Room reserved for a shadow is still window, and a window over a tray icon eats its clicks.**
   The window is larger than the visible panel so the shadow has room to fall, and the panel is
-  positioned 8 DIPs above the icon, which puts the window's bottom edge 24 DIPs *past* the
-  icon's top. Measured with `WindowFromPoint` on a bottom taskbar at 100%: the panel window owns
-  the pixels from y=1044 to y=1055 over the icon and the shell owns 1056 down. A click on the
-  lower half of the icon toggles the panel as it should; a click on the upper half lands on
-  transparent window and does nothing. It is not fixable by placement without moving the panel
-  24 DIPs further from the icon than DESIGN.md asks for, and Avalonia 12.1.2 exposes no window
-  procedure hook to answer `WM_NCHITTEST` with `HTTRANSPARENT` — `Win32Properties` is internal.
-  Left as it stands and recorded here, because both fixes are decisions rather than repairs.
+  positioned 8 DIPs above the icon while reserving 32 below itself, which put the window's bottom
+  edge 24 DIPs *past* the icon's top. Measured with `WindowFromPoint` on a bottom taskbar at 100%:
+  the panel window owned the pixels from y=1044 to y=1055 over an icon at y=1044, and the shell
+  owned 1056 down — so a click on the lower half of the icon toggled the panel and a click on the
+  upper half did nothing at all, which reads as a tray icon that does not work. **Fixed** by
+  trimming the inset on the edge facing the anchor back to that 8 DIP gap: past the panel's near
+  edge the taskbar covers that side's shadow anyway, so the only thing given up is room nothing
+  could see, and the panel does not move. The window now ends at y=1032, the working area's own
+  edge, and every row of the icon toggles. `PopupPlacement` returns the trimmed inset with the
+  position and `PopupHost` applies it to the window — to the panel's margin *and* to the window's
+  width, because `PART_PopupPanel` is a fixed 320 in a stretched slot and a window sized for the
+  untrimmed inset centres the panel in the difference. The two alternatives were worse: moving the
+  panel 24 DIPs further from the icon than DESIGN.md asks for is a visible change to pay for an
+  invisible one, and answering `WM_NCHITTEST` with `HTTRANSPARENT` needs a window procedure hook
+  Avalonia 12.1.2 does not expose — `Win32Properties` is internal.
 - **A broadcast cannot reach a message-only window.** The icon lives on the message-only window as
   intended, but Explorer's restart notice is a broadcast, so a second never-shown top-level window
   receives it, owns the native menu (bringing a menu to the foreground needs a top-level owner) and

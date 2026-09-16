@@ -261,6 +261,12 @@ transparent, because that is the room the one shadow falls into; anything positi
 window against the tray icon subtracts that inset. Where the compositor grants no transparency
 the shadow goes and the inset paints in the panel's own ground, never as unpainted black.
 
+On the one edge pointing at the tray icon the inset is cut back to the 8 the panel already
+stands off it. Reserved room is still window and a window over a tray icon swallows the clicks
+meant for it, and on that edge there is nothing to give up: past the panel's near edge the
+taskbar the icon sits in covers the shadow. The panel does not move, and the other three edges
+keep the whole inset.
+
 ## Motion
 
 Only in response to something changing: meter fill 180ms ease-out, popup fade+4px rise 120ms,

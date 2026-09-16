@@ -48,6 +48,7 @@ internal sealed class PopupHost : IDisposable
     private readonly PopupWindow _window;
     private readonly PopupViewModel _viewModel;
 
+    private Thickness? _chrome;
     private CoreRect? _lastAnchor;
     private PixelPoint? _lastCursor;
     private long _openedAt;
@@ -220,8 +221,45 @@ internal sealed class PopupHost : IDisposable
             size = new Size(_window.Width, _window.Height);
         }
 
-        _window.Position = PopupPlacement.Compute(
-            _lastAnchor, _lastCursor, workingArea, scaling, size, ShadowInset());
+        // The window is the panel plus whichever inset it is currently carrying, so the
+        // panel is what is left when that one is taken back off — not the design's, which
+        // is a different number on any open that trimmed it.
+        Thickness design = ShadowInset();
+        Thickness carried = _chrome ?? design;
+        var panel = new Size(
+            Math.Max(1d, size.Width - carried.Left - carried.Right),
+            Math.Max(1d, size.Height - carried.Top - carried.Bottom));
+
+        PopupPlacementResult placed = PopupPlacement.Compute(
+            _lastAnchor, _lastCursor, workingArea, scaling, panel, design);
+
+        Reserve(placed.ShadowInset, panel.Width);
+        _window.Position = placed.Position;
+    }
+
+    /// <summary>
+    /// Gives the window the transparent room the placement assumed it had.
+    /// </summary>
+    /// <remarks>
+    /// Placement trims the inset on the edge facing the tray icon, because that room is
+    /// still window and a window over a tray icon swallows the clicks meant for it. The
+    /// window has to be told, twice over: the panel's margin is the inset, and the window's
+    /// width is the panel plus the inset either side — <c>SizeToContent</c> handles the
+    /// height but the width is the theme's, and a window sized for one inset while its panel
+    /// carries another centres the panel inside the difference.
+    /// </remarks>
+    /// <param name="inset">The inset placement computed with.</param>
+    /// <param name="panelWidth">The panel's width in device-independent units.</param>
+    private void Reserve(Thickness inset, double panelWidth)
+    {
+        if (_chrome == inset)
+        {
+            return;
+        }
+
+        _chrome = inset;
+        PopupChrome.SetShadowInset(_window, inset);
+        _window.Width = panelWidth + inset.Left + inset.Right;
     }
 
     private Screen? PickScreen()

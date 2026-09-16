@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Altim.UI.Controls;
+using Altim.UI.Views;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -196,6 +197,60 @@ public sealed class PixelTests
         Assert.True(
             frame.Any(under, colour => colour.A is > 0 and < 0xFF),
             $"The area under the panel is not a blur: {frame.Describe(under)}");
+    }
+
+    /// <summary>
+    /// The window the placement code trims, drawn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The inset on the edge facing the tray icon is transparent window lying over the icon,
+    /// and a window over a tray icon swallows the clicks meant for it, so placement cuts that
+    /// side back to the gap the panel already keeps. The panel must not move when it does:
+    /// the trim is only meant to give up shadow room the taskbar was covering.
+    /// </para>
+    /// <para>
+    /// Both halves of that have to happen together. <c>PART_PopupPanel</c> is a fixed 320
+    /// inside a stretched slot, so a window still sized for the whole inset centres the panel
+    /// in what is left and puts it 8px off the position the arithmetic computed — a fault
+    /// worth a pixel test, because every property in the object graph reads correctly while
+    /// it happens. A left-hand taskbar is the case that exercises it, and it is the one that
+    /// cannot be reproduced on a Windows 11 machine, where the taskbar only goes at the foot.
+    /// </para>
+    /// </remarks>
+    [AvaloniaFact]
+    public void ATrimmedShadowInsetMovesTheWindowRatherThanThePanel()
+    {
+        Window window = DesignSystem.PopupWindow(transparent: true, ThemeVariant.Light);
+        using PixelHost host = PixelHost.Show(window);
+
+        Border panel = PixelHost.Part<Border>(window, "PART_PopupPanel");
+        Assert.Equal(new Thickness(24d, 16d, 24d, 32d), panel.Margin);
+        Assert.Equal(24d, host.BoundsOf(panel).X, 6);
+
+        // What placement hands back beside a left-hand taskbar: the panel's left edge faces
+        // the icon, so that side is trimmed and the window is narrowed by the difference.
+        var trimmed = new Thickness(PopupPlacement.Gap, 16d, 24d, 32d);
+        PopupChrome.SetShadowInset(window, trimmed);
+        window.Width = 320d + trimmed.Left + trimmed.Right;
+
+        Frame frame = host.Capture();
+        Rect bounds = host.BoundsOf(panel);
+
+        Assert.Equal(trimmed, panel.Margin);
+        Assert.Equal(320d, bounds.Width, 6);
+        Assert.Equal(PopupPlacement.Gap, bounds.X, 6);
+        Assert.Equal(16d, bounds.Y, 6);
+
+        // And on the screen: the panel is still 320 solid pixels, now 8 from the window's
+        // own edge rather than 24.
+        int row = (int)Math.Round(bounds.Y + (bounds.Height / 2d));
+        int span = frame.SpanAt(row, colour => colour.A >= 0x80);
+
+        Assert.True(
+            span == 320,
+            $"The panel spans {span} pixels on row {row}, not 320: "
+                + frame.Describe(new Rect(0d, row, frame.Width, 1d), take: 8));
     }
 
     /// <summary>

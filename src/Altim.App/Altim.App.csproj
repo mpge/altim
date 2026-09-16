@@ -78,6 +78,27 @@
     <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
   </ItemGroup>
 
+  <!-- Packaging identity. One version number reaches every artefact: the Velopack
+       release and its Setup.exe, the .deb and .rpm, the AppImage file name and the
+       macOS CFBundleShortVersionString are all derived from $(Version). The release
+       workflow overrides it from the tag with -p:Version=, so this default is what a
+       local `dotnet publish` stamps and nothing more. -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <AssemblyTitle>Altim</AssemblyTitle>
+    <Description>AI usage, at a glance.</Description>
+    <Authors>mpge</Authors>
+    <Copyright>Copyright (c) 2026 mpge</Copyright>
+  </PropertyGroup>
+
+  <!-- Publish payload. The app has no localised resources of its own, and neither
+       does anything it ships; this keeps a dependency that gains satellite assemblies
+       later from quietly adding a folder per language to every installer. -->
+  <PropertyGroup>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+
   <ItemGroup>
     <ProjectReference Include="..\Altim.UI\Altim.UI.csproj" />
     <ProjectReference Include="..\Altim.Storage\Altim.Storage.csproj" />
@@ -97,6 +118,20 @@
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <!-- Velopack is the Windows installer and updater. It is referenced here rather
+       than in a platform project because the one call it needs — VelopackApp.Build().Run()
+       as the first statement in Main — belongs to the entry point, and because the
+       package is inert on the platforms that do not use it.
+
+       VersionOverride, not Version: this repository manages package versions centrally
+       and the pin belongs in Directory.Packages.props as
+       <PackageVersion Include="Velopack" Version="1.2.0" />. Move it there and delete
+       the attribute; it is written this way only so that packaging could land without
+       editing a file it does not own. -->
+  <ItemGroup>
+    <PackageReference Include="Velopack" VersionOverride="1.2.0" />
   </ItemGroup>
 
   <!-- The Avalonia developer tools are compiled in for Debug and stripped from
