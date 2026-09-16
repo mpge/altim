@@ -85,6 +85,13 @@ public sealed class AltimDatabase : IDisposable
     private readonly SqliteConnection _writer;
     private readonly string _readConnectionString;
     private long _lastWriteTicks = Environment.TickCount64;
+
+    /// <summary>
+    /// The writer connection's row-change counter as the current lease found it. Only ever
+    /// touched by the one caller holding the write gate.
+    /// </summary>
+    private long _leaseChangeMark;
+
     private int _disposed;
 
     private AltimDatabase(string databasePath, SqliteConnection writer, string readConnectionString,
@@ -417,7 +424,9 @@ public sealed class AltimDatabase : IDisposable
             throw new ObjectDisposedException(nameof(AltimDatabase));
         }
 
-        Volatile.Write(ref _lastWriteTicks, Environment.TickCount64);
+        // Where the lease starts from, so releasing it can tell whether anything was
+        // actually written. See ReleaseWriter.
+        _leaseChangeMark = TotalChanges();
         return new WriteLease(this, _writer);
     }
 
@@ -530,9 +539,24 @@ public sealed class AltimDatabase : IDisposable
 
     internal void ReleaseWriter()
     {
-        // Measured from the end of the write rather than the start, so a long transaction
-        // does not make the database look idle the moment it commits.
-        Volatile.Write(ref _lastWriteTicks, Environment.TickCount64);
+        // **Only when something was written.** This clock is read by
+        // CheckpointIfIdleAsync, and it has to mean "the database was last written", not
+        // "the writer was last held" — because holding the writer to find out there is
+        // nothing to do is something Altim does constantly. The history service, the
+        // notification state, the down-sampler and the vacuum check all take the writer on
+        // every maintenance pass and usually change nothing, and two of them run in the
+        // same method that then asks whether the database has been idle for two minutes.
+        // Stamping on the take made that question answer "no" every single time, so the
+        // checkpoint that empties the write-ahead log was unreachable by construction:
+        // measured over nine minutes with both provider stores empty and nothing to report,
+        // it never ran once.
+        //
+        // Measured from the end rather than the start, so a long transaction does not make
+        // the database look idle the moment it commits.
+        if (TotalChanges() != _leaseChangeMark)
+        {
+            Volatile.Write(ref _lastWriteTicks, Environment.TickCount64);
+        }
 
         try
         {
@@ -545,6 +569,39 @@ public sealed class AltimDatabase : IDisposable
         }
         catch (SemaphoreFullException)
         {
+        }
+    }
+
+    /// <summary>
+    /// The writer connection's count of rows inserted, updated or deleted since it was
+    /// opened.
+    /// </summary>
+    /// <returns>
+    /// The count, or a value that cannot match the mark when it could not be read — an
+    /// unreadable counter is treated as a write, because the cost of that is a checkpoint
+    /// deferred by five minutes and the cost of the opposite is a checkpoint that runs while
+    /// something is writing.
+    /// </returns>
+    /// <remarks>
+    /// <c>total_changes()</c> counts row changes and nothing else, which is exactly the
+    /// question: a <c>VACUUM</c> or a checkpoint rewrites the file without changing a row,
+    /// and neither of those is a reason to call the database busy.
+    /// </remarks>
+    private long TotalChanges()
+    {
+        try
+        {
+            using SqliteCommand command = _writer.CreateCommand();
+            command.CommandText = "SELECT total_changes()";
+            return command.ExecuteScalar() as long? ?? unchecked(_leaseChangeMark + 1);
+        }
+        catch (SqliteException)
+        {
+            return unchecked(_leaseChangeMark + 1);
+        }
+        catch (InvalidOperationException)
+        {
+            return unchecked(_leaseChangeMark + 1);
         }
     }
 

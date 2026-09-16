@@ -224,16 +224,14 @@ public sealed class NotificationStateStore
     /// evaluator returns a complete next state on every reading, and almost every reading
     /// leaves it identical: nothing has crossed a threshold and no window has rolled over.
     /// Rewriting it anyway is a delete plus an insert per row inside a write transaction,
-    /// several times a minute while an agent works — which keeps the write-ahead log hot for
-    /// no reason, and, worse, takes the writer often enough that the maintenance pass's
-    /// "nothing has written for two minutes" test never comes true. The idle checkpoint that
-    /// empties the log therefore never ran while an agent was working, which is exactly when
-    /// the log is growing.
+    /// several times a minute while an agent works, and every one of those commits is
+    /// write-ahead log the checkpoint then has to carry — for a table that has not changed
+    /// since the last time it was written.
     /// </para>
     /// <para>
     /// The comparison is against what this process last wrote rather than against a read of
-    /// the table, so the skip costs nothing at all: no connection, no writer lease, and
-    /// therefore nothing that resets the idle clock.
+    /// the table, so the skip costs nothing at all: no connection, no writer lease, and no
+    /// transaction.
     /// </para>
     /// </remarks>
     public async ValueTask<bool> ReplaceAllAsync(IReadOnlyList<NotificationState> fired,

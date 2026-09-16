@@ -122,15 +122,18 @@ a rolling window of at most a month of raw samples. The write-ahead log in front
 capped at roughly 1MB while Altim is working and emptied once two minutes pass with no write —
 SQLite's own default would leave it sitting at 3.9MB for ever.
 
-That last part only recently became true, and two things had to change for it. The notification
-state was rewritten on every reading — a delete plus an insert per row, inside a write transaction
-— whether or not anything had changed, which is most readings; and the history recorded nothing on
-an unchanged reading but took the writer to work that out. The database is marked as recently
-written when the writer is *taken*, not when something reaches the file, so two minutes never
-passed without a write while an agent was working and the idle checkpoint never ran at exactly the
-times the log was growing. The log sat at 869KB in front of a 397KB database. Both comparisons now
-happen before the writer is asked for: the notification state against what this process last wrote,
-and the history on a read connection.
+**That last part was not true, and finding out is what this change is.** The clock the
+checkpoint reads was stamped when the writer was *taken*, and Altim takes the writer constantly to
+find out there is nothing to do — the history service, the notification state, the down-sampler and
+the vacuum check. The maintenance pass runs two of those in the same method that then asks whether
+two minutes have passed without a write, so the answer was always no and the checkpoint was
+unreachable by construction. Measured over nine minutes with both provider stores empty and nothing
+whatever to report, it never ran once, and the log sat at 869KB in front of a 397KB database.
+
+The clock now means what it says: a lease stamps it only when it actually changed a row. Two of the
+callers were also asking for the writer when they had nothing to write — the notification state was
+rewritten on every reading whether or not it had changed, and the history took the writer to
+discover that a reading had not moved — and both now compare before the writer is asked for.
 
 ### How to measure it yourself
 

@@ -457,22 +457,20 @@ public sealed class SqliteUsageHistoryServiceTests
         => history.GetRangeAsync("claude", from, to, Ct);
 
     /// <summary>
-    /// A reading that did not move writes no row, and — the part this asserts — does not
-    /// take the writer either.
+    /// A reading that did not move writes no row, and does not ask for the writer to find
+    /// that out.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The comparison used to happen inside a write transaction, which is invisible in the
-    /// file and very visible in the maintenance pass: <see cref="AltimDatabase"/> marks the
-    /// database as recently written when the writer is <em>taken</em>, not when something is
-    /// written to it. So readings arriving once a minute meant two minutes never passed
-    /// without a write, and the checkpoint that empties the write-ahead log never ran while
-    /// an agent was working — which is the only time the log grows.
+    /// The comparison used to happen inside a write transaction. Most readings leave every
+    /// metric exactly where it was, so most readings opened a transaction, found nothing to
+    /// do and committed nothing — while holding the one writer the whole process shares, and
+    /// queueing behind them anything else that wanted it.
     /// </para>
     /// <para>
-    /// Asserted through <see cref="AltimDatabase.CheckpointIfIdleAsync"/>, which is the
-    /// caller that actually cares, with a control either side: a reading that did move is
-    /// still recent enough to refuse the checkpoint.
+    /// Asserted by holding the writer from here: an unchanged reading has to finish anyway,
+    /// and a changed one cannot. Nothing in this depends on how long anything takes, only on
+    /// whether it can complete while the writer is held somewhere else.
     /// </para>
     /// </remarks>
     [Fact]
@@ -482,20 +480,37 @@ public sealed class SqliteUsageHistoryServiceTests
         AltimDatabase database = temp.Open();
         var history = new SqliteUsageHistoryService(database);
 
-        TimeSpan idleWindow = TimeSpan.FromMilliseconds(250);
-
-        // The control: a reading that moved has just taken the writer, so the database is
-        // not idle and the checkpoint is refused.
         await history.RecordAsync(Usage(Origin, Metric("five_hour", 41.5)), Ct);
-        Assert.Equal(WalCheckpoint.Skipped, await database.CheckpointIfIdleAsync(idleWindow, Ct));
 
-        // Well clear of the window, so anything that takes the writer from here resets it.
-        await Task.Delay(TimeSpan.FromMilliseconds(600), Ct);
+        Task changed;
+        using (WriteLease held = await database.LeaseWriterAsync(Ct))
+        {
+            // The same value again: the read says there is nothing to write, so the writer
+            // is never asked for and this finishes while somebody else holds it.
+            Task unchanged = history
+                .RecordAsync(Usage(Origin.AddMinutes(1), Metric("five_hour", 41.5)), Ct)
+                .AsTask();
 
-        await history.RecordAsync(Usage(Origin.AddMinutes(1), Metric("five_hour", 41.5)), Ct);
+            // Throws a TimeoutException if it did not finish, which is the failure this
+            // test is for: an unchanged reading waiting for a writer it has no use for.
+            await unchanged.WaitAsync(TimeSpan.FromSeconds(5), Ct);
 
-        Assert.NotEqual(WalCheckpoint.Skipped, await database.CheckpointIfIdleAsync(idleWindow, Ct));
-        Assert.Equal(1L, temp.CountRows("usage_sample"));
+            // The control: a value that moved does need the writer, and waits for it.
+            changed = history
+                .RecordAsync(Usage(Origin.AddMinutes(2), Metric("five_hour", 42.0)), Ct)
+                .AsTask();
+
+            // And the control has to be blocked, or the assertion above proves nothing.
+            _ = await Assert.ThrowsAsync<TimeoutException>(
+                async () => await changed.WaitAsync(TimeSpan.FromMilliseconds(300), Ct));
+        }
+
+        await changed;
+
+        IReadOnlyList<UsageSample> samples = await Range(history, Origin, Origin.AddHours(1));
+
+        Assert.Equal(2, samples.Count);
+        Assert.Equal(42.0, samples[1].UsedPercent);
     }
 
     private static ProviderUsage Usage(DateTimeOffset at, params UsageMetric[] metrics)

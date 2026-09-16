@@ -199,7 +199,17 @@ The write-ahead log is bounded, which it is not by default. SQLite checkpoints a
 the file settles at whatever high-water mark it ever reached and stays there: measured at 3.9 MB
 in front of a 240 KB database. Altim checkpoints at 256 pages, sets `journal_size_limit` **after**
 entering WAL mode so a reset truncates rather than rewinds, and runs a `TRUNCATE` checkpoint from
-the maintenance pass once nothing has written for two minutes. None of that trades durability:
+the maintenance pass once nothing has written for two minutes.
+
+**"Nothing has written" has to mean what it says, and for a long time it did not.** The clock was
+stamped when the writer was *taken*, and taking the writer to find out there is nothing to do is
+something Altim does constantly: the history service, the notification state, the down-sampler and
+the vacuum check all do it, and the maintenance pass runs two of them in the same method that then
+asks the question. The answer was always "something has written", so the checkpoint was unreachable
+by construction — measured over nine minutes with both provider stores empty and nothing to report,
+it never ran once. A lease now stamps the clock only when it changed a row, which is asked of
+SQLite's own `total_changes()` rather than of each caller's good intentions; and the two callers
+that were opening a write transaction to discover they had nothing to write now compare first. None of that trades durability:
 `synchronous` stays `NORMAL`, a checkpoint only moves already-committed frames and flushes before
 resetting, and a process that is killed still has its writes replayed from the log on the next
 open.

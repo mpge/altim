@@ -389,6 +389,59 @@ public sealed class AltimDatabaseTests
     }
 
     /// <summary>
+    /// Holding the writer is not writing, and the difference is what makes the checkpoint
+    /// reachable at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The idle clock is read by <see cref="AltimDatabase.CheckpointIfIdleAsync"/>, and it
+    /// used to be stamped when the writer was <em>taken</em>. Altim takes the writer
+    /// constantly to find out there is nothing to do — the history service, the notification
+    /// state, the down-sampler and the vacuum check — and the maintenance pass runs two of
+    /// those in the same method that then asks whether two minutes have passed without a
+    /// write. The answer was always no, so the checkpoint that empties the write-ahead log
+    /// was unreachable: measured over nine minutes with both provider stores empty and
+    /// nothing whatever to report, it never ran once.
+    /// </para>
+    /// <para>
+    /// This is the maintenance pass, in its own order, against a database that has just been
+    /// written to and then left alone.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task HoldingTheWriterWithNothingToWriteLeavesTheDatabaseIdle()
+    {
+        using var temp = new TempDatabase();
+        AltimDatabase database = temp.Open();
+        var retention = new UsageRetention(database);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        TimeSpan idleWindow = TimeSpan.FromMilliseconds(250);
+
+        // The first vacuum check writes: it starts the clock rather than compacting.
+        _ = await retention.VacuumIfDueAsync(now, TimeSpan.FromDays(30), Ct);
+
+        // Inside the retention window, so the down-sampler below has nothing to collapse —
+        // which is the ordinary case it runs in, since it only touches rows a month old.
+        using (WriteLease lease = await database.LeaseWriterAsync(Ct))
+        {
+            Execute(lease.Connection,
+                    "INSERT INTO usage_sample (provider_id, metric_key, captured_at, used_percent) " +
+                    $"VALUES ('claude', 'five_hour', {now.ToUnixTimeSeconds()}, 10)");
+        }
+
+        // The control: something really was written, so the database is not idle.
+        Assert.Equal(WalCheckpoint.Skipped, await database.CheckpointIfIdleAsync(idleWindow, Ct));
+
+        await Task.Delay(TimeSpan.FromMilliseconds(600), Ct);
+
+        // The maintenance pass, in order. Both take the writer; neither has anything to do.
+        _ = await retention.DownsampleAsync(now, Ct);
+        _ = await retention.VacuumIfDueAsync(now, TimeSpan.FromDays(30), Ct);
+
+        Assert.NotEqual(WalCheckpoint.Skipped, await database.CheckpointIfIdleAsync(idleWindow, Ct));
+    }
+
+    /// <summary>
     /// The log line that says the database opened names the kind of directory, never the
     /// directory. On every platform Altim supports the configuration directory is inside the
     /// user's profile, so the path contains the account name — and <c>altim.log</c> is a file

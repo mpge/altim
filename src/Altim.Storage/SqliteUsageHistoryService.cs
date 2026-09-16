@@ -92,11 +92,10 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
 
         // Asked on a read connection, before the writer is taken. Almost every reading
         // leaves every metric where it was, and the comparison below would then open a
-        // write transaction, find nothing to do and commit nothing — which is invisible in
-        // the file and very visible in the maintenance pass, because taking the writer at
-        // all is what marks the database as recently written. Two minutes never passed
-        // without a write while an agent was working, so the checkpoint that empties the
-        // write-ahead log never ran at exactly the times the log was growing.
+        // write transaction, find nothing to do and commit nothing — a transaction, a
+        // commit and a queue behind the single writer, all to discover that history has
+        // not moved. The read is the cheap half of the same question and it blocks
+        // nobody.
         if (!await HasChangesAsync(usage, ct).ConfigureAwait(false))
         {
             return;
