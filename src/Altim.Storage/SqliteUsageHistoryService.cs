@@ -234,7 +234,9 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
 
     private static SampleValues ToValues(UsageMetric metric, TokenTotals? tokens)
     {
-        double? usedPercent = metric.IsUsedPercentReported ? metric.UsedPercent : null;
+        // ReportedPercent, not the raw value: a provider defect can report 101, and history
+        // must never store a figure the UI would refuse to render.
+        double? usedPercent = metric.ReportedPercent;
         long? windowMinutes = metric.Window is null
             ? null
             : (long)Math.Round(metric.Window.Length.TotalMinutes, MidpointRounding.AwayFromZero);
