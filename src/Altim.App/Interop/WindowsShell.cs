@@ -1,6 +1,7 @@
 #if WINDOWS
 
 using System.Runtime.InteropServices;
+using Altim.UI.Views;
 using Avalonia;
 
 namespace Altim.App.Interop;
@@ -16,30 +17,17 @@ namespace Altim.App.Interop;
 /// cursor is then the only thing that knows where the user actually clicked.
 /// </para>
 /// <para>
-/// <see cref="ForegroundBelongsToTrayOrSelf"/> is the fix for the click that would otherwise
-/// open and immediately close the panel. Clicking the tray icon deactivates the panel, so a
-/// handler that closed on every deactivation would close the panel the click is about to
-/// reopen. The shell's own windows and Altim's own windows are therefore not real
-/// deactivations.
+/// <see cref="ForegroundOwner"/> reads the three facts that decide whether a deactivation is
+/// the user clicking away: whether there is a foreground window, whether it is one of ours,
+/// and what its class is. It decides nothing itself — <see cref="PopupDismissal"/> does, and
+/// it lives in <c>Altim.UI</c> beside <see cref="PopupPlacement"/> because, like the
+/// placement arithmetic, it is a pure function that can be asserted without a screen.
 /// </para>
 /// </remarks>
 internal static unsafe partial class WindowsShell
 {
-    /// <summary>
-    /// Window classes that belong to the notification area rather than to an application.
-    /// The last two are the Windows 11 overflow flyout, which is a XAML island rather than
-    /// the classic overflow window.
-    /// </summary>
-    private static readonly string[] TrayClasses =
-    [
-        "Shell_TrayWnd",
-        "Shell_SecondaryTrayWnd",
-        "TrayNotifyWnd",
-        "NotifyIconOverflowWindow",
-        "TopLevelWindowForOverflowXamlIsland",
-        "Windows.UI.Core.CoreWindow",
-        "XamlExplorerHostIslandWindow",
-    ];
+    /// <summary>Longest window class name Windows will register, plus a terminator.</summary>
+    private const int ClassNameCapacity = 257;
 
     /// <summary>The cursor's position in physical pixels, or null when Windows refused.</summary>
     public static PixelPoint? CursorPosition()
@@ -49,51 +37,41 @@ internal static unsafe partial class WindowsShell
     }
 
     /// <summary>
-    /// True when the window that took the foreground is the shell's tray, the overflow
-    /// flyout, or one of Altim's own windows — none of which is a reason to close the panel.
+    /// Who owns the window that currently holds the foreground.
     /// </summary>
-    /// <remarks>
-    /// An unknown foreground window, which is what a race during the transition reports,
-    /// is also treated as "not a real deactivation": leaving the panel open one click too
-    /// long is a smaller failure than making the tray icon look broken.
-    /// </remarks>
-    public static bool ForegroundBelongsToTrayOrSelf()
+    /// <returns>
+    /// <see cref="PopupForegroundOwner.Self"/>, <see cref="PopupForegroundOwner.Tray"/> or
+    /// <see cref="PopupForegroundOwner.Other"/> when Windows named a window, and
+    /// <see cref="PopupForegroundOwner.Unknown"/> while it will not — which is a state to
+    /// re-read a moment later rather than a verdict, because activation moving from one
+    /// window to another passes through it.
+    /// </returns>
+    public static PopupForegroundOwner ForegroundOwner()
     {
         IntPtr foreground = GetForegroundWindow();
         if (foreground == IntPtr.Zero)
         {
-            return true;
+            return PopupForegroundOwner.Unknown;
         }
 
         uint processId = 0;
         _ = GetWindowThreadProcessId(foreground, &processId);
         if (processId == (uint)Environment.ProcessId)
         {
-            return true;
+            return PopupForegroundOwner.Self;
         }
 
-        Span<char> buffer = stackalloc char[128];
+        Span<char> buffer = stackalloc char[ClassNameCapacity];
         int length;
         fixed (char* start = buffer)
         {
             length = GetClassNameW(foreground, start, buffer.Length);
         }
 
-        if (length <= 0)
-        {
-            return true;
-        }
-
-        ReadOnlySpan<char> name = buffer[..length];
-        foreach (string candidate in TrayClasses)
-        {
-            if (name.Equals(candidate, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return PopupDismissal.Classify(
+            hasForegroundWindow: true,
+            isOwnProcess: false,
+            length > 0 ? buffer[..length] : ReadOnlySpan<char>.Empty);
     }
 
     [LibraryImport("user32.dll", SetLastError = true)]

@@ -13,9 +13,9 @@
 # AppImage runtime.
 #
 # The runtime also exports APPIMAGE, holding the absolute path of the .AppImage
-# file itself. Altim does not read it yet, and until it does, "start at login" from
-# inside an AppImage writes an autostart entry pointing at this mount point, which
-# does not survive a reboot. See packaging/README.md, "Known gaps".
+# file itself. LinuxAutoStartService reads it and registers that path rather than
+# the one under this mount point, which does not survive a reboot. Nothing here has
+# to pass it on: it is already in the environment the payload inherits.
 set -eu
 
 HERE="$(dirname "$(readlink -f "$0")")"

@@ -21,6 +21,17 @@ namespace Altim.Platform.Linux;
 /// hundred bytes.
 /// </para>
 /// <para>
+/// <b>Inside an AppImage the running executable is the wrong thing to register.</b> The
+/// AppImage runtime mounts the image on a temporary directory and starts the program from
+/// inside it, so <see cref="Environment.ProcessPath"/> reads
+/// <c>/tmp/.mount_Altim&lt;random&gt;/usr/bin/Altim</c> — a path that is unmounted when the
+/// process ends and has a different random suffix the next time. An entry written from it
+/// points at nothing on the next boot, and the failure is silent: the file is there, the
+/// session manager runs it, and nothing starts. The runtime exports <c>APPIMAGE</c> with the
+/// image file's own path for exactly this, and <see cref="ResolveExecutablePath"/> prefers
+/// it.
+/// </para>
+/// <para>
 /// A session with no writable config home reports false and accepts a write that does
 /// nothing, which <see cref="IAutoStartService"/> already tells callers to expect.
 /// </para>
@@ -29,6 +40,17 @@ public sealed class LinuxAutoStartService : IAutoStartService
 {
     /// <summary>The desktop file id Altim registers under, without its suffix.</summary>
     public const string DefaultEntryName = "altim";
+
+    /// <summary>
+    /// The variable the AppImage runtime exports, holding the path of the image file itself.
+    /// </summary>
+    /// <remarks>
+    /// Set by the runtime that every AppImage is built around, before the payload runs. Its
+    /// absence is the signal that this is an ordinary installation — a <c>.deb</c>, an
+    /// <c>.rpm</c> or a build tree — where the running executable is already the right thing
+    /// to register.
+    /// </remarks>
+    public const string AppImageVariable = "APPIMAGE";
 
     private readonly string _entryName;
     private readonly string? _autostartDirectory;
@@ -46,7 +68,8 @@ public sealed class LinuxAutoStartService : IAutoStartService
     /// <c>XDG_CONFIG_HOME</c> and then <c>HOME</c>.
     /// </param>
     /// <param name="executablePath">
-    /// The executable to register, or <see langword="null"/> for the running process.
+    /// The executable to register, or <see langword="null"/> to resolve it from
+    /// <c>APPIMAGE</c> and then the running process.
     /// </param>
     /// <param name="displayName">The name session managers show.</param>
     /// <param name="comment">One sentence of description.</param>
@@ -66,10 +89,56 @@ public sealed class LinuxAutoStartService : IAutoStartService
 
         _entryName = entryName;
         _autostartDirectory = autostartDirectory ?? XdgDirectories.CurrentAutostartDirectory();
-        _executablePath = executablePath ?? Environment.ProcessPath;
+        _executablePath = ResolveExecutablePath(
+            executablePath,
+            Environment.GetEnvironmentVariable(AppImageVariable),
+            Environment.ProcessPath);
         _displayName = displayName;
         _comment = comment;
         _iconName = iconName;
+    }
+
+    /// <summary>
+    /// Chooses the executable an autostart entry should name.
+    /// </summary>
+    /// <param name="preferred">
+    /// An explicit path from the caller, which always wins — a packager knows where it put
+    /// the binary better than any of this does.
+    /// </param>
+    /// <param name="appImagePath">
+    /// The value of <c>APPIMAGE</c>, or <see langword="null"/> when it is not set, which is
+    /// every installation that is not an AppImage.
+    /// </param>
+    /// <param name="processPath">
+    /// <see cref="Environment.ProcessPath"/>: the right answer everywhere except inside an
+    /// AppImage, where it is a temporary mount point that will not exist at the next boot.
+    /// </param>
+    /// <returns>
+    /// The path to write into <c>Exec=</c>, or <see langword="null"/> when none of the three
+    /// gives one — in which case start at session reports itself unsupported rather than
+    /// writing an entry that launches nothing.
+    /// </returns>
+    /// <remarks>
+    /// A relative <c>APPIMAGE</c> is ignored rather than resolved, on the same rule
+    /// <see cref="XdgDirectories.Resolve"/> applies to a relative <c>XDG_CONFIG_HOME</c>: a
+    /// session manager launches an autostart entry from an unspecified working directory, so
+    /// a relative <c>Exec</c> is a path to wherever that turns out to be. The runtime always
+    /// exports an absolute one; anything else is an environment somebody else arranged, and
+    /// the running executable is the better guess.
+    /// </remarks>
+    public static string? ResolveExecutablePath(string? preferred, string? appImagePath, string? processPath)
+    {
+        if (!string.IsNullOrWhiteSpace(preferred))
+        {
+            return preferred;
+        }
+
+        if (!string.IsNullOrWhiteSpace(appImagePath) && appImagePath.StartsWith('/'))
+        {
+            return appImagePath;
+        }
+
+        return string.IsNullOrWhiteSpace(processPath) ? null : processPath;
     }
 
     /// <summary>

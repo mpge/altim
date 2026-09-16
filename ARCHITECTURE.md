@@ -242,7 +242,7 @@ straight to the working-area corner.
 | Tray host | own `Shell_NotifyIcon` message-only window, version 4 (click coordinates), `Shell_NotifyIconGetRect` | own `NSStatusItem` via `objc_msgSend`; anchor from the status button's window frame | Avalonia `TrayIcon` (StatusNotifierItem) |
 | Popup | positioned borderless window | positioned borderless window | working-area corner; no anchor exists in the protocol |
 | Notifications | `Microsoft.WindowsAppSDK` `AppNotificationManager` | `UNUserNotificationCenter` interop | `org.freedesktop.Notifications` over `Tmds.DBus.Protocol` |
-| Autostart | `HKCU\...\Run`, **reporting state from `StartupApproved`** | `SMAppService` (the selector is `mainAppService`), macOS 13+, bundle required; only *enabled* reports true, "requires approval" does not | `~/.config/autostart/*.desktop`, disable via `Hidden=true` |
+| Autostart | `HKCU\...\Run`, **reporting state from `StartupApproved`** | `SMAppService` (the selector is `mainAppService`), macOS 13+, bundle required; only *enabled* reports true, "requires approval" does not | `~/.config/autostart/*.desktop`, disable via `Hidden=true`; the entry names `$APPIMAGE` when it is set, never the AppImage's temporary mount point |
 | Power/session | `Microsoft.Win32.SystemEvents` plus `PBT_APMSUSPEND` / `GUID_CONSOLE_DISPLAY_STATE` | `NSWorkspace.shared.notificationCenter` (not the default centre): `WillSleep`, `DidWake`, `ScreensDidWake` | logind `PrepareForSleep` on the **system** bus — one signal, `true` to sleep and `false` to wake |
 | Theme | `ColorValuesChanged` | **`NSDistributedNotificationCenter`** — appearance is *not* posted to the workspace centre | portal `org.freedesktop.appearance` on the **session** bus; may resolve late |
 
@@ -257,13 +257,14 @@ not swap it on theme change.
 
 Known platform behaviours the code must handle: the macOS popup receives a spurious deactivation
 when an in-app popup takes key focus, so the handler verifies the new key window; on Windows,
-clicking the tray deactivates the panel and would immediately reopen it, so deactivation is ignored
-while the foreground window is the shell's tray window; Windows 11 hides new tray icons in the
-overflow by default, which first-run onboarding explains rather than tries to defeat.
+clicking the tray deactivates the panel and would immediately reopen it, so a deactivation is
+classified by the window that took the foreground rather than acted on blind — see the fifth
+Windows detail below; Windows 11 hides new tray icons in the overflow by default, which first-run
+onboarding explains rather than tries to defeat.
 
-Four Windows details were established by measurement rather than documentation. The code depends on
-all four; the third was a shipped defect, and what it cost is why the fix is described rather than
-just applied.
+Five Windows details were established by measurement rather than documentation. The code depends on
+all five; the third and the fifth were shipped defects, and what they cost is why those fixes are
+described rather than just applied.
 
 - **Asking for the icon's rectangle does not fail while the icon sits in the overflow.** On
   Windows 11 26200 it succeeds and returns the *chevron's* rectangle, which is geometrically
@@ -295,6 +296,25 @@ just applied.
   panel 24 DIPs further from the icon than DESIGN.md asks for is a visible change to pay for an
   invisible one, and answering `WM_NCHITTEST` with `HTTRANSPARENT` needs a window procedure hook
   Avalonia 12.1.2 does not expose — `Win32Properties` is internal.
+- **There is no foreground window while activation is moving, and that is when the panel asks.**
+  Clicking the tray icon makes the taskbar the foreground window and deactivates the panel, so
+  closing on every deactivation closes the panel a moment before the same click reopens it. The
+  guard against that answered "not a real deactivation" to any foreground window it could not
+  identify, `NULL` included — and `NULL` is what `GetForegroundWindow` returns for the moment
+  between one window losing activation and the next gaining it, which is exactly when the
+  deactivation arrives. Measured over one application log: the panel closed by deactivation
+  **once**, against fifty-six closes by clicking the tray icon again. DESIGN.md says the panel
+  closes on deactivate and in practice it did not, so it sat over whatever the user had switched
+  to. **Fixed** by making the unknown answer a question rather than a verdict: the foreground is
+  classified as this process, the tray, another window, or not settled yet, and only the last one
+  waits — re-read at 120ms, at most twice, then dismissed anyway because the panel is not the
+  active window. Re-reading is free in the case the guard exists for, because the tray click has
+  already toggled the panel shut by then and the re-check finds nothing to hide. The class list
+  shrank at the same time: `Windows.UI.Core.CoreWindow` is every packaged application's window,
+  not the shell's, so clicking Settings or Calculator read as clicking the tray. The rule is
+  `PopupDismissal` in `Altim.UI`, beside `PopupPlacement` and for the same reason — it is a pure
+  function over three facts, so it is asserted without a screen.
+
 - **A broadcast cannot reach a message-only window.** The icon lives on the message-only window as
   intended, but Explorer's restart notice is a broadcast, so a second never-shown top-level window
   receives it, owns the native menu (bringing a menu to the foreground needs a top-level owner) and

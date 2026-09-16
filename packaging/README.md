@@ -600,39 +600,30 @@ These are open, not hidden.
    correctly reported as undelivered and everything else works — which is the
    behaviour ARCHITECTURE.md asks for.
 
-2. **"Start at login" from inside an AppImage writes a dead entry.**
-   `LinuxAutoStartService` takes its executable path from
-   `Environment.ProcessPath`, which inside an AppImage is
-   `/tmp/.mount_Altim<random>/usr/bin/Altim` — a path that does not survive a
-   reboot. The AppImage runtime exports `APPIMAGE` with the real path of the
-   `.AppImage` file; the constructor already accepts an `executablePath` argument,
-   so the composition root passing `Environment.GetEnvironmentVariable("APPIMAGE")`
-   when it is set would close this.
-
-3. **Linux and macOS artefacts are unverified end to end.** The scripts are
+2. **Linux and macOS artefacts are unverified end to end.** The scripts are
    lint-clean and the workflow is `actionlint`-clean, but no `.deb`, `.rpm`,
    AppImage or `.app` built by them has been installed or run. ARCHITECTURE.md's
    risk 2 already says the native integrations behind them are unverified; this
    adds the packaging layer to that list.
 
-4. **No update mechanism outside Windows.** Velopack supports macOS, but its
+3. **No update mechanism outside Windows.** Velopack supports macOS, but its
    updater replaces the `.app` in place, and an unsigned, un-notarised replacement
    is quarantined and killed. Wiring it up is blocked on the Developer ID secrets
    above, not on effort. Linux has no updater and is not expected to grow one:
    AppImage users can use AppImageUpdate if the release ever embeds update
    information, and `.deb`/`.rpm` users would need a repository.
 
-5. **`win-arm64` is not built.** Native AOT cannot cross-compile, so it needs an
+4. **`win-arm64` is not built.** Native AOT cannot cross-compile, so it needs an
    arm64 Windows runner. The build script accepts `-Runtime win-arm64` and the
    Velopack channel layout has room for it; the release workflow does not have a
    job for it.
 
-6. **The Velopack pin lives in the wrong file.** `src/Altim.App/Altim.App.csproj`
+5. **The Velopack pin lives in the wrong file.** `src/Altim.App/Altim.App.csproj`
    references it with `VersionOverride="1.2.0"` because central package management
    is in force and `Directory.Packages.props` was not ours to edit. Move it to
    `<PackageVersion Include="Velopack" Version="1.2.0" />` and drop the attribute.
 
-7. **`packaging/linux/build-linux.sh` and `packaging/macos/build-macos.sh` need the
+6. **`packaging/linux/build-linux.sh` and `packaging/macos/build-macos.sh` need the
    executable bit in git** (`git update-index --chmod=+x`). The release workflow
    invokes them through `bash` so a missing bit cannot break a release, but a
    maintainer running `./packaging/...` locally will hit it.

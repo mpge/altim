@@ -6,6 +6,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Altim.UI\Altim.UI.csproj" />
+    <!-- Altim.Platform.Linux for one pure function: which executable an autostart
+         entry should name, which is the difference between a working "start at
+         login" and a dead one inside an AppImage. It cannot be exercised on the
+         machine that builds it, but the choice itself is arithmetic over three
+         strings and is asserted in LinuxAutoStartPathTests. Nothing in this
+         reference is initialised: no tray icon is created and no bus is connected. -->
+    <ProjectReference Include="..\..\src\Altim.Platform.Linux\Altim.Platform.Linux.csproj" />
   </ItemGroup>
 
   <ItemGroup>
