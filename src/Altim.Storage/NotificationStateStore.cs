@@ -43,6 +43,18 @@ public sealed class NotificationStateStore
     private readonly AltimDatabase _database;
 
     /// <summary>
+    /// What this process last wrote into the table, or null when it has not written yet.
+    /// </summary>
+    /// <remarks>
+    /// Altim is single-instance and is the only writer of its own database, so what it wrote
+    /// last is what the table holds. The snapshot is deliberately not seeded from a read: a
+    /// row that is on file but unusable — a hand-edited threshold that is not a percentage —
+    /// is filtered out of every read, so a snapshot taken from one would make the first
+    /// replacement skip the write that removes it.
+    /// </remarks>
+    private volatile IReadOnlyList<NotificationState>? _written;
+
+    /// <summary>
     /// Creates the store over an open database.
     /// </summary>
     /// <param name="database">The open database.</param>
@@ -61,6 +73,8 @@ public sealed class NotificationStateStore
     public async ValueTask RecordAsync(NotificationState state, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(state);
+
+        _written = null;
 
         using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
         await InsertAsync(lease.Connection, state, ct).ConfigureAwait(false);
@@ -124,6 +138,8 @@ public sealed class NotificationStateStore
         ArgumentException.ThrowIfNullOrEmpty(providerId);
         ArgumentException.ThrowIfNullOrEmpty(metricKey);
 
+        _written = null;
+
         using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
 
         using SqliteCommand command = lease.Connection.CreateCommand();
@@ -149,6 +165,8 @@ public sealed class NotificationStateStore
     /// </remarks>
     public async ValueTask<int> ClearExpiredAsync(DateTimeOffset now, CancellationToken ct)
     {
+        _written = null;
+
         using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
 
         using SqliteCommand command = lease.Connection.CreateCommand();
@@ -167,6 +185,8 @@ public sealed class NotificationStateStore
     /// <param name="ct">Cancels the write.</param>
     public async ValueTask ClearAllAsync(CancellationToken ct)
     {
+        _written = null;
+
         using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
 
         using SqliteCommand command = lease.Connection.CreateCommand();
@@ -194,28 +214,83 @@ public sealed class NotificationStateStore
     /// </summary>
     /// <param name="fired">The entries to keep. An empty list empties the table.</param>
     /// <param name="ct">Cancels the write.</param>
-    public async ValueTask ReplaceAllAsync(IReadOnlyList<NotificationState> fired,
-                                            CancellationToken ct)
+    /// <returns>
+    /// True when the table was rewritten, false when it already held exactly this and
+    /// nothing was written at all.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>An unchanged state writes nothing, and that is not a micro-optimisation.</b> The
+    /// evaluator returns a complete next state on every reading, and almost every reading
+    /// leaves it identical: nothing has crossed a threshold and no window has rolled over.
+    /// Rewriting it anyway is a delete plus an insert per row inside a write transaction,
+    /// several times a minute while an agent works — which keeps the write-ahead log hot for
+    /// no reason, and, worse, takes the writer often enough that the maintenance pass's
+    /// "nothing has written for two minutes" test never comes true. The idle checkpoint that
+    /// empties the log therefore never ran while an agent was working, which is exactly when
+    /// the log is growing.
+    /// </para>
+    /// <para>
+    /// The comparison is against what this process last wrote rather than against a read of
+    /// the table, so the skip costs nothing at all: no connection, no writer lease, and
+    /// therefore nothing that resets the idle clock.
+    /// </para>
+    /// </remarks>
+    public async ValueTask<bool> ReplaceAllAsync(IReadOnlyList<NotificationState> fired,
+                                                  CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(fired);
 
-        using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
-        SqliteConnection connection = lease.Connection;
-
-        using SqliteTransaction transaction = connection.BeginTransaction();
-
-        using (SqliteCommand clear = connection.CreateCommand())
+        if (_written is { } known && Same(known, fired))
         {
-            clear.CommandText = "DELETE FROM notification_state";
-            _ = await clear.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            return false;
         }
 
-        foreach (NotificationState state in fired)
+        using (WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false))
         {
-            await InsertAsync(connection, state, ct).ConfigureAwait(false);
+            SqliteConnection connection = lease.Connection;
+
+            using SqliteTransaction transaction = connection.BeginTransaction();
+
+            using (SqliteCommand clear = connection.CreateCommand())
+            {
+                clear.CommandText = "DELETE FROM notification_state";
+                _ = await clear.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            foreach (NotificationState state in fired)
+            {
+                await InsertAsync(connection, state, ct).ConfigureAwait(false);
+            }
+
+            transaction.Commit();
         }
 
-        transaction.Commit();
+        // Recorded only after the commit: a write that threw leaves the snapshot unset, and
+        // the next call writes rather than trusting a state that may not be on file.
+        _written = [.. fired];
+        return true;
+    }
+
+    /// <summary>Whether two states hold the same entries in the same order.</summary>
+    /// <param name="left">What was written last.</param>
+    /// <param name="right">What the evaluator has just produced.</param>
+    private static bool Same(IReadOnlyList<NotificationState> left, IReadOnlyList<NotificationState> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < left.Count; i++)
+        {
+            if (left[i] != right[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static async ValueTask InsertAsync(SqliteConnection connection, NotificationState state,

@@ -28,6 +28,24 @@ public static class UsageFormat
     /// <summary>The label on the action that retries a failed reading.</summary>
     public const string RetryLabel = "Retry";
 
+    /// <summary>
+    /// The accessible name of the gear, which is a drawn icon and therefore has no text of
+    /// its own for an assistive technology to read.
+    /// </summary>
+    public const string SettingsActionName = "Settings";
+
+    /// <summary>
+    /// The accessible name of a provider's disclosure, which is the chevron that opens that
+    /// provider's own page.
+    /// </summary>
+    /// <param name="providerName">The provider's display name.</param>
+    /// <returns>A sentence naming what the control opens, not what it looks like.</returns>
+    public static string DisclosureName(string providerName)
+    {
+        ArgumentNullException.ThrowIfNull(providerName);
+        return "Open " + providerName;
+    }
+
     /// <summary>Shown in place of a history chart with no samples in range.</summary>
     public const string HistoryEmpty = "No usage recorded yet. Altim starts collecting when an agent runs.";
 

@@ -80,4 +80,32 @@ internal sealed class StartupReport
         // Outside the lock: a subscriber rebuilds the tray menu, which reads Issues.
         Changed?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>
+    /// Withdraws a condition that has since been put right.
+    /// </summary>
+    /// <param name="issue">The sentence to withdraw. Unknown sentences are ignored.</param>
+    /// <returns>True when it was there and has been removed.</returns>
+    /// <remarks>
+    /// Not every degraded condition is permanent, and one that is over must stop being
+    /// reported. Explorer restarting takes every notification icon with it; Altim's own host
+    /// notices the broadcast and adds the icon again, but the menu went on saying "the tray
+    /// icon could not be added" for the rest of the session, which is a line the user can see
+    /// is false while they are reading it in the menu on that very icon.
+    /// </remarks>
+    public bool Resolve(string issue)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(issue);
+
+        lock (_gate)
+        {
+            if (!_issues.Remove(issue))
+            {
+                return false;
+            }
+        }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
 }

@@ -13,6 +13,7 @@ namespace Altim.Providers.Tests;
 public sealed class ClaudeUsageProviderTests
 {
     private const string UsageArguments = "-p --output-format json /usage";
+    private const string AgentsArguments = "agents --json";
     private static readonly DateTimeOffset Now = new(2026, 9, 15, 16, 0, 0, TimeSpan.Zero);
 
     private static string StatusLinePayload(DateTimeOffset writtenAt, int fiveHour = 53, int sevenDay = 85) =>
@@ -482,6 +483,183 @@ public sealed class ClaudeUsageProviderTests
         Assert.NotNull(usage.StatusDetail);
         Assert.NotEqual(ProviderStatus.NotDetected, usage.Status);
     }
+
+    /// <summary>
+    /// The listing is the one part of a Claude refresh that starts a process, and it is the
+    /// most expensive thing Altim does: one invocation measured 105 processes and 5.6 seconds
+    /// of CPU on the verification machine. Refreshes are event-driven, so running it on each
+    /// of them tied that to a transcript line — 173 child processes a minute and 17.8% of one
+    /// core, none of it in a CPU figure taken from the Altim process alone.
+    /// </summary>
+    [Fact]
+    public async Task TheAgentsListingRunsOnAFloorOfItsOwnRatherThanOnEveryRefresh()
+    {
+        using var workspace = new TempWorkspace();
+        var runner = new FakeCliRunner { CommandExists = true };
+        runner.RespondWithJson(AgentsArguments, "[]");
+
+        var clock = new MovableTimeProvider(Now);
+        using var provider = new ClaudeUsageProvider(
+            ClaudeOptions.Default,
+            runner,
+            new FakeProcessMonitor(new DetectedProcess(99, ClaudeProviderInfo.Id, "claude", Now)),
+            [workspace.Root],
+            clock);
+
+        _ = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, Listings(runner));
+
+        // Ten refreshes inside the floor, which is what a writing session produces.
+        for (int i = 0; i < 10; i++)
+        {
+            clock.Advance(TimeSpan.FromSeconds(5));
+            await provider.RefreshAsync(TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(1, Listings(runner));
+
+        clock.Advance(TimeSpan.FromSeconds(10));
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, Listings(runner));
+    }
+
+    /// <summary>
+    /// Nothing that looks like an agent pushes the listing out to the backoff rather than
+    /// stopping it: the scan matches on executable name, and an npm-shim install runs the
+    /// CLI as <c>node</c>, so the listing is the only thing that would ever see it.
+    /// </summary>
+    [Fact]
+    public async Task NothingThatLooksLikeAnAgentPushesTheListingOutToTheBackoff()
+    {
+        using var workspace = new TempWorkspace();
+        var runner = new FakeCliRunner { CommandExists = true };
+        runner.RespondWithJson(AgentsArguments, "[]");
+
+        var clock = new MovableTimeProvider(Now);
+        using var provider = new ClaudeUsageProvider(
+            ClaudeOptions.Default, runner, new FakeProcessMonitor(), [workspace.Root], clock);
+
+        _ = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, Listings(runner));
+
+        // A minute would have been enough with an agent running. It is not enough here.
+        clock.Advance(TimeSpan.FromSeconds(61));
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, Listings(runner));
+
+        clock.Advance(TimeSpan.FromMinutes(5));
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, Listings(runner));
+    }
+
+    /// <summary>
+    /// A listing that could not answer is not asked again at the same rate. It cost its
+    /// whole budget and produced nothing, and on the verification machine the command is
+    /// slower than its own timeout — so a floor of a minute would pay that price every
+    /// minute, for ever, for the same silence.
+    /// </summary>
+    [Fact]
+    public async Task AListingThatCouldNotAnswerBacksOff()
+    {
+        using var workspace = new TempWorkspace();
+
+        // The runner answers nothing for the agents arguments, which is a failed run.
+        var runner = new FakeCliRunner { CommandExists = true };
+
+        var clock = new MovableTimeProvider(Now);
+        using var provider = new ClaudeUsageProvider(
+            ClaudeOptions.Default,
+            runner,
+            new FakeProcessMonitor(new DetectedProcess(99, ClaudeProviderInfo.Id, "claude", Now)),
+            [workspace.Root],
+            clock);
+
+        _ = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, Listings(runner));
+
+        clock.Advance(TimeSpan.FromSeconds(61));
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, Listings(runner));
+
+        clock.Advance(TimeSpan.FromMinutes(5));
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, Listings(runner));
+
+        // And the fallback still reports the truth while it waits: the listing never
+        // answered, so the process scan is what says an agent is running.
+        Assert.Equal(ProviderStatus.Active, (await provider.GetUsageAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    /// <summary>
+    /// A skipped listing is not evidence that nothing is running, so the sessions it last
+    /// saw stand. Treating it as an empty answer would blink the activity list out between
+    /// listings.
+    /// </summary>
+    [Fact]
+    public async Task ASkippedListingKeepsTheSessionsTheLastOneReported()
+    {
+        using var workspace = new TempWorkspace();
+        var runner = new FakeCliRunner { CommandExists = true };
+        runner.RespondWithJson(
+            AgentsArguments,
+            """[{"pid":4242,"startedAt":1789467994766,"sessionId":"0199aaaa-bbbb-cccc-dddd-eeeeffff0000","status":"running"}]""");
+
+        var clock = new MovableTimeProvider(Now);
+        using var provider = new ClaudeUsageProvider(
+            ClaudeOptions.Default,
+            runner,
+            new FakeProcessMonitor(new DetectedProcess(99, ClaudeProviderInfo.Id, "claude", Now)),
+            [workspace.Root],
+            clock);
+
+        _ = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+        Assert.Single(await provider.GetSessionsAsync(TestContext.Current.CancellationToken));
+
+        clock.Advance(TimeSpan.FromSeconds(30));
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, Listings(runner));
+        Assert.Single(await provider.GetSessionsAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(ProviderStatus.Active, (await provider.GetUsageAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    /// <summary>
+    /// And a listing that answered "none" is still obeyed the moment it runs: the skip keeps
+    /// an answer alive, it does not make one up.
+    /// </summary>
+    [Fact]
+    public async Task AListingThatLaterReportsNothingClearsTheSessions()
+    {
+        using var workspace = new TempWorkspace();
+        var runner = new FakeCliRunner { CommandExists = true };
+        runner.RespondWithJson(
+            AgentsArguments,
+            """[{"pid":4242,"startedAt":1789467994766,"sessionId":"0199aaaa-bbbb-cccc-dddd-eeeeffff0000","status":"running"}]""");
+
+        var clock = new MovableTimeProvider(Now);
+        using var provider = new ClaudeUsageProvider(
+            ClaudeOptions.Default,
+            runner,
+            new FakeProcessMonitor(new DetectedProcess(99, ClaudeProviderInfo.Id, "claude", Now)),
+            [workspace.Root],
+            clock);
+
+        _ = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+        Assert.Single(await provider.GetSessionsAsync(TestContext.Current.CancellationToken));
+
+        runner.RespondWithJson(AgentsArguments, "[]");
+        clock.Advance(TimeSpan.FromSeconds(60));
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, Listings(runner));
+        Assert.Empty(await provider.GetSessionsAsync(TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>How many times the agents listing was actually run.</summary>
+    /// <param name="runner">The runner the provider was built with.</param>
+    private static int Listings(FakeCliRunner runner) =>
+        runner.Invocations.Count(argument => argument == AgentsArguments);
 
     [Fact]
     public async Task AFailedReadingCarriesTheFixedSentenceAndNeverTheExceptionText()

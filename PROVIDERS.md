@@ -241,6 +241,19 @@ claimed an idle session whose process id had been recycled to an unrelated progr
 correctly omitted it. Process enumeration is the fallback, matching the CLI binary and excluding
 helper invocations such as the browser native host.
 
+**It is the only part of a Claude reading that starts a process, and it is expensive.** Measured
+on the verification machine, one `claude agents --json` starts **105 processes and spends 5.6
+seconds of CPU**, and takes 18–27 seconds of wall clock — longer than the 15 seconds Altim allows
+it, so it is usually killed part way through and process enumeration answers instead. Every other
+source here is a file read, which is why a refresh can be driven by a filesystem event; running
+the listing on each of those tied that cost to a transcript line, and a session writing
+continuously produced 173 child processes a minute.
+
+So the listing has a floor of its own: the polling floor normally, and five minutes when the cheap
+process scan cannot see anything that looks like an agent or when the previous attempt did not
+answer. A skipped listing is not an empty one — the sessions the last listing reported still
+stand, and only a listing that actually ran can clear them.
+
 **Altim never stores process command lines.** Enumerating processes on the test machine exposed a
 third-party tool passing an API key in plaintext in its arguments; a monitor that captured argv
 would ingest other people's secrets. Altim records an executable name and a boolean, nothing more.

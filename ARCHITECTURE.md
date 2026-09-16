@@ -119,6 +119,17 @@ their own timers, so the process has a single wake source and a single place to 
   750ms debounce, drives refreshes. Filesystem events are hints, not data.
 - **Polling is the floor, not the plan.** A `PeriodicTimer` at 60s covers anything watchers miss.
   Missed ticks coalesce, so a laptop waking from sleep produces one refresh, not a backlog.
+- **Anything that starts a process has a floor of its own**, separately from the refresh that
+  asked for it. A refresh is file reads and is cheap enough to run on a filesystem event; a
+  process launch is not. Claude Code's agents listing ran on every refresh, and it is the most
+  expensive thing Altim does: measured here, one `claude agents --json` starts **105 processes
+  and spends 5.6 seconds of CPU**, and takes 18–27 seconds of wall clock, which is longer than
+  its own 15-second budget — so it is usually killed part way through and the reading falls back
+  to the process scan. Tied to a filesystem event that was 173 child processes a minute and
+  17.8% of one core. It now runs at the polling floor, and two things push it out to five
+  minutes: a process scan that sees nothing that looks like an agent, and a previous attempt
+  that did not answer. Neither costs a status — liveness comes from the scan on every refresh —
+  and what they delay is how soon a new session appears by name in the activity list.
 - **Network-touching calls are rate-limited separately** and never run faster than once a minute.
   They are also permission-gated: `INetworkPolicy` is read at the moment of the call rather than
   copied into a provider's options, because a provider is built once and outlives every settings
@@ -135,6 +146,12 @@ their own timers, so the process has a single wake source and a single place to 
   wake. The asymmetry is deliberate: an extra wake costs one refresh, while a wrong suspend
   stops recording an agent that is working against a dark monitor.
 - While the popup or dashboard is open, the cadence tightens to 10s; on close it relaxes again.
+- **The scheduler's cadences are fixed at construction, so changing Refresh replaces it.**
+  Everything that produces work for it therefore holds a `SchedulerHandle` rather than an
+  instance: the filesystem watchers, and the first-readings pass, which also follows a rebuild
+  that lands while it is running. A hint delivered to a disposed scheduler is documented not to
+  throw, so a watcher left holding the old one produced no error, no log line and no refresh —
+  it simply stopped being event-driven until the next restart.
 
 Provider work happens off the UI thread and returns immutable records. Failures are contained per
 provider: a thrown exception becomes `ProviderStatus.Error` with a message, never a crash.
@@ -263,12 +280,15 @@ Known platform behaviours the code must handle: the macOS popup receives a spuri
 when an in-app popup takes key focus, so the handler verifies the new key window; on Windows,
 clicking the tray deactivates the panel and would immediately reopen it, so a deactivation is
 classified by the window that took the foreground rather than acted on blind — see the fifth
-Windows detail below; Windows 11 hides new tray icons in the overflow by default, which first-run
-onboarding explains rather than tries to defeat.
+Windows detail below. **Windows 11 puts a new tray icon in the overflow by default.** Altim does
+not try to defeat that: it reports no anchor while the icon is hidden, so the panel falls to the
+next positioning tier rather than opening beside the chevron. There is no first-run onboarding and
+nothing else tells the user where the icon went; this document promised onboarding that explained
+it, and the promise is withdrawn rather than left standing over an empty space.
 
-Five Windows details were established by measurement rather than documentation. The code depends on
-all five; the third and the fifth were shipped defects, and what they cost is why those fixes are
-described rather than just applied.
+Six Windows details were established by measurement rather than documentation. The code depends on
+all six; the third, the fifth and the sixth were shipped defects, and what they cost is why those
+fixes are described rather than just applied.
 
 - **Asking for the icon's rectangle does not fail while the icon sits in the overflow.** On
   Windows 11 26200 it succeeds and returns the *chevron's* rectangle, which is geometrically
@@ -319,6 +339,41 @@ described rather than just applied.
   `PopupDismissal` in `Altim.UI`, beside `PopupPlacement` and for the same reason — it is a pure
   function over three facts, so it is asserted without a screen.
 
+  **A deactivation is not guaranteed to arrive at all**, which the rule above cannot help with
+  because it is only ever consulted by one. Two reproduced ways to have a panel nothing dismisses:
+  a double click on the icon, where the second press is inside the host's 200ms de-duplication
+  window so it raises no toggle, and the deactivation it *does* cause lands inside the panel's
+  250ms reopen guard; and the second-launch surfacing, where the running instance cannot take the
+  foreground and so the panel opens without ever being active. Both leave a topmost panel over the
+  user's work with no way to put it down. Three changes, and each covers a different half:
+  a second launch hands its foreground right over with `AllowSetForegroundWindow` before it
+  signals, so the panel can activate; a deactivation inside the reopen guard is re-asked once the
+  guard is over rather than dropped; and while the panel is visible it watches, at 250ms, for the
+  foreground *changing* and for a click landing outside it. The watch is a change rather than a
+  state on purpose: a panel surfaced over a window that already held the foreground would
+  otherwise dismiss itself a quarter of a second after the user asked for it. The click is read
+  with `GetAsyncKeyState`, whose "pressed since you last asked" bit is what lets a quarter-second
+  poll catch a click that moved no foreground at all — which is exactly the case, because the
+  window it landed on already had it. "One of ours" is two answers now: the panel and anything it
+  owns is an overlay and keeps it open, while the dashboard is a window the user switched to and
+  dismisses it.
+
+- **The session-end query is a question, and answering it wrongly blocks sign-out.** Avalonia
+  raises `ShutdownRequested` from `WM_QUERYENDSESSION` and asks every window to close while it is
+  answering; whether a window cancelled that close *is* the answer Windows gets back. The panel is
+  hidden and never closed, so it cancelled its own close unconditionally, and the query therefore
+  returned a veto — measured by sending the query to the running process, which returned 0 — while
+  the handler for the query had already removed the tray icon and latched the shutdown flag. The
+  result was an Altim with no icon, still running, whose Quit no longer did anything: a ghost until
+  Task Manager. **Fixed** three ways: `PopupCloseRule` lets a close through when its reason is an
+  application or OS shutdown and hides the panel for every other reason; nothing irreversible
+  happens on the query, only a log line; and the teardown runs from the lifetime's `Exit`, which is
+  the point at which the framework has decided to go. The latch moved with it, so a session end
+  that is cancelled leaves Quit working. The teardown is synchronous because the thread it runs on
+  is the dispatcher's and there is nothing behind it — which also means the windows have to be
+  closed before the first `await` hands the rest to the thread pool, or a pool thread ends up
+  waiting for a dispatcher frame that cannot run.
+
 - **A broadcast cannot reach a message-only window.** The icon lives on the message-only window as
   intended, but Explorer's restart notice is a broadcast, so a second never-shown top-level window
   receives it, owns the native menu (bringing a menu to the foreground needs a top-level owner) and
@@ -339,7 +394,7 @@ bearing rather than a let-out.
 |---|---|---|
 | Cold start to tray icon visible | < 800ms | 260ms |
 | Popup open (already warm) | < 100ms | 8.4ms first open, under 1ms after |
-| Idle CPU | < 2% of one core | 1.4% idle, 2.4% while an agent writes |
+| CPU, Altim and its children | < 5% of one core idle | 3.1% idle, 10.0% while an agent writes |
 | Idle working set | **< 120MB** | 107MB |
 | Database growth | < 5MB/year at default cadence | on track; see the README |
 
@@ -350,11 +405,29 @@ for background work, diagnostics excluded from Release.
 The CPU budget used to read "< 0.1% average" with no denominator, which is not a property of
 the program: the same binary doing the same work passes it on a sixteen-core machine and fails
 it on a four-core one. It is now a share of one core, which is both machine-independent and the
-thing that actually costs a battery. The measured floor is 1.4% of one core with both provider
-stores empty and nothing at all happening, which is what a process holding a live hidden window
-costs before Altim does any work of its own; it rises to about 2.4% while an agent is writing
-transcripts continuously and the filesystem watchers are firing, which is the cadence working
-rather than a leak.
+thing that actually costs a battery.
+
+**It also used to count the wrong processes, and that was the larger error of the two.** The
+figure came from `Process.TotalProcessorTime` on Altim itself, and Altim reads two of its sources
+by running the vendor's own command line — processes that live for a second or two and are gone
+before anything could sample them. Measured with Altim inside a job object, so that the CPU of
+every process that has ever been in the job is counted whether or not it has exited: **23.2% of
+one core and 259 child processes a minute** while an agent was writing transcripts, against a
+published 2.4%. Gating the agents listing takes that to **10.0% and 61 processes a minute**; idle
+is **3.1%**, which the gating does not move because the polling floor already held the listing to
+once a minute there. Altim's own share is 2.7% under load and about 1.8% idle, which is what a
+process holding a live hidden window costs before it does any work of its own.
+
+The budget follows the honest number rather than the other way round: it is now under 5% of one
+core at idle, and the load figure is published beside it rather than folded into it. What is left
+is mostly not Altim — it is the provider command lines, one of which starts 105 processes and
+spends 5.6 seconds of CPU to answer a question about which sessions are running.
+
+**The CPU row is the one figure in the table not taken from the shipping build.** It was measured
+on the framework-dependent build, and it is published as that rather than restated as a number
+nobody measured. The part ahead-of-time compilation moves is Altim's own share — 2.7% under load
+and 1.8% at idle — and the rest is the provider command lines, which are the same processes
+whichever way Altim itself was compiled.
 
 ### The working-set budget was wrong, and this is where the memory goes
 

@@ -9,7 +9,7 @@ namespace Altim.Providers.Cli;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Five things are non-negotiable here, and each of them came from a way this goes wrong:
+/// Six things are non-negotiable here, and each of them came from a way this goes wrong:
 /// </para>
 /// <list type="bullet">
 /// <item>
@@ -35,6 +35,12 @@ namespace Altim.Providers.Cli;
 /// for a provider the user does not use. A binary that was found and then would not start
 /// is a <see cref="CliRunOutcome.Failed"/>, because those two mean different things.
 /// </item>
+/// <item>
+/// Every child joins a job object that dies with Altim. The timeout covers the command that
+/// hangs; this covers the one that is working normally when the user quits, which used to
+/// go on running for a second or two after the tray icon had gone. See
+/// <see cref="ChildProcessJob"/>.
+/// </item>
 /// </list>
 /// </remarks>
 public sealed class CliRunner : ICliRunner
@@ -42,7 +48,7 @@ public sealed class CliRunner : ICliRunner
     /// <summary>
     /// The most standard output this runner will hold. A CLI answer that needs more than
     /// this is not an answer Altim knows how to read, and buffering it would only cost
-    /// memory in a process with an 80 MB working-set budget.
+    /// memory in a process whose whole working-set budget is 120MB.
     /// </summary>
     public const int MaxCapturedOutputBytes = 512 * 1024;
 
@@ -151,6 +157,10 @@ public sealed class CliRunner : ICliRunner
             {
                 return CliRunResult.Failed;
             }
+
+            // Before anything is read from it, so the window in which a child could outlive
+            // Altim is a few microseconds rather than the length of the command.
+            ChildProcessJob.Adopt(process);
         }
         catch (Win32Exception ex)
         {

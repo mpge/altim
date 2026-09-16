@@ -88,6 +88,12 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     /// <summary>The label on the panel's one action.</summary>
     public string OpenLabel => "Open Altim";
 
+    /// <summary>
+    /// The accessible name of the gear in the header. The control's whole content is a drawn
+    /// icon, so without this a screen reader announces the shape type instead.
+    /// </summary>
+    public string SettingsLabel => UsageFormat.SettingsActionName;
+
     /// <summary>The heading over the resets section.</summary>
     public string ResetsLabel => UsageFormat.ResetsLabel;
 

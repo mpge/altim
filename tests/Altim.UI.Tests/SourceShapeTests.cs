@@ -205,6 +205,103 @@ public sealed partial class SourceShapeTests
                 + string.Join(Environment.NewLine, offences));
     }
 
+    /// <summary>
+    /// Every button in the interface exposes a name an assistive technology can read out.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A button whose whole content is a drawn icon has nothing for an automation peer to
+    /// fall back on, so a screen reader announces the shape type — "Path" — which is the
+    /// same amount of help as silence. The panel's gear, every provider's disclosure and the
+    /// panel's one action were all in that state.
+    /// </para>
+    /// <para>
+    /// The rule is that a button either sets <c>Content</c> on the element itself, which the
+    /// content control's peer reads, or declares <c>AutomationProperties.Name</c>. A label
+    /// nested inside a panel inside the button does not count: Avalonia's peer reads a
+    /// string content and a directly presented text block, and a
+    /// <c>StackPanel</c> of a caption and an arrow is neither.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void EveryButtonExposesAnAccessibleName()
+    {
+        List<string> offences = [];
+        int checkedButtons = 0;
+
+        foreach (string file in ProjectXaml())
+        {
+            foreach (string element in OpeningTags(File.ReadAllText(file), "Button"))
+            {
+                checkedButtons++;
+
+                if (element.Contains("Content=", StringComparison.Ordinal)
+                    || element.Contains("AutomationProperties.Name=", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                offences.Add($"{Path.GetFileName(file)}: {Summarise(element)}");
+            }
+        }
+
+        Assert.True(checkedButtons > 0, "No buttons were found to check.");
+        Assert.True(
+            offences.Count == 0,
+            "A button with no Content and no AutomationProperties.Name is announced as its"
+                + " icon's shape type:"
+                + Environment.NewLine
+                + string.Join(Environment.NewLine, offences));
+    }
+
+    /// <summary>
+    /// Every opening tag for one element name, as its own text, quotes respected.
+    /// </summary>
+    /// <param name="xaml">The document to scan.</param>
+    /// <param name="elementName">The element to find, without its angle bracket.</param>
+    /// <remarks>
+    /// Written by hand rather than with an XML reader because these files carry
+    /// <c>x:</c> and <c>avares://</c> markup the reader would want namespaces for, and
+    /// because an offence has to be reported as the source text somebody can search for.
+    /// </remarks>
+    private static IEnumerable<string> OpeningTags(string xaml, string elementName)
+    {
+        string opening = "<" + elementName;
+
+        for (int at = xaml.IndexOf(opening, StringComparison.Ordinal); at >= 0;
+             at = xaml.IndexOf(opening, at + 1, StringComparison.Ordinal))
+        {
+            int after = at + opening.Length;
+            if (after < xaml.Length && xaml[after] is not (' ' or '\r' or '\n' or '\t' or '>' or '/'))
+            {
+                // <ButtonSpinner and friends: a different element that starts the same way.
+                continue;
+            }
+
+            bool quoted = false;
+            for (int i = after; i < xaml.Length; i++)
+            {
+                if (xaml[i] == '"')
+                {
+                    quoted = !quoted;
+                }
+                else if (xaml[i] == '>' && !quoted)
+                {
+                    yield return xaml[at..(i + 1)];
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>The first line of an element, for an assertion message.</summary>
+    /// <param name="element">The element's source text.</param>
+    private static string Summarise(string element)
+    {
+        string first = element.Split('\n')[0].Trim();
+        return first.Length > 80 ? first[..80] : first;
+    }
+
     /// <summary>Every C# file under one folder of the UI project.</summary>
     /// <param name="folder">The folder, relative to the project.</param>
     /// <returns>Absolute paths, sorted.</returns>

@@ -25,6 +25,13 @@ namespace Altim.App.Monitoring;
 /// exist at all.
 /// </para>
 /// <para>
+/// Hints go through a <see cref="SchedulerHandle"/> rather than to a scheduler instance.
+/// Changing the refresh interval in Settings replaces the scheduler, and a watcher holding
+/// the old one went on delivering hints to a disposed object — which is documented not to
+/// throw, so the meters quietly fell back to the 60-second floor until the next restart with
+/// nothing logged to say so.
+/// </para>
+/// <para>
 /// Nothing here is load-bearing. A watcher that cannot be created, a directory that is not
 /// there and a buffer that overflows all degrade to the same thing: the polling floor, which
 /// is what would have covered it anyway.
@@ -39,10 +46,10 @@ internal sealed class ProviderHintWatcher : IDisposable
     private const int BufferBytes = 64 * 1024;
 
     private readonly List<FileSystemWatcher> _watchers = [];
-    private readonly MonitorScheduler _scheduler;
+    private readonly SchedulerHandle _schedulers;
     private bool _disposed;
 
-    private ProviderHintWatcher(MonitorScheduler scheduler) => _scheduler = scheduler;
+    private ProviderHintWatcher(SchedulerHandle schedulers) => _schedulers = schedulers;
 
     /// <summary>How many watchers were actually armed.</summary>
     public int WatcherCount => _watchers.Count;
@@ -50,14 +57,16 @@ internal sealed class ProviderHintWatcher : IDisposable
     /// <summary>
     /// Arms a watcher over every directory the installed providers write to.
     /// </summary>
-    /// <param name="scheduler">The scheduler hints are delivered to.</param>
+    /// <param name="schedulers">
+    /// The handle hints are delivered through, so a rebuilt scheduler still receives them.
+    /// </param>
     /// <param name="providerIds">The providers that are actually registered.</param>
-    public static ProviderHintWatcher Create(MonitorScheduler scheduler, IReadOnlyCollection<string> providerIds)
+    public static ProviderHintWatcher Create(SchedulerHandle schedulers, IReadOnlyCollection<string> providerIds)
     {
-        ArgumentNullException.ThrowIfNull(scheduler);
+        ArgumentNullException.ThrowIfNull(schedulers);
         ArgumentNullException.ThrowIfNull(providerIds);
 
-        var watcher = new ProviderHintWatcher(scheduler);
+        var watcher = new ProviderHintWatcher(schedulers);
 
         if (providerIds.Contains(ProviderIds.Claude))
         {
@@ -153,8 +162,9 @@ internal sealed class ProviderHintWatcher : IDisposable
     private void Hint(string providerId)
     {
         // Hint() after disposal is documented as a no-op: a watcher is still delivering
-        // events while the process closes its windows.
-        _scheduler.Hint(providerId);
+        // events while the process closes its windows. The handle resolves the scheduler at
+        // the moment of the hint, so one rebuilt for a new cadence is the one that hears it.
+        _schedulers.Hint(providerId);
     }
 
     private void OnError(string providerId, FileSystemWatcher watcher, ErrorEventArgs e)

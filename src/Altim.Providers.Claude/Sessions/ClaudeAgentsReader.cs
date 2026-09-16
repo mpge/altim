@@ -20,6 +20,16 @@ public enum ClaudeAgentsOutcome
     /// that is not a JSON array.
     /// </summary>
     Failed = 2,
+
+    /// <summary>
+    /// The command was not run, because the last listing is recent enough to still stand.
+    /// </summary>
+    /// <remarks>
+    /// Not the same as a failure. A failed listing is evidence that the command cannot
+    /// answer; a skipped one is no new evidence at all, so the caller keeps the answer it
+    /// already had rather than falling back to anything.
+    /// </remarks>
+    Skipped = 3,
 }
 
 /// <summary>
@@ -45,6 +55,9 @@ public sealed record ClaudeAgentsListing(ClaudeAgentsOutcome Outcome, IReadOnlyL
 
     /// <summary>A listing from a machine without the CLI.</summary>
     public static ClaudeAgentsListing NotDetected { get; } = new(ClaudeAgentsOutcome.NotDetected, []);
+
+    /// <summary>A listing that was not asked for, because the last one still stands.</summary>
+    public static ClaudeAgentsListing Skipped { get; } = new(ClaudeAgentsOutcome.Skipped, []);
 
     /// <summary>True when the command answered, whatever it said.</summary>
     public bool IsAuthoritative => Outcome is ClaudeAgentsOutcome.Listed;

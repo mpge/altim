@@ -43,6 +43,18 @@ internal sealed class TrayController : IDisposable
     /// <summary>The identifier of the Quit entry.</summary>
     public const string QuitId = "quit";
 
+    /// <summary>
+    /// The degraded condition recorded while the icon is not in the notification area.
+    /// </summary>
+    /// <remarks>
+    /// Withdrawn again by <see cref="SyncIconCondition"/> once the icon is back. Explorer
+    /// restarting takes every notification icon with it and the host adds Altim's again on
+    /// the broadcast, so this condition is routinely temporary — and a menu that went on
+    /// reporting it was telling the user, on the icon they had just clicked, that there was
+    /// no icon.
+    /// </remarks>
+    public const string IconMissingIssue = "The tray icon could not be added";
+
     /// <summary>The shell truncates a tooltip at 128 characters including the terminator.</summary>
     private const int TooltipLimit = 127;
 
@@ -80,7 +92,37 @@ internal sealed class TrayController : IDisposable
     public async ValueTask ShowAsync(CancellationToken ct)
     {
         await _host.ShowAsync(ct).ConfigureAwait(false);
+        SyncIconCondition();
         await RefreshMenuAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Brings the "no tray icon" condition into line with what the host reports now, adding
+    /// it or withdrawing it.
+    /// </summary>
+    /// <remarks>
+    /// Called wherever the controller is already talking to the host, which is at start-up
+    /// and on every reading — so an icon that comes back after Explorer restarts stops being
+    /// reported as missing within one refresh rather than never.
+    /// </remarks>
+    public void SyncIconCondition()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (_host.IsVisible)
+        {
+            if (_report.Resolve(IconMissingIssue))
+            {
+                AltimLog.Write("tray", "The icon is in the notification area again; withdrawing the notice.");
+            }
+        }
+        else
+        {
+            _report.Add(IconMissingIssue);
+        }
     }
 
     /// <summary>
@@ -152,6 +194,10 @@ internal sealed class TrayController : IDisposable
     public async ValueTask UpdateTooltipAsync(IReadOnlyList<ProviderUsage> readings, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(readings);
+
+        // Every reading is an opportunity to notice that the icon has come back, and there
+        // is no event for it: the host re-adds the icon itself when Explorer restarts.
+        SyncIconCondition();
 
         string tooltip = BuildTooltip(readings);
         if (string.Equals(tooltip, _tooltip, StringComparison.Ordinal))

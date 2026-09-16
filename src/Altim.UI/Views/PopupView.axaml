@@ -37,6 +37,7 @@
                  Text="{Binding Title}" />
       <Button Grid.Column="2"
               Theme="{DynamicResource AltimIconButton}"
+              AutomationProperties.Name="{Binding SettingsLabel}"
               Command="{Binding OpenSettingsCommand}">
         <Path Classes="icon gear quiet" />
       </Button>
@@ -79,6 +80,7 @@
                       Margin="2,0,0,0"
                       VerticalAlignment="Center"
                       Theme="{DynamicResource AltimIconButton}"
+                      AutomationProperties.Name="{Binding DisclosureLabel}"
                       Command="{Binding OpenCommand}">
                 <Path Classes="icon next quiet" />
               </Button>
@@ -193,6 +195,7 @@
     <Button Margin="8"
             HorizontalAlignment="Left"
             Theme="{DynamicResource AltimTextButton}"
+            AutomationProperties.Name="{Binding OpenLabel}"
             Command="{Binding OpenAltimCommand}">
       <StackPanel Orientation="Horizontal" Spacing="{DynamicResource AltimSpace8}">
         <TextBlock VerticalAlignment="Center" Text="{Binding OpenLabel}" />

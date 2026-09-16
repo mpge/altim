@@ -388,6 +388,38 @@ public sealed class AltimDatabaseTests
         Assert.True(new FileInfo(temp.FilePath + "-wal").Length > 0);
     }
 
+    /// <summary>
+    /// The log line that says the database opened names the kind of directory, never the
+    /// directory. On every platform Altim supports the configuration directory is inside the
+    /// user's profile, so the path contains the account name — and <c>altim.log</c> is a file
+    /// people attach to bug reports.
+    /// </summary>
+    [Fact]
+    public void TheDirectoryIsDescribedByKindRatherThanByPath()
+    {
+        using var temp = new TempDatabase();
+
+        string standard = AltimDatabase.DescribeDirectory(AltimDatabase.GetDefaultDatabasePath());
+        string elsewhere = AltimDatabase.DescribeDirectory(temp.FilePath);
+
+        Assert.Equal("the default configuration directory", standard);
+        Assert.NotEqual(standard, elsewhere);
+
+        foreach (string described in new[] { standard, elsewhere })
+        {
+            Assert.DoesNotContain(Path.DirectorySeparatorChar.ToString(), described, StringComparison.Ordinal);
+            Assert.DoesNotContain(Environment.UserName, described, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Altim", described, StringComparison.Ordinal);
+        }
+
+        // Not a whole-path comparison: a file beside the real one is still the standard
+        // directory, and a file of the standard name somewhere else is not.
+        Assert.Equal(
+            standard,
+            AltimDatabase.DescribeDirectory(
+                Path.Combine(AltimDatabase.GetDefaultDirectory(), "altim.backup.db")));
+    }
+
     private static void Execute(SqliteConnection connection, string sql)
     {
         using SqliteCommand command = connection.CreateCommand();

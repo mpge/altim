@@ -9,7 +9,7 @@ public enum PopupForegroundOwner
     /// </summary>
     Unknown = 0,
 
-    /// <summary>One of Altim's own windows — the dashboard, or an overlay of the panel's own.</summary>
+    /// <summary>The panel itself, or an overlay the panel owns.</summary>
     Self = 1,
 
     /// <summary>The taskbar that holds the notification area, or the overflow flyout.</summary>
@@ -17,6 +17,16 @@ public enum PopupForegroundOwner
 
     /// <summary>Somebody else's window, including the desktop.</summary>
     Other = 3,
+
+    /// <summary>
+    /// Another window of Altim's own that the panel does not own: the dashboard.
+    /// </summary>
+    /// <remarks>
+    /// One of ours, and still a dismissal. The dashboard is a window the user has switched
+    /// to, not an overlay of the panel, and a topmost panel left sitting over it is the same
+    /// defect as one left over somebody else's window — only more obviously ours.
+    /// </remarks>
+    Application = 4,
 }
 
 /// <summary>What to do about a deactivation.</summary>
@@ -59,9 +69,13 @@ public enum PopupDismissalDecision
 /// </para>
 /// <list type="bullet">
 /// <item><description>
-/// <b>Self</b> — the foreground belongs to this process. Opening the dashboard from the
-/// panel deactivates it, and so does any overlay that takes focus; neither is the user
-/// leaving. Keep.
+/// <b>Self</b> — the foreground is the panel, or an overlay the panel owns. An overlay
+/// taking focus is not the user leaving. Keep.
+/// </description></item>
+/// <item><description>
+/// <b>Application</b> — one of ours, but not the panel and not an overlay of it: the
+/// dashboard. The user has switched to another window, and that the window is Altim's own
+/// does not make a topmost panel over it any less in the way. Dismiss.
 /// </description></item>
 /// <item><description>
 /// <b>Tray</b> — the foreground is the taskbar that carries the notification area or the
@@ -134,8 +148,18 @@ public static class PopupDismissal
     /// That window's class name, or empty when it could not be read — which is the same
     /// amount of information as no window.
     /// </param>
+    /// <param name="isPanelOrItsOverlay">
+    /// True when that window is the panel itself or a window the panel owns, which is what
+    /// separates an overlay of the panel's from the dashboard. Only read when
+    /// <paramref name="isOwnProcess"/> is true; defaults to true, which is the answer for a
+    /// caller that cannot tell the two apart.
+    /// </param>
     /// <returns>Who owns it, or <see cref="PopupForegroundOwner.Unknown"/> while nothing does.</returns>
-    public static PopupForegroundOwner Classify(bool hasForegroundWindow, bool isOwnProcess, ReadOnlySpan<char> windowClass)
+    public static PopupForegroundOwner Classify(
+        bool hasForegroundWindow,
+        bool isOwnProcess,
+        ReadOnlySpan<char> windowClass,
+        bool isPanelOrItsOverlay = true)
     {
         if (!hasForegroundWindow)
         {
@@ -147,7 +171,7 @@ public static class PopupDismissal
         // Altim's.
         if (isOwnProcess)
         {
-            return PopupForegroundOwner.Self;
+            return isPanelOrItsOverlay ? PopupForegroundOwner.Self : PopupForegroundOwner.Application;
         }
 
         if (windowClass.IsEmpty)
@@ -175,13 +199,33 @@ public static class PopupDismissal
         _ => PopupDismissalDecision.Dismiss,
     };
 
+    /// <summary>
+    /// One phrase per owner, for the log line a click that landed outside the panel leaves
+    /// behind.
+    /// </summary>
+    /// <param name="owner">Who owns the window the click landed on.</param>
+    /// <remarks>
+    /// A click is not a foreground change, and reading the foreground sentence against one
+    /// says the wrong thing: the case this exists for is precisely the click that moved no
+    /// foreground at all, because the window it landed on already had it.
+    /// </remarks>
+    public static string DescribeClick(PopupForegroundOwner owner) => owner switch
+    {
+        PopupForegroundOwner.Self => "the click was on the panel",
+        PopupForegroundOwner.Tray => "the click was on the tray",
+        PopupForegroundOwner.Other => "the click was on another window",
+        PopupForegroundOwner.Application => "the click was on another Altim window",
+        _ => "the click landed on nothing identifiable",
+    };
+
     /// <summary>One phrase per owner, for the log line a dismissal leaves behind.</summary>
     /// <param name="owner">Who took the foreground.</param>
     public static string Describe(PopupForegroundOwner owner) => owner switch
     {
-        PopupForegroundOwner.Self => "another Altim window took the foreground",
+        PopupForegroundOwner.Self => "the panel's own overlay took the foreground",
         PopupForegroundOwner.Tray => "the tray took the foreground",
         PopupForegroundOwner.Other => "another window took the foreground",
+        PopupForegroundOwner.Application => "another Altim window took the foreground",
         _ => "the foreground never settled",
     };
 }

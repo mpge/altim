@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Altim.Core.Diagnostics;
 
 namespace Altim.App.Diagnostics;
 
@@ -14,9 +15,15 @@ namespace Altim.App.Diagnostics;
 /// menu as one line each, and they reach this file with enough detail to act on.
 /// </para>
 /// <para>
-/// Nothing written here comes from a provider's data. Messages are Altim's own sentences
-/// plus exception text; no transcript content, no prompts and no project paths are logged,
-/// which is the same rule the storage layer keeps.
+/// <b>Nothing written here comes from outside Altim.</b> Every line is one of Altim's own
+/// sentences, and an exception contributes its <em>type</em> and nothing else. That last
+/// part was a defect rather than a decision: the line used to carry
+/// <c>Exception.Message</c> as well, and those messages are written by the framework and by
+/// other people's libraries. An <see cref="IOException"/> names the file it failed on, a
+/// watcher overflow names the directory being watched, and a provider failure carries
+/// whichever path its reader was inside — so a promise PRIVACY.md makes about the database
+/// was quietly not kept by the log file beside it, which is the file people attach to bug
+/// reports. See <see cref="ExceptionSummary"/>.
 /// </para>
 /// </remarks>
 internal static class AltimLog
@@ -101,14 +108,17 @@ internal static class AltimLog
         }
     }
 
-    /// <summary>Writes one line with an exception's type and message appended.</summary>
+    /// <summary>Writes one line with an exception's type appended.</summary>
     /// <param name="category">The area the line is about.</param>
-    /// <param name="message">The line.</param>
-    /// <param name="error">The exception to describe.</param>
+    /// <param name="message">The line. Always Altim's own sentence.</param>
+    /// <param name="error">
+    /// The exception to describe. Its type reaches the file; its message never does, because
+    /// an exception message is written by whatever threw it and routinely names a path.
+    /// </param>
     public static void Write(string category, string message, Exception error)
     {
         ArgumentNullException.ThrowIfNull(error);
-        Write(category, string.Create(CultureInfo.InvariantCulture, $"{message}: {error.GetType().Name}: {error.Message}"));
+        Write(category, string.Create(CultureInfo.InvariantCulture, $"{message}: {ExceptionSummary.Describe(error)}"));
     }
 
     /// <summary>Writes a millisecond measurement, which is how the budgets are checked.</summary>

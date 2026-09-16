@@ -67,10 +67,38 @@ internal sealed class PopupHost : IDisposable
     /// </remarks>
     private const int ForegroundRecheckLimit = 2;
 
+    /// <summary>
+    /// How often the foreground is read while the panel is on screen.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A deactivation is not guaranteed to arrive, and the panel is topmost.</b> Two
+    /// reproduced ways to have a panel nobody can dismiss. A double click on the tray icon:
+    /// the second click collapses the panel correctly, but the foreground goes to Explorer
+    /// and the deactivation lands inside the reopen guard. And the second-launch surfacing:
+    /// the running instance cannot take the foreground, so the panel opens without ever
+    /// being active and there is no activation to lose. Either way the panel sits over the
+    /// user's work and clicking away does nothing at all, because clicking away is only
+    /// noticed through a deactivation that never came.
+    /// </para>
+    /// <para>
+    /// So the panel watches instead of waiting, for two things: the foreground <em>changing</em>,
+    /// and a click landing outside the panel — the second because the surfaced case moves no
+    /// foreground at all, the window the click lands on having had it the whole time. A quarter
+    /// of a second is below the threshold a dismissal reads as sluggish, the timer only runs
+    /// while the panel is visible — seconds at a time — and a tick is a
+    /// <c>GetForegroundWindow</c> and two <c>GetAsyncKeyState</c> reads, which together are
+    /// cheaper than the frame the panel is already painting.
+    /// </para>
+    /// </remarks>
+    private static readonly TimeSpan ForegroundWatchInterval = TimeSpan.FromMilliseconds(250);
+
     private readonly PopupWindow _window;
     private readonly PopupViewModel _viewModel;
+    private readonly DispatcherTimer _foregroundWatch;
 
     private Thickness? _chrome;
+    private IntPtr _foregroundBaseline;
     private CoreRect? _lastAnchor;
     private PixelPoint? _lastCursor;
     private long _openedAt;
@@ -89,6 +117,9 @@ internal sealed class PopupHost : IDisposable
         _window = new PopupWindow(viewModel);
         _window.Deactivated += OnDeactivated;
         _window.Closing += OnClosing;
+
+        _foregroundWatch = new DispatcherTimer(
+            ForegroundWatchInterval, DispatcherPriority.Background, OnForegroundWatchTick);
     }
 
     /// <summary>Raised after the panel has been shown.</summary>
@@ -170,6 +201,15 @@ internal sealed class PopupHost : IDisposable
             return;
         }
 
+        // Watched from here rather than from the first deactivation, because a panel that
+        // never became the active window never gets one. The baseline is whatever holds the
+        // foreground now — the panel itself on an ordinary open, and somebody else's window
+        // when a second launch could not hand the right over — because what dismisses the
+        // panel is the foreground moving, not who happens to hold it at this instant.
+        _foregroundBaseline = ReadForegroundWindow();
+        ForgetPendingClicks();
+        _foregroundWatch.Start();
+
         AltimLog.Timing("popup open", System.Diagnostics.Stopwatch.GetElapsedTime(started));
         Opened?.Invoke(this, EventArgs.Empty);
     }
@@ -184,6 +224,7 @@ internal sealed class PopupHost : IDisposable
         }
 
         _showing++;
+        _foregroundWatch.Stop();
         AltimLog.Write("popup", "Hidden: " + reason);
 
         // Hiding deactivates the window, and the deactivation arrives before IsVisible
@@ -227,6 +268,7 @@ internal sealed class PopupHost : IDisposable
         _disposed = true;
         _closing = true;
 
+        _foregroundWatch.Stop();
         _window.Deactivated -= OnDeactivated;
         _window.Closing -= OnClosing;
 
@@ -335,13 +377,31 @@ internal sealed class PopupHost : IDisposable
         return DefaultShadowInset;
     }
 
+    /// <summary>
+    /// Refuses a close and hides the panel instead — except the one caller that must never
+    /// be refused.
+    /// </summary>
+    /// <remarks>
+    /// Avalonia asks every window to close while it is answering the operating system's
+    /// session-end query, and a cancelled close is the answer it hands back. A panel that
+    /// cancelled unconditionally therefore vetoed <c>WM_QUERYENDSESSION</c>, and the user got
+    /// the shell's "this app is preventing you from signing out" screen with Altim named on
+    /// it. The rule is <see cref="PopupCloseRule"/>, which is a pure function over the reason
+    /// and is asserted without a window.
+    /// </remarks>
     private void OnClosing(object? sender, WindowClosingEventArgs e)
     {
-        // The panel is hidden, never closed, for the whole life of the process. Anything
-        // that asks it to close before shutdown — alt+F4 on a focused panel, for instance —
-        // gets a hide instead.
         if (_closing)
         {
+            return;
+        }
+
+        if (PopupCloseRule.Decide(e.CloseReason) is PopupCloseAction.Close)
+        {
+            // Let it through, and stop pretending the window is coming back.
+            _closing = true;
+            _foregroundWatch.Stop();
+            AltimLog.Write("popup", "Close allowed: " + PopupCloseRule.Describe(e.CloseReason));
             return;
         }
 
@@ -357,13 +417,79 @@ internal sealed class PopupHost : IDisposable
         }
 
         // The click that opened the panel deactivates it a frame later on some transitions;
-        // closing on that one turns an open into a flicker.
-        if (Environment.TickCount64 - _openedAt < ReopenGuardMilliseconds)
+        // closing on that one turns an open into a flicker. But a deactivation inside the
+        // guard is not nothing, and swallowing it outright is how a double click on the tray
+        // icon left a panel that click-away could not dismiss: the second click collapsed the
+        // panel, the foreground went to Explorer, and the deactivation that said so arrived
+        // inside the guard and was dropped. So the question is asked again once the guard is
+        // over rather than answered "keep".
+        long sinceOpen = Environment.TickCount64 - _openedAt;
+        if (sinceOpen < ReopenGuardMilliseconds)
         {
+            int showing = _showing;
+            DispatcherTimer.RunOnce(
+                () => Resolve(ForegroundRecheckLimit, showing),
+                TimeSpan.FromMilliseconds(ReopenGuardMilliseconds - sinceOpen),
+                DispatcherPriority.Input);
             return;
         }
 
         Resolve(ForegroundRecheckLimit, _showing);
+    }
+
+    /// <summary>
+    /// Reads who owns the foreground while the panel is on screen, so a dismissal does not
+    /// depend on a deactivation arriving.
+    /// </summary>
+    private void OnForegroundWatchTick(object? sender, EventArgs e)
+    {
+        if (_disposed || _hiding || !_window.IsVisible)
+        {
+            _foregroundWatch.Stop();
+            return;
+        }
+
+        if (Environment.TickCount64 - _openedAt < ReopenGuardMilliseconds)
+        {
+            // The open's own focus transition. The deactivation path already schedules a
+            // re-check for the moment the guard is over.
+            return;
+        }
+
+        IntPtr foreground = ReadForegroundWindow();
+        if (foreground == _foregroundBaseline)
+        {
+            // Nothing has moved since the last look. That is the panel surfaced over a
+            // window which already held the foreground: the user asked for it and nothing
+            // has happened since, so it stays — but a click into that window is something
+            // happening, and it moves no foreground at all, so it is asked about directly.
+            PopupForegroundOwner clicked = ReadClickedOwner();
+            if (clicked is not PopupForegroundOwner.Unknown
+                && PopupDismissal.Decide(clicked, canRecheck: false) is PopupDismissalDecision.Dismiss)
+            {
+                Close("clicked away, " + PopupDismissal.DescribeClick(clicked));
+            }
+
+            return;
+        }
+
+        PopupForegroundOwner owner = ClassifyForeground(foreground);
+        if (owner is PopupForegroundOwner.Unknown)
+        {
+            // Activation is still moving. Not a new baseline and not a verdict; the next
+            // tick asks again.
+            return;
+        }
+
+        if (PopupDismissal.Decide(owner, canRecheck: false) is not PopupDismissalDecision.Dismiss)
+        {
+            // Ours or the tray. The foreground has moved, so this is the position the next
+            // move is measured against.
+            _foregroundBaseline = foreground;
+            return;
+        }
+
+        Close("foreground moved, " + PopupDismissal.Describe(owner));
     }
 
     /// <summary>
@@ -418,12 +544,68 @@ internal sealed class PopupHost : IDisposable
     /// that caused it. Everywhere else a deactivation is reported as what it says it is,
     /// which is the behaviour the panel had on those platforms before any of this existed.
     /// </remarks>
-    private static PopupForegroundOwner ReadForegroundOwner()
+    private PopupForegroundOwner ReadForegroundOwner()
     {
 #if WINDOWS
-        return WindowsShell.ForegroundOwner();
+        // The panel's own handle goes with the question, because "belongs to this process"
+        // is two different answers: an overlay the panel owns is the panel, and the
+        // dashboard is a window the user has switched to.
+        return WindowsShell.ForegroundOwner(PanelHandle());
 #else
         return PopupForegroundOwner.Other;
 #endif
     }
+
+    /// <summary>The window that holds the foreground, as a handle, or zero off Windows.</summary>
+    /// <remarks>
+    /// Zero everywhere else, which is what turns the watch off on those platforms: the
+    /// baseline never changes, so it never decides anything, and a deactivation is reported
+    /// as what it says it is — the behaviour the panel had there before any of this existed.
+    /// </remarks>
+    private static IntPtr ReadForegroundWindow()
+    {
+#if WINDOWS
+        return WindowsShell.ForegroundWindow();
+#else
+        return IntPtr.Zero;
+#endif
+    }
+
+    /// <summary>
+    /// Who owns the window a click has landed on since the last look, or
+    /// <see cref="PopupForegroundOwner.Unknown"/> when there has been no click.
+    /// </summary>
+    private PopupForegroundOwner ReadClickedOwner()
+    {
+#if WINDOWS
+        return WindowsShell.ClickedOn(PanelHandle());
+#else
+        return PopupForegroundOwner.Unknown;
+#endif
+    }
+
+    /// <summary>Discards clicks that happened before the panel was on screen.</summary>
+    private static void ForgetPendingClicks()
+    {
+#if WINDOWS
+        WindowsShell.ForgetPendingClicks();
+#endif
+    }
+
+    /// <summary>Who owns a window the watch has just noticed taking the foreground.</summary>
+    /// <param name="foreground">The window that now holds it.</param>
+    private PopupForegroundOwner ClassifyForeground(IntPtr foreground)
+    {
+#if WINDOWS
+        return WindowsShell.ClassifyForeground(foreground, PanelHandle());
+#else
+        _ = foreground;
+        return PopupForegroundOwner.Unknown;
+#endif
+    }
+
+#if WINDOWS
+    /// <summary>The panel window's native handle, or zero before it has one.</summary>
+    private IntPtr PanelHandle() => _window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+#endif
 }

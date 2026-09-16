@@ -58,7 +58,7 @@ one.
 |---|---|---|---|
 | Cold start to tray icon | < 800ms | **260ms** | 0.9–1.2s |
 | Popup open, already warm | < 100ms | **8.4ms**, then under 1ms | 4–43ms |
-| Idle CPU | < 2% of one core | **1.4%** idle, 2.4% under load | same within noise |
+| CPU, Altim **and its children** | < 5% of one core idle | see below | **3.1%** idle, 10.0% under load |
 | Idle working set | < 120MB | **107MB** | 156MB |
 | Database | < 5MB/year | **270KB** after 7.4 hours; see below | same file |
 
@@ -75,11 +75,43 @@ the number was changed. [ARCHITECTURE.md](ARCHITECTURE.md#the-working-set-budget
 has the full breakdown, including the one change that would reach 80MB and why it has not been
 made.
 
-**Idle CPU** is a share of *one* core, not of the machine, because "0.1% of the machine" means
+**CPU is a share of *one* core, not of the machine**, because "0.1% of the machine" means
 different things on a four-core laptop and a sixteen-core desktop and is not a property of the
-program. 1.4% of one core is what the process costs with both provider stores empty and nothing
-happening at all — it is Avalonia's floor for holding a live hidden window, not Altim's work.
-Under continuous agent activity, with the filesystem watchers firing, it reaches about 2.4%.
+program. It sits in the `dotnet build` column because that is the build it was measured on, and
+the shipping column is left empty rather than filled with a number from a different binary. What
+dominates it is the provider command lines, which are the same processes whichever way Altim
+itself was compiled; Altim's own share is the part ahead-of-time compilation would move, and that
+is the smaller half of a figure this size.
+
+**It now counts the processes Altim starts, and it used to count only Altim.** That is not a
+rounding error. Reading Claude Code's session list means running `claude agents --json`, and on
+this machine one of those starts **105 processes and spends 5.6 seconds of CPU** before it
+answers — it takes 18 to 27 seconds of wall clock, longer than the 15 seconds Altim allows it, so
+it is usually killed part way through and the reading falls back to a process scan. It ran on
+every refresh, and refreshes are driven by filesystem events, so a session writing transcripts
+continuously cost **259 child processes a minute and 23.2% of one core** while the published
+figure — taken from `(Get-Process Altim).TotalProcessorTime` — said 2.4%. That figure was not
+wrong about what it measured. It measured the wrong thing.
+
+Two changes, then an honest number. The session listing now runs at the polling floor rather than
+on every refresh, and backs off to five minutes when nothing that looks like an agent is running
+or when the previous attempt did not answer. Neither costs a status: whether an agent is running
+comes from a process scan that reads an executable name and a process id. Measured back to back on
+the same machine under the same load, that takes the whole tree from **23.2% to 10.0% of one core,
+and from 259 child processes a minute to 61**.
+
+**The budget has moved with it, because 10% does not fit under 2%.** The old number was written
+for a process measured alone, and keeping it while counting the children would have meant
+publishing a budget the product misses by five times. It is now **under 5% of one core at idle**,
+against a measured 3.1%, with the load figure stated separately rather than folded in and
+rounded down. Idle is the one number the gating did not move — at idle the polling floor already
+held the listing to once a minute, and what is left there is the provider CLIs answering once a
+minute each, which is the price of reading anything at all. The way to make that smaller is to run
+them less often, not to measure them less honestly.
+
+Altim's own share, which is what the old figure reported, is **2.7% of one core under load and
+1.8% at idle**. That part is Avalonia's floor for holding a live hidden window plus the file
+reads, and these changes left it where it was.
 
 **Database growth** has two figures and they mean different things. The file held **270KB for
 2,373 samples** after 7.4 hours of continuous agent activity — about 114 bytes per sample
@@ -90,14 +122,32 @@ a rolling window of at most a month of raw samples. The write-ahead log in front
 capped at roughly 1MB while Altim is working and emptied once two minutes pass with no write —
 SQLite's own default would leave it sitting at 3.9MB for ever.
 
+That last part only recently became true, and two things had to change for it. The notification
+state was rewritten on every reading — a delete plus an insert per row, inside a write transaction
+— whether or not anything had changed, which is most readings; and the history recorded nothing on
+an unchanged reading but took the writer to work that out. The database is marked as recently
+written when the writer is *taken*, not when something reaches the file, so two minutes never
+passed without a write while an agent was working and the idle checkpoint never ran at exactly the
+times the log was growing. The log sat at 869KB in front of a 397KB database. Both comparisons now
+happen before the writer is asked for: the notification state against what this process last wrote,
+and the history on a read connection.
+
 ### How to measure it yourself
 
 - **Start-up, popup open and first readings** are timed by the application and written to
   `%APPDATA%\Altim\altim.log`. Launching Altim a second time signals the running instance to
   surface its panel, which is a repeatable way to time an open without touching the mouse.
-- **Working set and CPU** come from the process itself: `(Get-Process Altim).WorkingSet64`, and
-  `TotalProcessorTime` sampled three minutes apart divided by the elapsed wall time for the
-  share of one core. Measure a minute after start at the earliest — the first pass over a
+- **Working set** comes from the process itself: `(Get-Process Altim).WorkingSet64`.
+- **CPU has to count the children, or it counts almost nothing.** A provider CLI runs for a
+  second or two and exits, so it is gone before a sampling loop can find it, and
+  `TotalProcessorTime` on the Altim process never knew it existed. Put Altim in a **job
+  object** — `CreateJobObject`, `AssignProcessToJobObject` — and read
+  `JobObjectBasicAccountingInformation`: `TotalUserTime` plus `TotalKernelTime` are the summed
+  CPU of every process that has ever been in the job, including the ones that have already
+  exited, and `TotalProcesses` counts how many there have been. Divide the CPU by the elapsed
+  wall time for the share of one core, and read the Altim process's own `TotalProcessorTime`
+  alongside it: the difference between the two is what the old figure was missing. Measure a
+  minute after start at the earliest — the first pass over a
   provider store is the expensive one, and it is deliberately not on the start-up path. For the
   idle floor rather than the working figure, point `CODEX_HOME` and `CLAUDE_CONFIG_DIR` at empty
   directories, which leaves the process with nothing to react to.

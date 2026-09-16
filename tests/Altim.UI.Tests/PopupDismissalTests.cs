@@ -155,20 +155,53 @@ public sealed class PopupDismissalTests
             PopupDismissal.Classify(hasForegroundWindow: true, isOwnProcess: false, "Shell_SecondaryTrayWnd"));
 
     /// <summary>
-    /// Opening the dashboard from the panel deactivates the panel, and the dashboard is ours.
-    /// If that dismissed, the panel would be hidden with the reason "deactivated" a frame
-    /// before the action it was asked to run had a chance to hide it itself — and any overlay
-    /// of the panel's own that takes focus would close the panel underneath it.
+    /// An overlay of the panel's own that takes focus is not the user leaving: it is the
+    /// panel, one window further in. Closing the panel underneath it would take the overlay
+    /// with it.
     /// </summary>
     [Fact]
-    public void AnAltimWindowTakingTheForegroundIsNotADismissal()
+    public void AnOverlayThePanelOwnsIsNotADismissal()
     {
         PopupForegroundOwner owner = PopupDismissal.Classify(
-            hasForegroundWindow: true, isOwnProcess: true, windowClass: string.Empty);
+            hasForegroundWindow: true,
+            isOwnProcess: true,
+            windowClass: string.Empty,
+            isPanelOrItsOverlay: true);
 
         Assert.Equal(PopupForegroundOwner.Self, owner);
         Assert.Equal(PopupDismissalDecision.Keep, PopupDismissal.Decide(owner, canRecheck: false));
     }
+
+    /// <summary>
+    /// The dashboard is one of ours and is still a click-away. "Belongs to this process" was
+    /// the whole test, so clicking the dashboard while the panel was open left a topmost
+    /// panel sitting over the window the user had just switched to — and being Altim's own
+    /// window makes that more obviously a defect, not less.
+    /// </summary>
+    [Fact]
+    public void AnotherAltimWindowThatThePanelDoesNotOwnIsADismissal()
+    {
+        PopupForegroundOwner owner = PopupDismissal.Classify(
+            hasForegroundWindow: true,
+            isOwnProcess: true,
+            windowClass: string.Empty,
+            isPanelOrItsOverlay: false);
+
+        Assert.Equal(PopupForegroundOwner.Application, owner);
+        Assert.Equal(PopupDismissalDecision.Dismiss, PopupDismissal.Decide(owner, canRecheck: true));
+        Assert.Equal(PopupDismissalDecision.Dismiss, PopupDismissal.Decide(owner, canRecheck: false));
+    }
+
+    /// <summary>
+    /// The two own-process answers read differently in the log, because "another Altim
+    /// window took the foreground" was the line printed while the panel stayed up over the
+    /// dashboard and it is the line somebody will search for.
+    /// </summary>
+    [Fact]
+    public void TheTwoOwnProcessAnswersAreDescribedDifferently() =>
+        Assert.NotEqual(
+            PopupDismissal.Describe(PopupForegroundOwner.Self),
+            PopupDismissal.Describe(PopupForegroundOwner.Application));
 
     /// <summary>
     /// Our own process is asked about before the class name is, because an Avalonia overlay
@@ -189,6 +222,27 @@ public sealed class PopupDismissalTests
     [InlineData("NotShell_TrayWnd")]
     public void ANearMissIsNotTheTray(string windowClass) =>
         Assert.False(PopupDismissal.IsTrayWindowClass(windowClass));
+
+    /// <summary>
+    /// A click that lands outside the panel is described as a click rather than as a
+    /// foreground change, because the case the click test exists for is the one where no
+    /// foreground moved at all: the panel was surfaced over a window that already had it.
+    /// </summary>
+    /// <param name="owner">Who owns the window the click landed on.</param>
+    [Theory]
+    [InlineData(PopupForegroundOwner.Unknown)]
+    [InlineData(PopupForegroundOwner.Self)]
+    [InlineData(PopupForegroundOwner.Tray)]
+    [InlineData(PopupForegroundOwner.Other)]
+    [InlineData(PopupForegroundOwner.Application)]
+    public void AClickIsDescribedAsAClick(PopupForegroundOwner owner)
+    {
+        string described = PopupDismissal.DescribeClick(owner);
+
+        Assert.False(string.IsNullOrWhiteSpace(described));
+        Assert.Contains("click", described, StringComparison.Ordinal);
+        Assert.NotEqual(PopupDismissal.Describe(owner), described);
+    }
 
     /// <summary>Every class the classifier accepts is one it reports as the tray.</summary>
     [Fact]

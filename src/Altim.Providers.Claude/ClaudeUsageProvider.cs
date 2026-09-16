@@ -74,6 +74,14 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
 
     private ProviderUsage _usage;
     private IReadOnlyList<AgentSession> _sessions = [];
+
+    /// <summary>
+    /// The entries the last listing that actually ran reported, and whether that listing
+    /// answered. A skipped listing is no new information, so the last answer stands.
+    /// </summary>
+    private IReadOnlyList<ClaudeAgentEntry> _lastEntries = [];
+    private bool _lastListingAnswered;
+    private DateTimeOffset? _agentsListedAt;
     private ClaudeTokenBucket _cumulative;
     private bool _hasCumulative;
     private ClaudeUsageSummary _summary = ClaudeUsageSummary.Empty;
@@ -302,9 +310,16 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
             AddStatusLineMetrics(metrics, statusLine, statusLineFresh, now);
             AddSummaryMetrics(metrics, now);
 
-            ClaudeAgentsListing listing = await ListAgentsAsync(cliPresent, ct).ConfigureAwait(false);
-            IReadOnlyList<AgentSession> sessions = BuildSessions(listing);
-            ProviderStatus status = await ResolveStatusAsync(listing, metrics.Count > 0, ct).ConfigureAwait(false);
+            // The liveness scan first, and it is what decides whether the listing runs at
+            // all. It reads a process table; the listing starts a process.
+            bool agentRunning = ProcessScanner.HasProcess(
+                await ScanProcessesAsync(ct).ConfigureAwait(false), ClaudeProviderInfo.Id);
+
+            ClaudeAgentsListing listing = await ListAgentsAsync(cliPresent, agentRunning, now, ct).ConfigureAwait(false);
+            RememberListing(listing);
+
+            IReadOnlyList<AgentSession> sessions = BuildSessions(_lastEntries);
+            ProviderStatus status = ResolveStatus(agentRunning, metrics.Count > 0);
             string? detail = DescribeStatus(statusLine, statusLineFresh, metrics, cliPresent, now);
 
             return (
@@ -565,18 +580,100 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         return true;
     }
 
-    private async Task<ClaudeAgentsListing> ListAgentsAsync(bool cliPresent, CancellationToken ct)
+    /// <summary>
+    /// Runs <c>claude agents --json</c>, unless the last listing is recent enough to stand.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the one part of a Claude refresh that starts a process, and it used to run on
+    /// every refresh. It is also, by a wide margin, the most expensive thing Altim does:
+    /// measured on the verification machine, one invocation starts 105 processes and spends
+    /// 5.6 seconds of CPU, and takes longer than its own timeout to answer. Refreshes are
+    /// event-driven, so tying it to one meant a session writing transcripts continuously
+    /// produced 173 child processes a minute and about 17.8% of one core — none of which
+    /// appeared in a CPU figure measured from the Altim process alone.
+    /// </para>
+    /// <para>
+    /// So it runs on a floor of its own, at the polling floor, and two things push it out to
+    /// the backoff: a scan that cannot see anything that looks like an agent, and a previous
+    /// attempt that did not answer. Neither costs the user a status — whether an agent is
+    /// running comes from the scan on every refresh — and what is delayed is how soon a new
+    /// session appears by name in the activity list.
+    /// </para>
+    /// </remarks>
+    private async Task<ClaudeAgentsListing> ListAgentsAsync(
+        bool cliPresent, bool agentRunning, DateTimeOffset now, CancellationToken ct)
     {
         if (!cliPresent)
         {
             return ClaudeAgentsListing.NotDetected;
         }
 
+        if (_agentsListedAt is { } last)
+        {
+            TimeSpan floor = agentRunning && _lastListingAnswered
+                ? _options.AgentsInterval
+                : _options.AgentsBackoffInterval;
+
+            if (now >= last && now - last < floor)
+            {
+                return ClaudeAgentsListing.Skipped;
+            }
+        }
+
+        _agentsListedAt = now;
         return await _agents.ListAsync(_options.AgentsTimeout, ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Turns a listing into session rows, each carrying that session's running token total.
+    /// Keeps whatever the last listing that actually ran said.
+    /// </summary>
+    /// <param name="listing">The listing this refresh produced.</param>
+    /// <remarks>
+    /// A skipped listing changes nothing: it is not evidence that no session is running, and
+    /// treating it as one would blink the activity list out between listings. A failed or
+    /// absent one is different — it means the command cannot answer, so the remembered
+    /// entries are dropped and the process scan becomes the fallback it has always been.
+    /// </remarks>
+    private void RememberListing(ClaudeAgentsListing listing)
+    {
+        switch (listing.Outcome)
+        {
+            case ClaudeAgentsOutcome.Listed:
+                _lastEntries = listing.Entries;
+                _lastListingAnswered = true;
+                break;
+
+            case ClaudeAgentsOutcome.Skipped:
+                break;
+
+            default:
+                _lastEntries = [];
+                _lastListingAnswered = false;
+                break;
+        }
+    }
+
+    private async Task<IReadOnlyList<DetectedProcess>> ScanProcessesAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await _processMonitor.ScanAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException)
+        {
+            // A denied process table is the normal case, not a failure.
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Turns the entries in force into session rows, each carrying that session's running
+    /// token total.
     /// </summary>
     /// <remarks>
     /// An entry with no start instant produces no row. The clock is not a start time: an
@@ -585,11 +682,11 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
     /// entry still counts towards the provider's status, because the command listing it is
     /// what says an agent is running.
     /// </remarks>
-    private IReadOnlyList<AgentSession> BuildSessions(ClaudeAgentsListing listing)
+    private IReadOnlyList<AgentSession> BuildSessions(IReadOnlyList<ClaudeAgentEntry> entries)
     {
-        var sessions = new List<AgentSession>(listing.Entries.Count);
+        var sessions = new List<AgentSession>(entries.Count);
 
-        foreach (ClaudeAgentEntry entry in listing.Entries)
+        foreach (ClaudeAgentEntry entry in entries)
         {
             if (entry.SessionId is not { } sessionId || entry.StartedAt is not { } startedAt)
             {
@@ -613,14 +710,14 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         return sessions;
     }
 
-    private async Task<ProviderStatus> ResolveStatusAsync(ClaudeAgentsListing listing, bool hasMetrics, CancellationToken ct)
+    private ProviderStatus ResolveStatus(bool agentRunning, bool hasMetrics)
     {
-        if (listing.Entries.Count > 0)
+        if (_lastEntries.Count > 0)
         {
             return ProviderStatus.Active;
         }
 
-        if (listing.IsAuthoritative)
+        if (_lastListingAnswered)
         {
             // The agents listing answered and said nothing is running. It resolves liveness
             // itself — it correctly omitted a registry entry whose process id had been
@@ -630,25 +727,10 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         }
 
         // The listing could not be had at all. That is not "nothing is running", so the
-        // fallback applies.
-        try
-        {
-            IReadOnlyList<DetectedProcess> processes = await _processMonitor.ScanAsync(ct).ConfigureAwait(false);
-            if (ProcessScanner.HasProcess(processes, ClaudeProviderInfo.Id))
-            {
-                return ProviderStatus.Active;
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (InvalidOperationException)
-        {
-            // A denied process table is the normal case, not a failure.
-        }
-
-        return hasMetrics ? ProviderStatus.Idle : ProviderStatus.Detected;
+        // fallback applies: the scan that was taken before the listing was decided on.
+        return agentRunning
+            ? ProviderStatus.Active
+            : hasMetrics ? ProviderStatus.Idle : ProviderStatus.Detected;
     }
 
     private string? DescribeStatus(

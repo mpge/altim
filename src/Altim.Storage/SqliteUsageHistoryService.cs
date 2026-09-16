@@ -90,6 +90,18 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
 
         long capturedAt = (usage.LastRefreshed ?? _timeProvider.GetUtcNow()).ToUnixTimeSeconds();
 
+        // Asked on a read connection, before the writer is taken. Almost every reading
+        // leaves every metric where it was, and the comparison below would then open a
+        // write transaction, find nothing to do and commit nothing — which is invisible in
+        // the file and very visible in the maintenance pass, because taking the writer at
+        // all is what marks the database as recently written. Two minutes never passed
+        // without a write while an agent was working, so the checkpoint that empties the
+        // write-ahead log never ran at exactly the times the log was growing.
+        if (!await HasChangesAsync(usage, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
         using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
         SqliteConnection connection = lease.Connection;
 
@@ -249,6 +261,36 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
             tokens?.Output,
             tokens?.CacheRead,
             tokens?.CacheWrite);
+    }
+
+    /// <summary>
+    /// Whether any metric in a reading differs from the last row recorded for it.
+    /// </summary>
+    /// <param name="usage">The reading about to be recorded.</param>
+    /// <param name="ct">Cancels the read.</param>
+    /// <remarks>
+    /// The same comparison the write path makes, on a connection that cannot write. It is
+    /// a pre-check rather than the decision: the write path compares again inside its own
+    /// transaction, so a value that changes between the two is still handled correctly and
+    /// this can only ever cost an unnecessary transaction, never a lost sample.
+    /// </remarks>
+    private async ValueTask<bool> HasChangesAsync(ProviderUsage usage, CancellationToken ct)
+    {
+        using SqliteConnection connection = _database.OpenRead();
+
+        foreach (UsageMetric metric in usage.Metrics)
+        {
+            SampleValues candidate = ToValues(metric, usage.Tokens);
+            SampleValues? previous = await ReadLatestAsync(connection, usage.ProviderId, metric.Key, ct)
+                .ConfigureAwait(false);
+
+            if (previous != candidate)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static async ValueTask<SampleValues?> ReadLatestAsync(

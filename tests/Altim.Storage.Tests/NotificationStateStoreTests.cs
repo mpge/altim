@@ -1,4 +1,5 @@
 using Altim.Core.Notifications;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace Altim.Storage.Tests;
@@ -209,6 +210,101 @@ public sealed class NotificationStateStoreTests
         // An instant that cannot exist is not an instant. The firing is still known.
         Assert.Null(stored.WindowResetsAt);
         Assert.Equal(Now, stored.FiredAt);
+    }
+
+    /// <summary>
+    /// The state the evaluator produces is identical on almost every reading: nothing has
+    /// crossed a threshold and no window has rolled over. Rewriting it anyway is a delete
+    /// plus an insert per row inside a write transaction, several times a minute while an
+    /// agent works.
+    /// </summary>
+    /// <remarks>
+    /// <c>PRAGMA data_version</c> is read twice on one connection that stays open across the
+    /// calls, which is the only way SQLite defines it: it changes when <em>another</em>
+    /// connection commits. So this asserts the file was not modified, rather than taking the
+    /// store's word for it.
+    /// </remarks>
+    [Fact]
+    public async Task AnUnchangedStateIsNotWrittenAgain()
+    {
+        using var temp = new TempDatabase();
+        AltimDatabase database = temp.Open();
+        var store = new NotificationStateStore(database);
+
+        NotificationState[] fired =
+        [
+            new NotificationState("claude", "five_hour", 80, Now, Now.AddHours(3)),
+            new NotificationState("codex", "codex:10080", 90, Now, null),
+        ];
+
+        Assert.True(await store.ReplaceAllAsync(fired, Ct));
+
+        using SqliteConnection watcher = database.OpenRead();
+        long before = DataVersion(watcher);
+
+        Assert.False(await store.ReplaceAllAsync(fired, Ct));
+        Assert.False(await store.ReplaceAllAsync([.. fired], Ct));
+
+        Assert.Equal(before, DataVersion(watcher));
+        Assert.Equal(2L, temp.CountRows("notification_state"));
+
+        // And the same connection does see a real write, so the reading above is evidence
+        // rather than a pragma that never moves.
+        Assert.True(await store.ReplaceAllAsync([fired[0]], Ct));
+        Assert.NotEqual(before, DataVersion(watcher));
+    }
+
+    /// <summary>Reads SQLite's own "somebody else committed" counter.</summary>
+    /// <param name="connection">A connection held open across the calls being measured.</param>
+    private static long DataVersion(SqliteConnection connection)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "PRAGMA data_version";
+        return (long)command.ExecuteScalar()!;
+    }
+
+    /// <summary>
+    /// And a state that has changed is still written, in every direction a change can go:
+    /// one more entry, one fewer, and the same entries with a different value on one.
+    /// </summary>
+    [Fact]
+    public async Task AChangedStateIsWritten()
+    {
+        using var temp = new TempDatabase();
+        var store = new NotificationStateStore(temp.Open());
+
+        var first = new NotificationState("claude", "five_hour", 80, Now, Now.AddHours(3));
+        var second = new NotificationState("codex", "codex:10080", 90, Now, null);
+
+        Assert.True(await store.ReplaceAllAsync([first], Ct));
+        Assert.True(await store.ReplaceAllAsync([first, second], Ct));
+        Assert.True(await store.ReplaceAllAsync([first with { WindowResetsAt = Now.AddHours(4) }, second], Ct));
+        Assert.True(await store.ReplaceAllAsync([second], Ct));
+        Assert.True(await store.ReplaceAllAsync([], Ct));
+
+        Assert.Equal(0L, temp.CountRows("notification_state"));
+    }
+
+    /// <summary>
+    /// The skip is only ever about what this process wrote. Anything that changes the table
+    /// by another route gives the answer up, so the next replacement rewrites the table
+    /// rather than trusting a state that is no longer on file.
+    /// </summary>
+    [Fact]
+    public async Task AWriteByAnotherRouteMakesTheNextReplacementWriteAgain()
+    {
+        using var temp = new TempDatabase();
+        var store = new NotificationStateStore(temp.Open());
+
+        NotificationState[] fired = [new NotificationState("claude", "five_hour", 80, Now, Now.AddHours(3))];
+
+        Assert.True(await store.ReplaceAllAsync(fired, Ct));
+        Assert.False(await store.ReplaceAllAsync(fired, Ct));
+
+        await store.ClearAllAsync(Ct);
+
+        Assert.True(await store.ReplaceAllAsync(fired, Ct));
+        Assert.Equal(1L, temp.CountRows("notification_state"));
     }
 
     private static async Task Seed(NotificationStateStore store)

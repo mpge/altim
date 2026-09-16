@@ -45,9 +45,11 @@ internal static class Program
             return 0;
         }
 
+        App? app = null;
+
         try
         {
-            return BuildAvaloniaApp(instance)
+            return BuildAvaloniaApp(instance, created => app = created)
                 .StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown);
         }
         catch (Exception ex)
@@ -56,6 +58,15 @@ internal static class Program
             // file is the only place it can go. The guard is still released by the finally.
             AltimLog.Initialize(AltimDatabase.GetDefaultDirectory());
             AltimLog.Write("startup", "Altim could not start", ex);
+
+            // And the log is not enough on its own. An exception that reaches here has
+            // already unwound the dispatcher loop, so the tray icon is still in the
+            // notification area and the database is still open, and returning from Main
+            // leaves both to the operating system: a ghost icon that only clears when
+            // somebody hovers over it, and a database closed by process exit rather than by
+            // its own teardown. This runs the same synchronous teardown the session-end path
+            // does, on this thread, before the return.
+            app?.ShutDownRuntime("an unhandled exception reached the entry point");
             return 1;
         }
         finally
@@ -76,9 +87,19 @@ internal static class Program
     /// Builds the application for a process that owns the session.
     /// </summary>
     /// <param name="instance">The single-instance guard, or null when none was taken.</param>
+    /// <param name="onCreated">
+    /// Handed the application as it is constructed, so the entry point can tear it down if
+    /// an exception ever reaches it. Avalonia builds the object itself and there is nowhere
+    /// else to get hold of it from.
+    /// </param>
     /// <returns>The configured builder.</returns>
-    private static AppBuilder BuildAvaloniaApp(SingleInstance? instance) =>
-        Configure(AppBuilder.Configure(() => new App(instance)));
+    private static AppBuilder BuildAvaloniaApp(SingleInstance? instance, Action<App> onCreated) =>
+        Configure(AppBuilder.Configure(() =>
+        {
+            var app = new App(instance);
+            onCreated(app);
+            return app;
+        }));
 
     /// <summary>
     /// The configuration both entry points share, so the previewer and the headless test

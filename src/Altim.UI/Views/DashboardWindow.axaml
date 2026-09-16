@@ -64,7 +64,11 @@
                  SelectedItem="{Binding SelectedSection}">
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:NavigationItemViewModel">
-              <Grid ColumnDefinitions="Auto,*">
+              <!-- The row's name is set on the row, not left to the item's ToString(). A
+                   list item whose content is a view model announces the view model's type
+                   name, so a screen reader read the sidebar out as five copies of
+                   "Altim.UI.ViewModels.NavigationItemViewModel". -->
+              <Grid ColumnDefinitions="Auto,*" AutomationProperties.Name="{Binding Title}">
                 <!-- The mark's box is always present so every row lines up, whichever of
                      the two kinds of mark it is carrying. -->
                 <Panel Grid.Column="0"

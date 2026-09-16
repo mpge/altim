@@ -456,6 +456,48 @@ public sealed class SqliteUsageHistoryServiceTests
         SqliteUsageHistoryService history, DateTimeOffset from, DateTimeOffset to)
         => history.GetRangeAsync("claude", from, to, Ct);
 
+    /// <summary>
+    /// A reading that did not move writes no row, and — the part this asserts — does not
+    /// take the writer either.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The comparison used to happen inside a write transaction, which is invisible in the
+    /// file and very visible in the maintenance pass: <see cref="AltimDatabase"/> marks the
+    /// database as recently written when the writer is <em>taken</em>, not when something is
+    /// written to it. So readings arriving once a minute meant two minutes never passed
+    /// without a write, and the checkpoint that empties the write-ahead log never ran while
+    /// an agent was working — which is the only time the log grows.
+    /// </para>
+    /// <para>
+    /// Asserted through <see cref="AltimDatabase.CheckpointIfIdleAsync"/>, which is the
+    /// caller that actually cares, with a control either side: a reading that did move is
+    /// still recent enough to refuse the checkpoint.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task AReadingThatDidNotMoveDoesNotTakeTheWriter()
+    {
+        using var temp = new TempDatabase();
+        AltimDatabase database = temp.Open();
+        var history = new SqliteUsageHistoryService(database);
+
+        TimeSpan idleWindow = TimeSpan.FromMilliseconds(250);
+
+        // The control: a reading that moved has just taken the writer, so the database is
+        // not idle and the checkpoint is refused.
+        await history.RecordAsync(Usage(Origin, Metric("five_hour", 41.5)), Ct);
+        Assert.Equal(WalCheckpoint.Skipped, await database.CheckpointIfIdleAsync(idleWindow, Ct));
+
+        // Well clear of the window, so anything that takes the writer from here resets it.
+        await Task.Delay(TimeSpan.FromMilliseconds(600), Ct);
+
+        await history.RecordAsync(Usage(Origin.AddMinutes(1), Metric("five_hour", 41.5)), Ct);
+
+        Assert.NotEqual(WalCheckpoint.Skipped, await database.CheckpointIfIdleAsync(idleWindow, Ct));
+        Assert.Equal(1L, temp.CountRows("usage_sample"));
+    }
+
     private static ProviderUsage Usage(DateTimeOffset at, params UsageMetric[] metrics)
         => Usage(at, tokens: null, metrics);
 

@@ -60,9 +60,14 @@ internal sealed class StorageStack : IDisposable
         try
         {
             AltimDatabase database = await AltimDatabase.OpenAsync(ct).ConfigureAwait(false);
+
+            // The kind of directory, never the directory. On every platform Altim supports
+            // the configuration directory is inside the user's profile, so the path carries
+            // the account name — and altim.log is a file people attach to bug reports.
             AltimLog.Write(
                 "storage",
-                "Opened " + database.DatabasePath + " at schema version " +
+                "Opened the database in " + AltimDatabase.DescribeDirectory(database.DatabasePath) +
+                " at schema version " +
                 database.SchemaVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
             return new StorageStack(

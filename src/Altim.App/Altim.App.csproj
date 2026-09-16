@@ -64,11 +64,14 @@
     <InvariantTimezone>false</InvariantTimezone>
   </PropertyGroup>
 
-  <!-- Idle footprint. ARCHITECTURE.md's budget is under 80MB working set and under
-       0.1% average CPU for a process that spends its life asleep, and the workstation
-       non-concurrent collector with ConserveMemory set is what that list prescribes:
-       no background GC thread waking a machine that is doing nothing, and a heap that
-       is returned rather than held. -->
+  <!-- Idle footprint. ARCHITECTURE.md's budgets are under 120MB working set and under
+       2% of one core, both of which this file's settings are part of meeting; the older
+       80MB and "0.1% average" numbers this comment used to cite were retired, the first
+       because nothing ever met it and the second because a share of the machine is not a
+       property of the program. The workstation non-concurrent collector with
+       ConserveMemory set is what the technique list prescribes: no background GC thread
+       waking a machine that is doing nothing, and a heap that is returned rather than
+       held. -->
   <PropertyGroup>
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>

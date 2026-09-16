@@ -44,6 +44,19 @@ public sealed class App : Application
         Resources.MergedDictionaries.Add(new AltimTheme());
     }
 
+    /// <summary>
+    /// Tears the runtime down on the calling thread.
+    /// </summary>
+    /// <param name="cause">Why, for the log.</param>
+    /// <remarks>
+    /// For the entry point's last-resort catch. An exception that reaches it has already
+    /// unwound the dispatcher loop, so nothing else is going to run: without this the process
+    /// returned an exit code and left a tray icon nobody owns and a database nobody closed.
+    /// It is the same teardown the session-end path runs, for the same reason — the caller is
+    /// on the dispatcher thread with nothing behind it.
+    /// </remarks>
+    internal void ShutDownRuntime(string cause) => _runtime?.ShutdownSynchronously(cause);
+
     /// <inheritdoc />
     public override void OnFrameworkInitializationCompleted()
     {

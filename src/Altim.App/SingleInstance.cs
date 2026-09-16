@@ -1,5 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using Altim.App.Diagnostics;
+#if WINDOWS
+using Altim.App.Interop;
+#endif
 
 namespace Altim.App;
 
@@ -118,10 +121,21 @@ internal sealed class SingleInstance : IDisposable
     /// Asks the instance that already owns the session to show itself.
     /// </summary>
     /// <returns>True when the signal was delivered.</returns>
+    /// <remarks>
+    /// The foreground right is handed over before the signal, not after. Windows only lets
+    /// the process that currently owns the foreground set it, and that is this launch — the
+    /// one about to exit. Without the hand-over the running instance showed its panel without
+    /// ever activating it, so the panel never received a deactivation and clicking away could
+    /// not dismiss it: a topmost panel over the user's work with no way to put it down.
+    /// </remarks>
     public static bool SignalExisting()
     {
         try
         {
+#if WINDOWS
+            WindowsShell.GrantForegroundToRunningInstance();
+#endif
+
             if (TryOpenSurfaceEvent(out EventWaitHandle? surface))
             {
                 using (surface)

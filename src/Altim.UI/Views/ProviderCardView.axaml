@@ -51,6 +51,7 @@
                 Margin="2,0,0,0"
                 VerticalAlignment="Center"
                 Theme="{DynamicResource AltimIconButton}"
+                AutomationProperties.Name="{Binding DisclosureLabel}"
                 Command="{Binding OpenCommand}">
           <Path Classes="icon next quiet" />
         </Button>

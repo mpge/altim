@@ -162,6 +162,13 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
     public string RetryLabel => UsageFormat.RetryLabel;
 
     /// <summary>
+    /// The accessible name of the disclosure beside this provider's name. The control is a
+    /// drawn chevron with no text of its own, and one chevron per provider is
+    /// indistinguishable from another without it.
+    /// </summary>
+    public string DisclosureLabel => UsageFormat.DisclosureName(DisplayName);
+
+    /// <summary>
     /// Whether the reading succeeded and carried no metric at all, which is a different
     /// thing from a reading that failed and is said differently.
     /// </summary>

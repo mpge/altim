@@ -140,6 +140,43 @@ public sealed class AltimDatabase : IDisposable
     public static string GetDefaultDatabasePath() => Path.Combine(GetDefaultDirectory(), FileName);
 
     /// <summary>
+    /// Names the <em>kind</em> of directory a database file is in, for a log line.
+    /// </summary>
+    /// <param name="databasePath">The file that was opened.</param>
+    /// <returns>
+    /// A phrase naming which directory it is, never the directory itself.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// The path cannot be logged. On every platform Altim supports, the configuration
+    /// directory is inside the user's profile, so the full path contains the account name —
+    /// and <c>altim.log</c> is a file users attach to bug reports. PRIVACY.md says Altim does
+    /// not write the user's filesystem layout down, and its own database path is part of it.
+    /// </para>
+    /// <para>
+    /// The kind is what a log line is actually for. "The default configuration directory"
+    /// against "a configured location" is the difference between the ordinary case and one
+    /// where something pointed Altim somewhere else, and that is the whole of what reading
+    /// the path would have told anybody.
+    /// </para>
+    /// </remarks>
+    public static string DescribeDirectory(string databasePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
+
+        string? directory = Path.GetDirectoryName(Path.GetFullPath(databasePath));
+        string expected = Path.TrimEndingDirectorySeparator(Path.GetFullPath(GetDefaultDirectory()));
+
+        return directory is not null
+            && string.Equals(
+                Path.TrimEndingDirectorySeparator(directory),
+                expected,
+                OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase)
+            ? "the default configuration directory"
+            : "a configured location";
+    }
+
+    /// <summary>
     /// Opens, creating and migrating as needed, the database at the default location.
     /// </summary>
     /// <returns>The open database.</returns>

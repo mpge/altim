@@ -45,6 +45,17 @@ internal sealed class AltimRuntime : IAsyncDisposable
     private static readonly TimeSpan MaintenanceInterval = TimeSpan.FromMinutes(5);
 
     /// <summary>
+    /// How long a teardown that cannot wait is given before the process gives up on it.
+    /// </summary>
+    /// <remarks>
+    /// The session-end path and the unhandled-exception path both run on the dispatcher
+    /// thread with nothing behind them, so they block on the teardown rather than handing it
+    /// to a worker that will never be scheduled. Bounded, because a shutdown that hangs is
+    /// what the operating system kills the process over.
+    /// </remarks>
+    private static readonly TimeSpan SynchronousShutdownTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// How long the database must have gone unwritten before the write-ahead log is
     /// emptied. Comfortably longer than the tightest refresh cadence, so a checkpoint never
     /// lands in the middle of a burst of samples.
@@ -55,6 +66,7 @@ internal sealed class AltimRuntime : IAsyncDisposable
     private readonly StartupReport _report = new();
     private readonly SchedulerNetworkGate _networkGate = new();
     private readonly LiveNetworkPolicy _networkPolicy = new();
+    private readonly SchedulerHandle _schedulers = new();
     private readonly CancellationTokenSource _shutdown = new();
     private readonly DateTimeOffset _processStarted;
 
@@ -63,7 +75,6 @@ internal sealed class AltimRuntime : IAsyncDisposable
     private StorageStack? _storage;
     private SettingsGateway? _settings;
     private ServiceProvider? _services;
-    private MonitorScheduler? _scheduler;
     private ProviderHintWatcher? _hints;
     private UsagePipeline? _pipeline;
     private TrayController? _tray;
@@ -72,6 +83,21 @@ internal sealed class AltimRuntime : IAsyncDisposable
     private IReadOnlyList<IUsageProvider> _providers = [];
 
     private AltimSettings _current = AltimSettings.Default;
+
+    /// <summary>
+    /// Whether a window is on screen, as anything off the dispatcher thread may read it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Asking the window directly is a thread violation, and it was one.</b>
+    /// <c>Window.IsVisible</c> is an Avalonia property and reading it off the dispatcher
+    /// thread throws — and the one caller that does so is the scheduler rebuild, which runs
+    /// on a worker. So changing the refresh interval threw before the replacement was
+    /// started, the old scheduler had already been let go, and monitoring stopped for the
+    /// rest of the session with one line in the tray menu to say so. Reproduced by changing
+    /// Refresh from 1 minute to 5 in the running application. The flag is written on the
+    /// dispatcher thread, where the answer is legal to ask for, and read anywhere.
+    /// </remarks>
+    private volatile bool _windowOnScreen;
     private Altim.Core.Models.PixelRect? _pendingAnchor;
     private bool _activationPending;
     private int _shuttingDown;
@@ -104,6 +130,7 @@ internal sealed class AltimRuntime : IAsyncDisposable
         AltimLog.Write("startup", "Altim starting.");
 
         _lifetime.ShutdownRequested += OnShutdownRequested;
+        _lifetime.Exit += OnExit;
 
         // Subscribed before the stack is built, because building it is what finds most of
         // the conditions. A condition found later — the Linux notification service learning
@@ -158,14 +185,17 @@ internal sealed class AltimRuntime : IAsyncDisposable
         // harmless, but there is no reason to keep producing them.
         _hints?.Dispose();
 
-        if (_scheduler is not null)
+        MonitorScheduler? scheduler = _schedulers.Current;
+        _schedulers.Bind(null);
+
+        if (scheduler is not null)
         {
-            _scheduler.UsageUpdated -= OnUsageUpdated;
-            _scheduler.ProviderFailed -= OnProviderFailed;
+            scheduler.UsageUpdated -= OnUsageUpdated;
+            scheduler.ProviderFailed -= OnProviderFailed;
 
             try
             {
-                await _scheduler.DisposeAsync().ConfigureAwait(false);
+                await scheduler.DisposeAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -226,6 +256,7 @@ internal sealed class AltimRuntime : IAsyncDisposable
         }
 
         _lifetime.ShutdownRequested -= OnShutdownRequested;
+        _lifetime.Exit -= OnExit;
         _report.Changed -= OnReportChanged;
 
         // The token source is cancelled but deliberately not disposed. Work that was in
@@ -281,7 +312,8 @@ internal sealed class AltimRuntime : IAsyncDisposable
 
             if (!_tray.IsVisible)
             {
-                _report.Add("The tray icon could not be added");
+                // Recorded by the controller, which also withdraws it again if the icon
+                // turns up later — Explorer restarting is the ordinary way that happens.
                 AltimLog.Write("tray", "Shell_NotifyIcon did not accept the icon.");
             }
         }
@@ -313,10 +345,11 @@ internal sealed class AltimRuntime : IAsyncDisposable
                 _report, _platform!, _storage, _settings, loaded, _networkGate, _networkPolicy);
             _providers = [.. _services.GetServices<IUsageProvider>()];
 
-            _scheduler = _services.GetRequiredService<MonitorScheduler>();
-            _networkGate.Bind(_scheduler.NetworkGate);
-            _scheduler.UsageUpdated += OnUsageUpdated;
-            _scheduler.ProviderFailed += OnProviderFailed;
+            var scheduler = _services.GetRequiredService<MonitorScheduler>();
+            _networkGate.Bind(scheduler.NetworkGate);
+            scheduler.UsageUpdated += OnUsageUpdated;
+            scheduler.ProviderFailed += OnProviderFailed;
+            _schedulers.Bind(scheduler);
 
             _pipeline = new UsagePipeline(
                 _storage.History,
@@ -333,11 +366,13 @@ internal sealed class AltimRuntime : IAsyncDisposable
 
             await Dispatcher.UIThread.InvokeAsync(() => BuildWindows(loaded)).GetTask().ConfigureAwait(false);
 
-            _scheduler.Start();
+            scheduler.Start();
 
             // Filesystem hints are the event-driven half of monitoring; the 60-second floor
-            // covers anything they miss, which is why failing to arm one is not fatal.
-            _hints = ProviderHintWatcher.Create(_scheduler, BuildProviderIdSet());
+            // covers anything they miss, which is why failing to arm one is not fatal. They
+            // are delivered through the handle rather than to this instance, because
+            // changing the refresh interval replaces it.
+            _hints = ProviderHintWatcher.Create(_schedulers, BuildProviderIdSet());
 
             await ApplyAutoStartAsync(loaded).ConfigureAwait(false);
 
@@ -403,9 +438,28 @@ internal sealed class AltimRuntime : IAsyncDisposable
         {
             _activationPending = false;
             _popup.Open(_pendingAnchor);
+            return;
+        }
+
+        // The one thing "Start minimised" can mean for a process whose main surface is a
+        // tray icon: off, launching opens the dashboard as well. It was persisted and shown
+        // in Settings and read by nothing at all, which is a control that lies.
+        if (!settings.StartMinimised)
+        {
+            AltimLog.Write("startup", "Start minimised is off; opening the dashboard.");
+            _dashboard.Open();
         }
     }
 
+    /// <summary>
+    /// Closes both windows on the dispatcher thread, inline when the caller is already on
+    /// it.
+    /// </summary>
+    /// <remarks>
+    /// The inline case is not an optimisation. The session-end and unhandled-exception paths
+    /// run on the dispatcher thread and block it waiting for this, so posting the work back
+    /// to that thread would be waiting for a frame that cannot run until the wait is over.
+    /// </remarks>
     private async ValueTask DisposeWindowsAsync()
     {
         if (_popup is null && _dashboard is null)
@@ -415,29 +469,37 @@ internal sealed class AltimRuntime : IAsyncDisposable
 
         try
         {
-            await Dispatcher.UIThread.InvokeAsync(() =>
+            if (Dispatcher.UIThread.CheckAccess())
             {
-                if (_popup is not null)
-                {
-                    _popup.Opened -= OnWindowVisibilityChanged;
-                    _popup.Closed -= OnWindowVisibilityChanged;
-                    _popup.ViewModel.OpenRequested -= OnPopupOpenRequested;
-                    _popup.Dispose();
-                    _popup = null;
-                }
+                DisposeWindows();
+                return;
+            }
 
-                if (_dashboard is not null)
-                {
-                    _dashboard.Opened -= OnWindowVisibilityChanged;
-                    _dashboard.Closed -= OnWindowVisibilityChanged;
-                    _dashboard.Dispose();
-                    _dashboard = null;
-                }
-            });
+            await Dispatcher.UIThread.InvokeAsync(DisposeWindows);
         }
         catch (Exception ex)
         {
             AltimLog.Write("shutdown", "Closing the windows failed", ex);
+        }
+    }
+
+    private void DisposeWindows()
+    {
+        if (_popup is not null)
+        {
+            _popup.Opened -= OnWindowVisibilityChanged;
+            _popup.Closed -= OnWindowVisibilityChanged;
+            _popup.ViewModel.OpenRequested -= OnPopupOpenRequested;
+            _popup.Dispose();
+            _popup = null;
+        }
+
+        if (_dashboard is not null)
+        {
+            _dashboard.Opened -= OnWindowVisibilityChanged;
+            _dashboard.Closed -= OnWindowVisibilityChanged;
+            _dashboard.Dispose();
+            _dashboard = null;
         }
     }
 
@@ -449,17 +511,21 @@ internal sealed class AltimRuntime : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Takes the first reading of every provider, which is the expensive one.
+    /// </summary>
+    /// <param name="ct">Cancelled at shutdown.</param>
+    /// <remarks>
+    /// Through the handle rather than through a captured instance, because this is the pass
+    /// a settings change is most likely to land in the middle of: it walks stores measured in
+    /// tens of gigabytes, and a scheduler replaced underneath it would answer with nothing
+    /// and report nothing. The handle notices the rebuild and takes the reading again.
+    /// </remarks>
     private async Task FirstReadingsAsync(CancellationToken ct)
     {
-        MonitorScheduler? scheduler = _scheduler;
-        if (scheduler is null)
-        {
-            return;
-        }
-
         try
         {
-            await scheduler.RefreshAllAsync(ct).ConfigureAwait(false);
+            await _schedulers.RefreshAllAsync(ct).ConfigureAwait(false);
             AltimLog.Timing("first readings", SinceProcessStart());
         }
         catch (OperationCanceledException)
@@ -601,9 +667,28 @@ internal sealed class AltimRuntime : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Replaces the scheduler when a cadence setting changes, which is the only way to change
+    /// one: its intervals are fixed at construction.
+    /// </summary>
+    /// <param name="settings">The settings as they now stand.</param>
+    /// <remarks>
+    /// <para>
+    /// The hand-over order is the whole of this method's difficulty. The replacement is
+    /// running before anything is pointed at it, the handle is re-pointed next so hints and
+    /// passes reach the live instance from that moment, and only then is the old one
+    /// disposed — so nothing is ever holding a scheduler that has stopped.
+    /// </para>
+    /// <para>
+    /// It used to be the other way round, and two things captured the instance rather than
+    /// the handle: the filesystem watchers and the first-readings pass. Changing Refresh
+    /// therefore sent every later hint to a disposed scheduler, which drops them without
+    /// complaint, and the meters fell back to the polling floor for the rest of the session.
+    /// </para>
+    /// </remarks>
     private async Task RebuildSchedulerAsync(AltimSettings settings)
     {
-        MonitorScheduler? previous = _scheduler;
+        MonitorScheduler? previous = _schedulers.Current;
         if (previous is null)
         {
             return;
@@ -617,23 +702,25 @@ internal sealed class AltimRuntime : IAsyncDisposable
 
         try
         {
-            previous.UsageUpdated -= OnUsageUpdated;
-            previous.ProviderFailed -= OnProviderFailed;
-            await previous.DisposeAsync().ConfigureAwait(false);
-
             var replacement = new MonitorScheduler(_providers, TimeProvider.System, wanted);
             replacement.UsageUpdated += OnUsageUpdated;
             replacement.ProviderFailed += OnProviderFailed;
 
-            _scheduler = replacement;
-
             // The providers are holding the forwarding gate, so re-pointing it is the whole
             // of the hand-over; nothing has to be rebuilt to follow the new floor.
             _networkGate.Bind(replacement.NetworkGate);
-            replacement.SetUiVisible(IsAnyWindowOpen());
+            replacement.SetUiVisible(_windowOnScreen);
             replacement.Start();
 
-            AltimLog.Write("monitor", "Rebuilt the scheduler for a new cadence.");
+            // Live before the old one stops, so a hint that arrives during the hand-over has
+            // somewhere to go.
+            _schedulers.Bind(replacement);
+
+            previous.UsageUpdated -= OnUsageUpdated;
+            previous.ProviderFailed -= OnProviderFailed;
+            await previous.DisposeAsync().ConfigureAwait(false);
+
+            AltimLog.Write("monitor", "Rebuilt the scheduler for a new cadence; hints follow it.");
         }
         catch (Exception ex)
         {
@@ -642,10 +729,22 @@ internal sealed class AltimRuntime : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Whether a window is on screen. Dispatcher thread only; everything else reads
+    /// <see cref="_windowOnScreen"/>.
+    /// </summary>
     private bool IsAnyWindowOpen() => _popup?.IsOpen == true || _dashboard?.IsOpen == true;
 
-    private void OnWindowVisibilityChanged(object? sender, EventArgs e) =>
-        _scheduler?.SetUiVisible(IsAnyWindowOpen());
+    /// <summary>
+    /// Raised on the dispatcher thread when either window is shown or hidden, which is the
+    /// only place the question may be asked.
+    /// </summary>
+    private void OnWindowVisibilityChanged(object? sender, EventArgs e)
+    {
+        bool onScreen = IsAnyWindowOpen();
+        _windowOnScreen = onScreen;
+        _schedulers.Current?.SetUiVisible(onScreen);
+    }
 
     /// <summary>
     /// The panel asks for the window, and says which section it wants: the gear asks for
@@ -772,7 +871,7 @@ internal sealed class AltimRuntime : IAsyncDisposable
 
     private void OnSystemSuspending(object? sender, EventArgs e)
     {
-        MonitorScheduler? scheduler = _scheduler;
+        MonitorScheduler? scheduler = _schedulers.Current;
         if (scheduler is null)
         {
             return;
@@ -784,7 +883,7 @@ internal sealed class AltimRuntime : IAsyncDisposable
 
     private void OnSystemResumed(object? sender, EventArgs e)
     {
-        MonitorScheduler? scheduler = _scheduler;
+        MonitorScheduler? scheduler = _schedulers.Current;
         if (scheduler is null)
         {
             return;
@@ -864,23 +963,119 @@ internal sealed class AltimRuntime : IAsyncDisposable
         });
     }
 
-    private void OnShutdownRequested(object? sender, ShutdownRequestedEventArgs e)
+    /// <summary>
+    /// The session-end <em>query</em>: Windows asking whether the session may end, which the
+    /// user can still answer no to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Nothing irreversible happens here, and it used to.</b> This handler removed the
+    /// tray icon and latched the shutdown flag, on the reasoning that a session end leaves no
+    /// time for an orderly teardown. Both halves were wrong. Avalonia raises this from
+    /// <c>WM_QUERYENDSESSION</c>, which is a question — sign-out can be cancelled at the
+    /// confirmation screen, or by another application — and answering it is not the same as
+    /// the process going away. Reproduced on Windows 11 26200 by sending the query to the
+    /// running process: the icon went, the query was vetoed by
+    /// <c>PopupHost</c> cancelling its own close, and what was left was a running Altim with
+    /// no icon and, because the flag had latched, a Quit that did nothing.
+    /// </para>
+    /// <para>
+    /// So the query gets a log line and no action. <see cref="OnExit"/> is where shutdown is
+    /// certain, and that is where the teardown happens.
+    /// </para>
+    /// </remarks>
+    private void OnShutdownRequested(object? sender, ShutdownRequestedEventArgs e) =>
+        AltimLog.Write("shutdown", "A session end was queried; allowing it.");
+
+    /// <summary>
+    /// Shutdown is certain: Avalonia has decided to exit and is about to stop the dispatcher.
+    /// </summary>
+    private void OnExit(object? sender, ControlledApplicationLifetimeExitEventArgs e) =>
+        ShutdownSynchronously("the application is exiting");
+
+    /// <summary>
+    /// Tears everything down on the calling thread, bounded by
+    /// <see cref="SynchronousShutdownTimeout"/>.
+    /// </summary>
+    /// <param name="cause">Why, for the log.</param>
+    /// <remarks>
+    /// <para>
+    /// For the two paths that have nothing behind them: the session ending, and an unhandled
+    /// exception on the dispatcher thread. Both run on that thread with the message loop
+    /// about to stop, so handing the teardown to a worker and returning leaves a tray icon
+    /// and an open database behind while the process exits around them.
+    /// </para>
+    /// <para>
+    /// The icon goes first and only from here, because from here the process really is going
+    /// away — the removal can no longer be regretted.
+    /// </para>
+    /// </remarks>
+    internal void ShutdownSynchronously(string cause)
     {
-        // The session is ending and there is no time for an orderly teardown. Remove the
-        // icon synchronously, because the one thing that must not survive this process is a
-        // ghost in the notification area.
-        if (Interlocked.Exchange(ref _shuttingDown, 1) == 0)
+        if (Interlocked.Exchange(ref _shuttingDown, 1) != 0)
+        {
+            return;
+        }
+
+        AltimLog.Write("shutdown", "Tearing down synchronously: " + cause + ".");
+
+        try
         {
             _platform?.Dispose();
         }
+        catch (Exception ex)
+        {
+            AltimLog.Write("shutdown", "Removing the tray icon failed", ex);
+        }
+
+        // The windows next, here, on this thread. This is the dispatcher thread and it is
+        // about to block on the rest of the teardown, and the teardown does not stay on it:
+        // the first await inside DisposeAsync hands the continuation to the thread pool, and
+        // a pool thread asking the dispatcher to close the windows would be waiting for a
+        // frame that cannot run until the wait it is inside of is over. Measured as exactly
+        // that deadlock before this line existed — the teardown reached the windows and sat
+        // there until the budget ran out.
+        try
+        {
+            if (Dispatcher.UIThread.CheckAccess())
+            {
+                DisposeWindows();
+            }
+        }
+        catch (Exception ex)
+        {
+            AltimLog.Write("shutdown", "Closing the windows failed", ex);
+        }
+
+        try
+        {
+            if (!DisposeAsync().AsTask().Wait(SynchronousShutdownTimeout))
+            {
+                AltimLog.Write("shutdown", "The teardown did not finish in time; exiting anyway.");
+            }
+        }
+        catch (Exception ex)
+        {
+            AltimLog.Write("shutdown", "The teardown failed", ex);
+        }
     }
 
+    /// <summary>
+    /// Quit, from the tray menu.
+    /// </summary>
+    /// <remarks>
+    /// The latch is taken here rather than on the session-end query, which is what makes Quit
+    /// still work after a sign-out the user backed out of. <see cref="OnExit"/> finds the
+    /// latch already taken and does nothing, because this path has already done it.
+    /// </remarks>
     private void RequestShutdown()
     {
         if (Interlocked.Exchange(ref _shuttingDown, 1) != 0)
         {
             return;
         }
+
+        AltimLog.Write("shutdown", "Quit was chosen from the tray menu.");
 
         _ = Task.Run(async () =>
         {
