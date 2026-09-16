@@ -1,0 +1,169 @@
+<!--
+  ComboBox and ComboBoxItem.
+
+  The closed box is the same shape as a TextBox - 32px, 1px border, radius 6 - with a
+  hairline chevron rather than a filled glyph. The drop down reuses the popup panel shape
+  from DESIGN.md: radius 8, 1px border, SurfaceMuted, and the one shadow the system allows.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:conv="using:Avalonia.Data.Converters">
+
+  <ControlTheme x:Key="{x:Type ComboBoxItem}" TargetType="ComboBoxItem">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="Padding" Value="{DynamicResource AltimComboBoxPadding}" />
+    <Setter Property="MinHeight" Value="{DynamicResource AltimRowMinHeight}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius6}" />
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="ComboBoxItem">
+        <Border Name="PART_Body"
+                Background="{TemplateBinding Background}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Name="PART_ContentPresenter"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:pointerover /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
+    </Style>
+
+    <Style Selector="^:selected /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Opacity" Value="{DynamicResource AltimDisabledOpacity}" />
+    </Style>
+  </ControlTheme>
+
+  <!-- The editable field inside the box carries no chrome of its own. -->
+  <ControlTheme x:Key="AltimBareTextBox"
+                TargetType="TextBox"
+                BasedOn="{StaticResource {x:Type TextBox}}">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThicknessNone}" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="{x:Type ComboBox}" TargetType="ComboBox">
+    <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimBorderBrush}" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThickness}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius6}" />
+    <Setter Property="Padding" Value="{DynamicResource AltimComboBoxPadding}" />
+    <Setter Property="MinHeight" Value="{DynamicResource AltimControlMinHeight}" />
+    <Setter Property="MaxDropDownHeight" Value="240" />
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+    <Setter Property="PlaceholderForeground" Value="{DynamicResource AltimTextSecondaryBrush}" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="ComboBox">
+        <Panel>
+          <Border Name="PART_FocusRing"
+                  IsVisible="False"
+                  IsHitTestVisible="False"
+                  Margin="{DynamicResource AltimFocusRingMargin}"
+                  BorderThickness="{DynamicResource AltimFocusRingThickness}"
+                  BorderBrush="{DynamicResource AltimFocusRingBrush}"
+                  CornerRadius="{DynamicResource AltimCornerRadius8}" />
+
+          <Border Name="PART_Body"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{TemplateBinding CornerRadius}"
+                  Padding="{TemplateBinding Padding}">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Name="PART_Placeholder"
+                         Grid.Column="0"
+                         Text="{TemplateBinding PlaceholderText}"
+                         Foreground="{TemplateBinding PlaceholderForeground}"
+                         VerticalAlignment="Center"
+                         IsVisible="{TemplateBinding SelectionBoxItem, Converter={x:Static conv:ObjectConverters.IsNull}}" />
+              <ContentControl Name="PART_SelectedContent"
+                              Grid.Column="0"
+                              IsHitTestVisible="False"
+                              Content="{TemplateBinding SelectionBoxItem}"
+                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="Center" />
+              <TextBox Name="PART_EditableTextBox"
+                       Grid.Column="0"
+                       IsVisible="{TemplateBinding IsEditable}"
+                       Theme="{StaticResource AltimBareTextBox}"
+                       Text="{TemplateBinding Text, Mode=TwoWay}"
+                       VerticalAlignment="Center" />
+              <Path Name="PART_Chevron"
+                    Grid.Column="1"
+                    Margin="8,0,0,0"
+                    Width="8"
+                    Height="5"
+                    Stretch="None"
+                    VerticalAlignment="Center"
+                    StrokeThickness="1"
+                    StrokeLineCap="Round"
+                    StrokeJoin="Round"
+                    Stroke="{DynamicResource AltimTextSecondaryBrush}"
+                    Data="M 0,0 L 4,4 L 8,0" />
+            </Grid>
+          </Border>
+
+          <Popup Name="PART_Popup"
+                 IsOpen="{TemplateBinding IsDropDownOpen, Mode=TwoWay}"
+                 MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                 MinWidth="{Binding Bounds.Width, RelativeSource={RelativeSource TemplatedParent}}"
+                 Placement="BottomEdgeAlignedLeft"
+                 InheritsTransform="True"
+                 IsLightDismissEnabled="True"
+                 WindowManagerAddShadowHint="False">
+            <Border Name="PART_PopupBody"
+                    Margin="0,4,0,0"
+                    Background="{DynamicResource AltimPopupBackgroundBrush}"
+                    BorderBrush="{DynamicResource AltimBorderBrush}"
+                    BorderThickness="{DynamicResource AltimBorderThickness}"
+                    CornerRadius="{DynamicResource AltimCornerRadius8}"
+                    Padding="{DynamicResource AltimInset4}"
+                    BoxShadow="{DynamicResource AltimPopupShadow}">
+              <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                            VerticalScrollBarVisibility="Auto">
+                <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+              </ScrollViewer>
+            </Border>
+          </Popup>
+        </Panel>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:pointerover /template/ Border#PART_Body">
+      <Setter Property="BorderBrush" Value="{DynamicResource AltimTextSecondaryBrush}" />
+    </Style>
+
+    <Style Selector="^:dropdownopen /template/ Border#PART_Body">
+      <Setter Property="BorderBrush" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    </Style>
+
+    <Style Selector="^:focus-visible /template/ Border#PART_FocusRing">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Opacity" Value="{DynamicResource AltimDisabledOpacity}" />
+    </Style>
+  </ControlTheme>
+
+</ResourceDictionary>

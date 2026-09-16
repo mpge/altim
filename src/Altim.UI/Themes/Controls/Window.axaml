@@ -1,0 +1,84 @@
+<!--
+  Window, and the popup panel shape.
+
+  The default window is a plain Surface ground carrying the Inter face and Body size, so
+  every descendant inherits the family without a view setting it.
+
+  AltimPopupWindow is the tray panel from DESIGN.md: 320 wide, radius 8, 1px border,
+  SurfaceMuted, and the single shadow the system allows. It leaves a margin around the
+  panel for that shadow to fall into, which is why the window itself is transparent - a
+  borderless window cannot cast a shadow onto its own opaque background.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <ControlTheme x:Key="{x:Type Window}" TargetType="Window">
+    <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+    <Setter Property="TransparencyBackgroundFallback" Value="{DynamicResource AltimSurfaceBrush}" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="Window">
+        <Panel>
+          <Border Name="PART_TransparencyFallback"
+                  IsHitTestVisible="False"
+                  Background="{TemplateBinding TransparencyBackgroundFallback}" />
+          <Border Name="PART_WindowGround" Background="{TemplateBinding Background}" />
+          <Panel Margin="{TemplateBinding OffScreenMargin}">
+            <Panel Margin="{TemplateBinding WindowDecorationMargin}">
+              <VisualLayerManager Name="PART_VisualLayerManager">
+                <ContentPresenter Name="PART_ContentPresenter"
+                                  Content="{TemplateBinding Content}"
+                                  ContentTemplate="{TemplateBinding ContentTemplate}"
+                                  Margin="{TemplateBinding Padding}"
+                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+              </VisualLayerManager>
+            </Panel>
+          </Panel>
+        </Panel>
+      </ControlTemplate>
+    </Setter>
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimPopupWindow" TargetType="Window">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="TransparencyBackgroundFallback" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+    <Setter Property="Width" Value="{DynamicResource AltimPopupWidth}" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="Window">
+        <Panel>
+          <Border Name="PART_TransparencyFallback"
+                  IsHitTestVisible="False"
+                  Background="{TemplateBinding TransparencyBackgroundFallback}" />
+          <Panel Margin="{TemplateBinding OffScreenMargin}">
+            <Panel Margin="{TemplateBinding WindowDecorationMargin}">
+              <VisualLayerManager Name="PART_VisualLayerManager">
+                <Border Name="PART_PopupPanel"
+                        Margin="{DynamicResource AltimPopupShadowMargin}"
+                        Background="{DynamicResource AltimPopupBackgroundBrush}"
+                        BorderBrush="{DynamicResource AltimBorderBrush}"
+                        BorderThickness="{DynamicResource AltimBorderThickness}"
+                        CornerRadius="{DynamicResource AltimCornerRadius8}"
+                        BoxShadow="{DynamicResource AltimPopupShadow}"
+                        ClipToBounds="True">
+                  <ContentPresenter Name="PART_ContentPresenter"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    Margin="{TemplateBinding Padding}"
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                </Border>
+              </VisualLayerManager>
+            </Panel>
+          </Panel>
+        </Panel>
+      </ControlTemplate>
+    </Setter>
+  </ControlTheme>
+
+</ResourceDictionary>

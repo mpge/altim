@@ -1,0 +1,159 @@
+<!--
+  Altim primitives: everything in docs/DESIGN.md that does not change with the theme
+  variant. Spacing, radii, line weights, the type scale and the two motion durations.
+
+  These live outside ThemeDictionaries deliberately, so they resolve identically in
+  Light and Dark. They are still safe to consume with DynamicResource, and control
+  themes here do exactly that so that one lookup rule applies across the whole system.
+
+  Nothing in between the scale steps exists. If a view needs a value that is not here,
+  the value belongs in DESIGN.md first.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- ==================================================================== -->
+  <!-- Spacing scale: 2 4 6 8 12 16 20 24 32 48. Nothing in between.        -->
+  <!-- ==================================================================== -->
+  <x:Double x:Key="AltimSpace2">2</x:Double>
+  <x:Double x:Key="AltimSpace4">4</x:Double>
+  <x:Double x:Key="AltimSpace6">6</x:Double>
+  <x:Double x:Key="AltimSpace8">8</x:Double>
+  <x:Double x:Key="AltimSpace12">12</x:Double>
+  <x:Double x:Key="AltimSpace16">16</x:Double>
+  <x:Double x:Key="AltimSpace20">20</x:Double>
+  <x:Double x:Key="AltimSpace24">24</x:Double>
+  <x:Double x:Key="AltimSpace32">32</x:Double>
+  <x:Double x:Key="AltimSpace48">48</x:Double>
+
+  <!-- The same scale as uniform Thickness values, for Margin and Padding. -->
+  <Thickness x:Key="AltimInset2">2</Thickness>
+  <Thickness x:Key="AltimInset4">4</Thickness>
+  <Thickness x:Key="AltimInset6">6</Thickness>
+  <Thickness x:Key="AltimInset8">8</Thickness>
+  <Thickness x:Key="AltimInset12">12</Thickness>
+  <Thickness x:Key="AltimInset16">16</Thickness>
+  <Thickness x:Key="AltimInset20">20</Thickness>
+  <Thickness x:Key="AltimInset24">24</Thickness>
+  <Thickness x:Key="AltimInset32">32</Thickness>
+  <Thickness x:Key="AltimInset48">48</Thickness>
+
+  <!-- ==================================================================== -->
+  <!-- Radius: 6 for controls and meter ends, 8 for cards and the popup.    -->
+  <!-- ==================================================================== -->
+  <x:Double x:Key="AltimRadius6">6</x:Double>
+  <x:Double x:Key="AltimRadius8">8</x:Double>
+  <CornerRadius x:Key="AltimCornerRadius6">6</CornerRadius>
+  <CornerRadius x:Key="AltimCornerRadius8">8</CornerRadius>
+
+  <!-- ==================================================================== -->
+  <!-- Line: borders are exactly 1px, separators are 1px with no margin.    -->
+  <!-- ==================================================================== -->
+  <x:Double x:Key="AltimHairline">1</x:Double>
+  <Thickness x:Key="AltimBorderThickness">1</Thickness>
+  <Thickness x:Key="AltimBorderThicknessBottom">0,0,0,1</Thickness>
+  <Thickness x:Key="AltimBorderThicknessTop">0,1,0,0</Thickness>
+  <Thickness x:Key="AltimBorderThicknessRight">0,0,1,0</Thickness>
+  <Thickness x:Key="AltimBorderThicknessNone">0</Thickness>
+
+  <!-- Focus: a 2px ring, offset 2px, never removed. The ring is drawn outside the
+       control bounds, so its Border sits at -(offset + thickness) = -4. -->
+  <x:Double x:Key="AltimFocusRingWidth">2</x:Double>
+  <x:Double x:Key="AltimFocusRingOffset">2</x:Double>
+  <Thickness x:Key="AltimFocusRingThickness">2</Thickness>
+  <Thickness x:Key="AltimFocusRingMargin">-4</Thickness>
+
+  <!-- ==================================================================== -->
+  <!-- Hit targets and fixed component sizes.                                -->
+  <!-- ==================================================================== -->
+  <x:Double x:Key="AltimRowMinHeight">28</x:Double>
+  <x:Double x:Key="AltimButtonMinHeight">32</x:Double>
+  <x:Double x:Key="AltimControlMinHeight">32</x:Double>
+  <x:Double x:Key="AltimSidebarWidth">200</x:Double>
+  <x:Double x:Key="AltimSidebarItemHeight">32</x:Double>
+  <x:Double x:Key="AltimPopupWidth">320</x:Double>
+  <x:Double x:Key="AltimStatusDotSize">6</x:Double>
+  <x:Double x:Key="AltimProviderGlyphSize">16</x:Double>
+  <x:Double x:Key="AltimIconSize">16</x:Double>
+  <x:Double x:Key="AltimMeterHeight">6</x:Double>
+  <x:Double x:Key="AltimTapeMinHeight">96</x:Double>
+  <x:Double x:Key="AltimTapeLineThickness">1.5</x:Double>
+  <x:Double x:Key="AltimTapeDotDiameter">3</x:Double>
+  <x:Double x:Key="AltimScrollBarThickness">8</x:Double>
+
+  <!-- DESIGN.md does not specify a toggle. The track is derived from the scale: a 16
+       tall pill, a 12 knob, a 2 inset, so the travel is one scale step and the width is
+       16 + 12 = 28. The control itself still keeps the 28px row hit target. -->
+  <x:Double x:Key="AltimToggleTrackWidth">28</x:Double>
+  <x:Double x:Key="AltimToggleTrackHeight">16</x:Double>
+  <x:Double x:Key="AltimToggleKnobSize">12</x:Double>
+  <Thickness x:Key="AltimToggleKnobInset">2</Thickness>
+
+  <!-- Disabled is expressed as opacity, not as a colour: DESIGN.md has no disabled
+       colour, and inventing one would put a value in a view that is not in the doc. -->
+  <x:Double x:Key="AltimDisabledOpacity">0.45</x:Double>
+
+  <!-- ==================================================================== -->
+  <!-- Component insets. Every number here is a step on the spacing scale.   -->
+  <!-- ==================================================================== -->
+  <Thickness x:Key="AltimButtonPadding">12,0</Thickness>
+  <Thickness x:Key="AltimTextBoxPadding">8,0</Thickness>
+  <Thickness x:Key="AltimComboBoxPadding">8,0</Thickness>
+  <Thickness x:Key="AltimToolTipPadding">8,6</Thickness>
+  <Thickness x:Key="AltimSidebarItemPadding">8,0</Thickness>
+  <Thickness x:Key="AltimRowPadding">12,12</Thickness>
+  <Thickness x:Key="AltimCardPadding">20</Thickness>
+
+  <!-- Room for the one shadow, on the one window that casts it. Every side is a step on
+       the scale, and the bottom is deeper because the shadow is offset 8 downward. -->
+  <Thickness x:Key="AltimPopupShadowMargin">24,16,24,32</Thickness>
+
+  <!-- ==================================================================== -->
+  <!-- Type scale. Size / line height / weight / tracking.                   -->
+  <!-- Tracking is stated in em in DESIGN.md; Avalonia LetterSpacing is in    -->
+  <!-- device independent pixels, so each value is em x size.                -->
+  <!-- ==================================================================== -->
+  <x:Double x:Key="AltimFontSizeFigure">34</x:Double>
+  <x:Double x:Key="AltimLineHeightFigure">36</x:Double>
+  <FontWeight x:Key="AltimFontWeightFigure">SemiBold</FontWeight>
+  <x:Double x:Key="AltimLetterSpacingFigure">-0.68</x:Double>
+
+  <x:Double x:Key="AltimFontSizeFigureSmall">20</x:Double>
+  <x:Double x:Key="AltimLineHeightFigureSmall">24</x:Double>
+  <FontWeight x:Key="AltimFontWeightFigureSmall">SemiBold</FontWeight>
+  <x:Double x:Key="AltimLetterSpacingFigureSmall">-0.2</x:Double>
+
+  <x:Double x:Key="AltimFontSizeTitle">28</x:Double>
+  <x:Double x:Key="AltimLineHeightTitle">34</x:Double>
+  <FontWeight x:Key="AltimFontWeightTitle">SemiBold</FontWeight>
+  <x:Double x:Key="AltimLetterSpacingTitle">-0.56</x:Double>
+
+  <x:Double x:Key="AltimFontSizeHeading">15</x:Double>
+  <x:Double x:Key="AltimLineHeightHeading">20</x:Double>
+  <FontWeight x:Key="AltimFontWeightHeading">SemiBold</FontWeight>
+  <x:Double x:Key="AltimLetterSpacingHeading">0</x:Double>
+
+  <x:Double x:Key="AltimFontSizeBody">13</x:Double>
+  <x:Double x:Key="AltimLineHeightBody">18</x:Double>
+  <FontWeight x:Key="AltimFontWeightBody">Normal</FontWeight>
+  <x:Double x:Key="AltimLetterSpacingBody">0</x:Double>
+
+  <x:Double x:Key="AltimFontSizeLabel">12</x:Double>
+  <x:Double x:Key="AltimLineHeightLabel">16</x:Double>
+  <FontWeight x:Key="AltimFontWeightLabel">Medium</FontWeight>
+  <x:Double x:Key="AltimLetterSpacingLabel">0</x:Double>
+
+  <x:Double x:Key="AltimFontSizeCaption">11</x:Double>
+  <x:Double x:Key="AltimLineHeightCaption">14</x:Double>
+  <FontWeight x:Key="AltimFontWeightCaption">Normal</FontWeight>
+  <x:Double x:Key="AltimLetterSpacingCaption">0.11</x:Double>
+
+  <!-- ==================================================================== -->
+  <!-- Motion. Two durations exist: 120ms and 180ms. Motion happens only in  -->
+  <!-- response to something changing.                                       -->
+  <!-- ==================================================================== -->
+  <x:TimeSpan x:Key="AltimDuration120">00:00:00.1200000</x:TimeSpan>
+  <x:TimeSpan x:Key="AltimDuration180">00:00:00.1800000</x:TimeSpan>
+  <x:Double x:Key="AltimPopupRiseDistance">4</x:Double>
+
+</ResourceDictionary>

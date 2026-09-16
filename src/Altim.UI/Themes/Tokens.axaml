@@ -1,0 +1,149 @@
+<!--
+  Altim colour tokens.
+
+  Every colour in docs/DESIGN.md, and nothing else. Values are repeated literally in
+  each bucket rather than aliased with StaticResource: a theme dictionary entry is
+  resolved per variant at runtime, and StaticResource has no variant to resolve
+  against, so it throws. Consumers must use DynamicResource for everything here.
+
+  Dark is the designed palette from the brief, not an inversion of Light: backgrounds
+  lift, borders stay lower contrast than text, and pure black is never a surface.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ResourceDictionary.ThemeDictionaries>
+
+    <!-- Default: the variant used when a top level states no preference. Same as Light. -->
+    <ResourceDictionary x:Key="Default">
+      <Color x:Key="AltimSurfaceColor">#FFFFFF</Color>
+      <Color x:Key="AltimSurfaceMutedColor">#FAFAFA</Color>
+      <Color x:Key="AltimTextPrimaryColor">#0A0A0A</Color>
+      <Color x:Key="AltimTextSecondaryColor">#666666</Color>
+      <Color x:Key="AltimBorderColor">#EAEAEA</Color>
+      <Color x:Key="AltimStatusOkColor">#15803D</Color>
+      <Color x:Key="AltimStatusWarnColor">#B45309</Color>
+      <Color x:Key="AltimStatusErrorColor">#B42318</Color>
+      <Color x:Key="AltimAccentAnthropicColor">#C05B32</Color>
+      <Color x:Key="AltimAccentOpenAIColor">#0A0A0A</Color>
+      <Color x:Key="AltimSidebarSelectedColor">#FFFFFF</Color>
+
+      <SolidColorBrush x:Key="AltimSurfaceBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="AltimSurfaceMutedBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="AltimTextPrimaryBrush" Color="#0A0A0A" />
+      <SolidColorBrush x:Key="AltimTextSecondaryBrush" Color="#666666" />
+      <SolidColorBrush x:Key="AltimBorderBrush" Color="#EAEAEA" />
+
+      <SolidColorBrush x:Key="AltimStatusOkBrush" Color="#15803D" />
+      <SolidColorBrush x:Key="AltimStatusWarnBrush" Color="#B45309" />
+      <SolidColorBrush x:Key="AltimStatusErrorBrush" Color="#B42318" />
+      <SolidColorBrush x:Key="AltimAccentAnthropicBrush" Color="#C05B32" />
+      <SolidColorBrush x:Key="AltimAccentOpenAIBrush" Color="#0A0A0A" />
+
+      <!-- Role aliases. The value repeats, the name carries the reason. -->
+      <SolidColorBrush x:Key="AltimSeparatorBrush" Color="#EAEAEA" />
+      <SolidColorBrush x:Key="AltimHoverBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="AltimFocusRingBrush" Color="#0A0A0A" />
+      <SolidColorBrush x:Key="AltimMeterTrackBrush" Color="#EAEAEA" />
+      <SolidColorBrush x:Key="AltimMeterFillBrush" Color="#0A0A0A" />
+      <SolidColorBrush x:Key="AltimMeterThresholdBrush" Color="#666666" />
+      <SolidColorBrush x:Key="AltimPopupBackgroundBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="AltimSidebarBackgroundBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="AltimSidebarSelectedBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="AltimChartGroundBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="AltimChartLevelLineBrush" Color="#EAEAEA" />
+      <SolidColorBrush x:Key="AltimChartLinePrimaryBrush" Color="#0A0A0A" />
+      <SolidColorBrush x:Key="AltimChartLineSecondaryBrush" Color="#666666" />
+      <SolidColorBrush x:Key="AltimChartLabelBrush" Color="#666666" />
+
+      <!-- The one shadow in the system. It belongs to the popup and nothing else. -->
+      <BoxShadows x:Key="AltimPopupShadow">0 8 24 #1F000000</BoxShadows>
+    </ResourceDictionary>
+
+    <ResourceDictionary x:Key="Light">
+      <Color x:Key="AltimSurfaceColor">#FFFFFF</Color>
+      <Color x:Key="AltimSurfaceMutedColor">#FAFAFA</Color>
+      <Color x:Key="AltimTextPrimaryColor">#0A0A0A</Color>
+      <Color x:Key="AltimTextSecondaryColor">#666666</Color>
+      <Color x:Key="AltimBorderColor">#EAEAEA</Color>
+      <Color x:Key="AltimStatusOkColor">#15803D</Color>
+      <Color x:Key="AltimStatusWarnColor">#B45309</Color>
+      <Color x:Key="AltimStatusErrorColor">#B42318</Color>
+      <Color x:Key="AltimAccentAnthropicColor">#C05B32</Color>
+      <Color x:Key="AltimAccentOpenAIColor">#0A0A0A</Color>
+      <Color x:Key="AltimSidebarSelectedColor">#FFFFFF</Color>
+
+      <SolidColorBrush x:Key="AltimSurfaceBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="AltimSurfaceMutedBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="AltimTextPrimaryBrush" Color="#0A0A0A" />
+      <SolidColorBrush x:Key="AltimTextSecondaryBrush" Color="#666666" />
+      <SolidColorBrush x:Key="AltimBorderBrush" Color="#EAEAEA" />
+
+      <SolidColorBrush x:Key="AltimStatusOkBrush" Color="#15803D" />
+      <SolidColorBrush x:Key="AltimStatusWarnBrush" Color="#B45309" />
+      <SolidColorBrush x:Key="AltimStatusErrorBrush" Color="#B42318" />
+      <SolidColorBrush x:Key="AltimAccentAnthropicBrush" Color="#C05B32" />
+      <SolidColorBrush x:Key="AltimAccentOpenAIBrush" Color="#0A0A0A" />
+
+      <SolidColorBrush x:Key="AltimSeparatorBrush" Color="#EAEAEA" />
+      <SolidColorBrush x:Key="AltimHoverBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="AltimFocusRingBrush" Color="#0A0A0A" />
+      <SolidColorBrush x:Key="AltimMeterTrackBrush" Color="#EAEAEA" />
+      <SolidColorBrush x:Key="AltimMeterFillBrush" Color="#0A0A0A" />
+      <SolidColorBrush x:Key="AltimMeterThresholdBrush" Color="#666666" />
+      <SolidColorBrush x:Key="AltimPopupBackgroundBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="AltimSidebarBackgroundBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="AltimSidebarSelectedBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="AltimChartGroundBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="AltimChartLevelLineBrush" Color="#EAEAEA" />
+      <SolidColorBrush x:Key="AltimChartLinePrimaryBrush" Color="#0A0A0A" />
+      <SolidColorBrush x:Key="AltimChartLineSecondaryBrush" Color="#666666" />
+      <SolidColorBrush x:Key="AltimChartLabelBrush" Color="#666666" />
+
+      <BoxShadows x:Key="AltimPopupShadow">0 8 24 #1F000000</BoxShadows>
+    </ResourceDictionary>
+
+    <ResourceDictionary x:Key="Dark">
+      <Color x:Key="AltimSurfaceColor">#0C0C0D</Color>
+      <Color x:Key="AltimSurfaceMutedColor">#151517</Color>
+      <Color x:Key="AltimTextPrimaryColor">#F2F2F3</Color>
+      <Color x:Key="AltimTextSecondaryColor">#8A8A90</Color>
+      <Color x:Key="AltimBorderColor">#232326</Color>
+      <Color x:Key="AltimStatusOkColor">#4ADE80</Color>
+      <Color x:Key="AltimStatusWarnColor">#FBBF24</Color>
+      <Color x:Key="AltimStatusErrorColor">#F87171</Color>
+      <Color x:Key="AltimAccentAnthropicColor">#D2764D</Color>
+      <Color x:Key="AltimAccentOpenAIColor">#F2F2F3</Color>
+      <Color x:Key="AltimSidebarSelectedColor">#1C1C1F</Color>
+
+      <SolidColorBrush x:Key="AltimSurfaceBrush" Color="#0C0C0D" />
+      <SolidColorBrush x:Key="AltimSurfaceMutedBrush" Color="#151517" />
+      <SolidColorBrush x:Key="AltimTextPrimaryBrush" Color="#F2F2F3" />
+      <SolidColorBrush x:Key="AltimTextSecondaryBrush" Color="#8A8A90" />
+      <SolidColorBrush x:Key="AltimBorderBrush" Color="#232326" />
+
+      <SolidColorBrush x:Key="AltimStatusOkBrush" Color="#4ADE80" />
+      <SolidColorBrush x:Key="AltimStatusWarnBrush" Color="#FBBF24" />
+      <SolidColorBrush x:Key="AltimStatusErrorBrush" Color="#F87171" />
+      <SolidColorBrush x:Key="AltimAccentAnthropicBrush" Color="#D2764D" />
+      <SolidColorBrush x:Key="AltimAccentOpenAIBrush" Color="#F2F2F3" />
+
+      <SolidColorBrush x:Key="AltimSeparatorBrush" Color="#232326" />
+      <SolidColorBrush x:Key="AltimHoverBrush" Color="#151517" />
+      <SolidColorBrush x:Key="AltimFocusRingBrush" Color="#F2F2F3" />
+      <SolidColorBrush x:Key="AltimMeterTrackBrush" Color="#232326" />
+      <SolidColorBrush x:Key="AltimMeterFillBrush" Color="#F2F2F3" />
+      <SolidColorBrush x:Key="AltimMeterThresholdBrush" Color="#8A8A90" />
+      <SolidColorBrush x:Key="AltimPopupBackgroundBrush" Color="#151517" />
+      <SolidColorBrush x:Key="AltimSidebarBackgroundBrush" Color="#151517" />
+      <SolidColorBrush x:Key="AltimSidebarSelectedBrush" Color="#1C1C1F" />
+      <SolidColorBrush x:Key="AltimChartGroundBrush" Color="#151517" />
+      <SolidColorBrush x:Key="AltimChartLevelLineBrush" Color="#232326" />
+      <SolidColorBrush x:Key="AltimChartLinePrimaryBrush" Color="#F2F2F3" />
+      <SolidColorBrush x:Key="AltimChartLineSecondaryBrush" Color="#8A8A90" />
+      <SolidColorBrush x:Key="AltimChartLabelBrush" Color="#8A8A90" />
+
+      <BoxShadows x:Key="AltimPopupShadow">0 8 24 #80000000</BoxShadows>
+    </ResourceDictionary>
+
+  </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

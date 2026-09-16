@@ -1,0 +1,29 @@
+<!--
+  The two shapes DESIGN.md specifies exactly but that are not controls in their own right.
+
+  AltimProviderCard is the only card in the system, used once per provider on Overview:
+  1px border, radius 8, padding 20, no shadow. There is no nested variant, because there is
+  no card inside a card - sections are split by separators and whitespace instead.
+
+  AltimStatusDot is the 6px dot status is allowed to appear as. The other permitted form is
+  a single word. A tinted panel is not one of them, so no themed background exists here.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <ControlTheme x:Key="AltimProviderCard" TargetType="Border">
+    <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimBorderBrush}" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThickness}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius8}" />
+    <Setter Property="Padding" Value="{DynamicResource AltimCardPadding}" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimStatusDot" TargetType="Ellipse">
+    <Setter Property="Width" Value="{DynamicResource AltimStatusDotSize}" />
+    <Setter Property="Height" Value="{DynamicResource AltimStatusDotSize}" />
+    <Setter Property="Fill" Value="{DynamicResource AltimStatusOkBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </ControlTheme>
+
+</ResourceDictionary>

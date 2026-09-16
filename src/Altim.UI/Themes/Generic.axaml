@@ -1,0 +1,31 @@
+<!--
+  The Altim design system, as one dictionary.
+
+  This is the only file the application includes. Merge order is tokens, then primitives,
+  then typography, then one control theme file per control. Nothing here depends on merge
+  order at load time: every cross file reference is a DynamicResource, resolved against the
+  merged tree at runtime, and the few StaticResource references inside the control files
+  point at keys declared in the same file.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    x:Class="Altim.UI.Themes.AltimTheme">
+  <ResourceDictionary.MergedDictionaries>
+    <ResourceInclude Source="avares://Altim.UI/Themes/Tokens.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Primitives.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Typography.axaml" />
+
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/Button.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/ComboBox.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/ListBox.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/Meter.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/ScrollViewer.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/Separator.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/Surfaces.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/TextBox.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/ToggleSwitch.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/ToolTip.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/UsageTape.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/Window.axaml" />
+  </ResourceDictionary.MergedDictionaries>
+</ResourceDictionary>

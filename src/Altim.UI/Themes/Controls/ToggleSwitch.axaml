@@ -1,0 +1,116 @@
+<!--
+  ToggleSwitch.
+
+  A settings row: label left, switch right, 28px minimum height. Off is an outlined track
+  with a TextSecondary knob; on is a solid TextPrimary track with a Surface knob. The knob
+  does not slide - DESIGN.md lists three motions and a toggle is not one of them - so the
+  state reads as a position, not as an animation.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <ControlTheme x:Key="{x:Type ToggleSwitch}" TargetType="ToggleSwitch">
+    <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimBorderBrush}" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThickness}" />
+    <Setter Property="MinHeight" Value="{DynamicResource AltimRowMinHeight}" />
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="ToggleSwitch">
+        <Grid ColumnDefinitions="*,Auto">
+          <ContentPresenter Name="PART_ContentPresenter"
+                            Grid.Column="0"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalAlignment="Center" />
+
+          <StackPanel Grid.Column="1"
+                      Orientation="Horizontal"
+                      Spacing="{DynamicResource AltimSpace8}"
+                      VerticalAlignment="Center">
+            <ContentPresenter Name="PART_OnContentPresenter"
+                              Content="{TemplateBinding OnContent}"
+                              ContentTemplate="{TemplateBinding OnContentTemplate}"
+                              VerticalAlignment="Center" />
+            <ContentPresenter Name="PART_OffContentPresenter"
+                              Content="{TemplateBinding OffContent}"
+                              ContentTemplate="{TemplateBinding OffContentTemplate}"
+                              VerticalAlignment="Center" />
+
+            <Panel VerticalAlignment="Center">
+              <Border Name="PART_FocusRing"
+                      IsVisible="False"
+                      IsHitTestVisible="False"
+                      Margin="{DynamicResource AltimFocusRingMargin}"
+                      BorderThickness="{DynamicResource AltimFocusRingThickness}"
+                      BorderBrush="{DynamicResource AltimFocusRingBrush}"
+                      CornerRadius="{DynamicResource AltimCornerRadius8}" />
+              <Border Name="PART_Track"
+                      Width="{DynamicResource AltimToggleTrackWidth}"
+                      Height="{DynamicResource AltimToggleTrackHeight}"
+                      CornerRadius="{DynamicResource AltimCornerRadius6}"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}">
+                <Panel Name="PART_SwitchKnob" Margin="{DynamicResource AltimToggleKnobInset}">
+                  <Panel Name="PART_MovingKnobs"
+                         HorizontalAlignment="Left"
+                         Width="{DynamicResource AltimToggleKnobSize}"
+                         Height="{DynamicResource AltimToggleKnobSize}">
+                    <Border Name="PART_Knob"
+                            CornerRadius="{DynamicResource AltimCornerRadius6}"
+                            Background="{DynamicResource AltimTextSecondaryBrush}" />
+                  </Panel>
+                </Panel>
+              </Border>
+            </Panel>
+          </StackPanel>
+        </Grid>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:unchecked /template/ ContentPresenter#PART_OnContentPresenter">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+
+    <Style Selector="^:checked /template/ ContentPresenter#PART_OffContentPresenter">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+
+    <Style Selector="^:checked /template/ Panel#PART_MovingKnobs">
+      <Setter Property="HorizontalAlignment" Value="Right" />
+    </Style>
+
+    <Style Selector="^:checked /template/ Border#PART_Track">
+      <Setter Property="Background" Value="{DynamicResource AltimTextPrimaryBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    </Style>
+
+    <Style Selector="^:checked /template/ Border#PART_Knob">
+      <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
+    </Style>
+
+    <Style Selector="^:pointerover /template/ Border#PART_Track">
+      <Setter Property="BorderBrush" Value="{DynamicResource AltimTextSecondaryBrush}" />
+    </Style>
+
+    <Style Selector="^:checked:pointerover /template/ Border#PART_Track">
+      <Setter Property="BorderBrush" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    </Style>
+
+    <Style Selector="^:focus-visible /template/ Border#PART_FocusRing">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Opacity" Value="{DynamicResource AltimDisabledOpacity}" />
+    </Style>
+  </ControlTheme>
+
+</ResourceDictionary>

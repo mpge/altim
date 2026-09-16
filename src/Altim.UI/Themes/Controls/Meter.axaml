@@ -1,0 +1,21 @@
+<!--
+  Meter.
+
+  The control draws itself; the theme only hands it the three brushes. Fill is TextPrimary
+  in both variants and stays TextPrimary above the threshold - the bar never turns red. It
+  is the metric label beside it that moves to StatusWarn, which the view does by binding to
+  the meter's IsAboveThreshold.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:controls="using:Altim.UI.Controls">
+
+  <ControlTheme x:Key="{x:Type controls:Meter}" TargetType="controls:Meter">
+    <Setter Property="TrackBrush" Value="{DynamicResource AltimMeterTrackBrush}" />
+    <Setter Property="FillBrush" Value="{DynamicResource AltimMeterFillBrush}" />
+    <Setter Property="ThresholdBrush" Value="{DynamicResource AltimMeterThresholdBrush}" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </ControlTheme>
+
+</ResourceDictionary>

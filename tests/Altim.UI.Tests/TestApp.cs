@@ -16,11 +16,17 @@ public sealed class TestApp : Application
     /// Builds the headless application. Named by convention; the headless xUnit
     /// integration looks for this method on the type named by
     /// <c>AvaloniaTestApplicationAttribute</c>.
+    ///
+    /// <c>UseHeadlessDrawing</c> is off so the platform renders through Skia. The stub
+    /// drawing backend measures and arranges but produces no surface, and
+    /// <c>CaptureRenderedFrame</c> returns null against it, so a render assertion would
+    /// assert nothing.
     /// </summary>
     /// <returns>The configured builder.</returns>
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<TestApp>()
-            .UseHeadless(new AvaloniaHeadlessPlatformOptions());
+            .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
+            .UseSkia();
 
     /// <inheritdoc />
     public override void Initialize() => Styles.Add(new FluentTheme());

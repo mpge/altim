@@ -1,0 +1,41 @@
+<!--
+  ToolTip.
+
+  A caption on a muted ground with a 1px border and radius 6. No shadow: DESIGN.md allows
+  one shadow in the whole system and it belongs to the popup panel. No pointer, no tail,
+  no fade in - a tooltip appears because the pointer stopped, which is not a value changing.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <ControlTheme x:Key="{x:Type ToolTip}" TargetType="ToolTip">
+    <Setter Property="Background" Value="{DynamicResource AltimSurfaceMutedBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimBorderBrush}" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThickness}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius6}" />
+    <Setter Property="Padding" Value="{DynamicResource AltimToolTipPadding}" />
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeCaption}" />
+    <Setter Property="MaxWidth" Value="{DynamicResource AltimPopupWidth}" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="ToolTip">
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}"
+                Padding="{TemplateBinding Padding}">
+          <ContentPresenter Name="PART_ContentPresenter"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                            TextBlock.TextWrapping="Wrap" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </ControlTheme>
+
+</ResourceDictionary>

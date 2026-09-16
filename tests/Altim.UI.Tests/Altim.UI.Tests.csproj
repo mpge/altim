@@ -16,6 +16,11 @@
          theme to measure and arrange against, and loading Fluent here keeps the
          Simple based design system out of the assertions. -->
     <PackageReference Include="Avalonia.Themes.Fluent" />
+    <!-- Skia is a test-only dependency too. The headless platform's stub drawing backend
+         measures and arranges but never rasterises, so CaptureRenderedFrame returns null
+         against it and a render assertion would assert nothing. The version is pinned
+         here rather than centrally because nothing the app ships needs it. -->
+    <PackageReference Include="Avalonia.Skia" VersionOverride="12.1.2" />
   </ItemGroup>
 
 </Project>

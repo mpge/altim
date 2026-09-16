@@ -1,0 +1,25 @@
+<!--
+  UsageTape.
+
+  Level rules in Border, the primary line in TextPrimary, the secondary in TextSecondary,
+  labels in TextSecondary. That is the whole palette: a history chart is not an identity
+  surface, so no provider accent reaches it.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:controls="using:Altim.UI.Controls">
+
+  <ControlTheme x:Key="{x:Type controls:UsageTape}" TargetType="controls:UsageTape">
+    <Setter Property="LevelLineBrush" Value="{DynamicResource AltimChartLevelLineBrush}" />
+    <Setter Property="PrimaryLineBrush" Value="{DynamicResource AltimChartLinePrimaryBrush}" />
+    <Setter Property="SecondaryLineBrush" Value="{DynamicResource AltimChartLineSecondaryBrush}" />
+    <Setter Property="LabelBrush" Value="{DynamicResource AltimChartLabelBrush}" />
+    <Setter Property="CaptionFontSize" Value="{DynamicResource AltimFontSizeCaption}" />
+    <Setter Property="LineThickness" Value="{DynamicResource AltimTapeLineThickness}" />
+    <Setter Property="DotDiameter" Value="{DynamicResource AltimTapeDotDiameter}" />
+    <Setter Property="MinHeight" Value="{DynamicResource AltimTapeMinHeight}" />
+    <Setter Property="TextElement.FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+  </ControlTheme>
+
+</ResourceDictionary>

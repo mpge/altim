@@ -1,0 +1,120 @@
+<!--
+  ListBox and ListBoxItem.
+
+  Activity and history entries are rows, not cards: a 1px bottom rule, 12px of vertical
+  padding, SurfaceMuted on hover, 28px minimum height. No nesting, no card inside a card.
+
+  AltimSidebarItem is the second row shape DESIGN.md names: 32px, radius 6, a 13px label
+  and a 16px icon, selected by taking the Surface colour back off the muted sidebar ground.
+  No accent bar, no bold.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <ControlTheme x:Key="{x:Type ListBoxItem}" TargetType="ListBoxItem">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimSeparatorBrush}" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThicknessBottom}" />
+    <Setter Property="Padding" Value="{DynamicResource AltimRowPadding}" />
+    <Setter Property="MinHeight" Value="{DynamicResource AltimRowMinHeight}" />
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="ListBoxItem">
+        <Panel>
+          <Border Name="PART_FocusRing"
+                  IsVisible="False"
+                  IsHitTestVisible="False"
+                  Margin="{DynamicResource AltimFocusRingMargin}"
+                  BorderThickness="{DynamicResource AltimFocusRingThickness}"
+                  BorderBrush="{DynamicResource AltimFocusRingBrush}"
+                  CornerRadius="{DynamicResource AltimCornerRadius8}" />
+          <Border Name="PART_Body"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{TemplateBinding CornerRadius}">
+            <ContentPresenter Name="PART_ContentPresenter"
+                              Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                              Padding="{TemplateBinding Padding}"
+                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+          </Border>
+        </Panel>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:pointerover /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimHoverBrush}" />
+    </Style>
+
+    <Style Selector="^:selected /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimHoverBrush}" />
+    </Style>
+
+    <Style Selector="^:focus-visible /template/ Border#PART_FocusRing">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Opacity" Value="{DynamicResource AltimDisabledOpacity}" />
+    </Style>
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimSidebarItem"
+                TargetType="ListBoxItem"
+                BasedOn="{StaticResource {x:Type ListBoxItem}}">
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThicknessNone}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius6}" />
+    <Setter Property="Padding" Value="{DynamicResource AltimSidebarItemPadding}" />
+    <Setter Property="Height" Value="{DynamicResource AltimSidebarItemHeight}" />
+    <Setter Property="MinHeight" Value="{DynamicResource AltimSidebarItemHeight}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+
+    <Style Selector="^:selected /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimSidebarSelectedBrush}" />
+    </Style>
+  </ControlTheme>
+
+  <ControlTheme x:Key="{x:Type ListBox}" TargetType="ListBox">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimBorderBrush}" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThicknessNone}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="ListBox">
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ScrollViewer Name="PART_ScrollViewer"
+                        HorizontalScrollBarVisibility="{TemplateBinding (ScrollViewer.HorizontalScrollBarVisibility)}"
+                        VerticalScrollBarVisibility="{TemplateBinding (ScrollViewer.VerticalScrollBarVisibility)}">
+            <ItemsPresenter Name="PART_ItemsPresenter"
+                            ItemsPanel="{TemplateBinding ItemsPanel}"
+                            Margin="{TemplateBinding Padding}" />
+          </ScrollViewer>
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </ControlTheme>
+
+  <!-- The sidebar itself: 200px, SurfaceMuted, 1px right border, radius 6 rows. -->
+  <ControlTheme x:Key="AltimSidebarListBox"
+                TargetType="ListBox"
+                BasedOn="{StaticResource {x:Type ListBox}}">
+    <Setter Property="Width" Value="{DynamicResource AltimSidebarWidth}" />
+    <Setter Property="Background" Value="{DynamicResource AltimSidebarBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimBorderBrush}" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThicknessRight}" />
+    <Setter Property="Padding" Value="{DynamicResource AltimInset8}" />
+    <Setter Property="ItemContainerTheme" Value="{StaticResource AltimSidebarItem}" />
+  </ControlTheme>
+
+</ResourceDictionary>

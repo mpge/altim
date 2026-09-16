@@ -1,0 +1,106 @@
+<!--
+  TextBox.
+
+  A 32px field with a 1px border and radius 6. Focus does two things: the border moves to
+  TextPrimary, and the 2px ring appears. Selection is inverse video - TextPrimary ground,
+  Surface text - because DESIGN.md has no selection colour and inventing one would put a
+  value in a view that is not in the doc.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <ControlTheme x:Key="{x:Type TextBox}" TargetType="TextBox">
+    <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimBorderBrush}" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThickness}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius6}" />
+    <Setter Property="Padding" Value="{DynamicResource AltimTextBoxPadding}" />
+    <Setter Property="MinHeight" Value="{DynamicResource AltimControlMinHeight}" />
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+    <Setter Property="CaretBrush" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="SelectionBrush" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="SelectionForegroundBrush" Value="{DynamicResource AltimSurfaceBrush}" />
+    <Setter Property="PlaceholderForeground" Value="{DynamicResource AltimTextSecondaryBrush}" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="TextBox">
+        <Panel>
+          <Border Name="PART_FocusRing"
+                  IsVisible="False"
+                  IsHitTestVisible="False"
+                  Margin="{DynamicResource AltimFocusRingMargin}"
+                  BorderThickness="{DynamicResource AltimFocusRingThickness}"
+                  BorderBrush="{DynamicResource AltimFocusRingBrush}"
+                  CornerRadius="{DynamicResource AltimCornerRadius8}" />
+          <Border Name="PART_Body"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{TemplateBinding CornerRadius}"
+                  Padding="{TemplateBinding Padding}">
+            <DockPanel>
+              <ContentPresenter Name="PART_InnerLeftContent"
+                                DockPanel.Dock="Left"
+                                VerticalAlignment="Center"
+                                Content="{TemplateBinding InnerLeftContent}" />
+              <ContentPresenter Name="PART_InnerRightContent"
+                                DockPanel.Dock="Right"
+                                VerticalAlignment="Center"
+                                Content="{TemplateBinding InnerRightContent}" />
+              <ScrollViewer Name="PART_ScrollViewer"
+                            HorizontalScrollBarVisibility="{TemplateBinding (ScrollViewer.HorizontalScrollBarVisibility)}"
+                            VerticalScrollBarVisibility="{TemplateBinding (ScrollViewer.VerticalScrollBarVisibility)}">
+                <Panel>
+                  <TextBlock Name="PART_Placeholder"
+                             IsVisible="False"
+                             Text="{TemplateBinding PlaceholderText}"
+                             Foreground="{TemplateBinding PlaceholderForeground}"
+                             TextAlignment="{TemplateBinding TextAlignment}"
+                             TextWrapping="{TemplateBinding TextWrapping}"
+                             VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                  <TextPresenter Name="PART_TextPresenter"
+                                 Text="{TemplateBinding Text, Mode=TwoWay}"
+                                 CaretIndex="{TemplateBinding CaretIndex}"
+                                 SelectionStart="{TemplateBinding SelectionStart}"
+                                 SelectionEnd="{TemplateBinding SelectionEnd}"
+                                 TextAlignment="{TemplateBinding TextAlignment}"
+                                 TextWrapping="{TemplateBinding TextWrapping}"
+                                 LineHeight="{TemplateBinding LineHeight}"
+                                 PasswordChar="{TemplateBinding PasswordChar}"
+                                 RevealPassword="{TemplateBinding RevealPassword}"
+                                 CaretBrush="{TemplateBinding CaretBrush}"
+                                 SelectionBrush="{TemplateBinding SelectionBrush}"
+                                 SelectionForegroundBrush="{TemplateBinding SelectionForegroundBrush}"
+                                 VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                </Panel>
+              </ScrollViewer>
+            </DockPanel>
+          </Border>
+        </Panel>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:empty /template/ TextBlock#PART_Placeholder">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <Style Selector="^:pointerover /template/ Border#PART_Body">
+      <Setter Property="BorderBrush" Value="{DynamicResource AltimTextSecondaryBrush}" />
+    </Style>
+
+    <Style Selector="^:focus /template/ Border#PART_Body">
+      <Setter Property="BorderBrush" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    </Style>
+
+    <Style Selector="^:focus-visible /template/ Border#PART_FocusRing">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Opacity" Value="{DynamicResource AltimDisabledOpacity}" />
+    </Style>
+  </ControlTheme>
+
+</ResourceDictionary>

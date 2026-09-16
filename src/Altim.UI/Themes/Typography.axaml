@@ -1,0 +1,120 @@
+<!--
+  Altim typography.
+
+  One family: Inter, bundled through Avalonia.Fonts.Inter, with the platform UI face as
+  the fallback name so a missing glyph resolves rather than tofu. No second family, no
+  italics, sentence case everywhere.
+
+  The type scale itself lives in Primitives.axaml. This file binds the scale to TextBlock
+  as one ControlTheme per role, because a ControlTheme is the only form of reusable
+  styling a ResourceDictionary can hold. A view applies a role with
+  Theme="{StaticResource AltimHeadingText}" and overrides nothing but Foreground.
+
+  Roles whose name ends in Metric carry tabular figures. Figures always do.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:themes="using:Altim.UI.Themes">
+
+  <FontFamily x:Key="AltimFontFamily">avares://Avalonia.Fonts.Inter/Assets#Inter, $Default</FontFamily>
+  <themes:TabularFigures x:Key="AltimTabularFigures" />
+
+  <!-- Figure: the percentage, and the largest thing on any surface. -->
+  <ControlTheme x:Key="AltimFigureText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeFigure}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightFigure}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightFigure}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingFigure}" />
+    <Setter Property="FontFeatures" Value="{DynamicResource AltimTabularFigures}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimFigureSmallText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeFigureSmall}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightFigureSmall}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightFigureSmall}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingFigureSmall}" />
+    <Setter Property="FontFeatures" Value="{DynamicResource AltimTabularFigures}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimTitleText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeTitle}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightTitle}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightTitle}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingTitle}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimHeadingText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeHeading}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightHeading}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightHeading}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingHeading}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimBodyText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightBody}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightBody}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingBody}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimBodyMetricText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightBody}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightBody}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingBody}" />
+    <Setter Property="FontFeatures" Value="{DynamicResource AltimTabularFigures}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+  </ControlTheme>
+
+  <!-- Label and Caption are the quiet roles, so they default to TextSecondary. -->
+  <ControlTheme x:Key="AltimLabelText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeLabel}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightLabel}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightLabel}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingLabel}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextSecondaryBrush}" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimLabelMetricText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeLabel}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightLabel}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightLabel}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingLabel}" />
+    <Setter Property="FontFeatures" Value="{DynamicResource AltimTabularFigures}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextSecondaryBrush}" />
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimCaptionText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeCaption}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightCaption}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightCaption}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingCaption}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextSecondaryBrush}" />
+  </ControlTheme>
+
+  <!-- Reset times, last refreshed, token counts: caption sized, but still figures. -->
+  <ControlTheme x:Key="AltimCaptionMetricText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeCaption}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightCaption}" />
+    <Setter Property="LineHeight" Value="{DynamicResource AltimLineHeightCaption}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource AltimLetterSpacingCaption}" />
+    <Setter Property="FontFeatures" Value="{DynamicResource AltimTabularFigures}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextSecondaryBrush}" />
+  </ControlTheme>
+
+</ResourceDictionary>

@@ -1,0 +1,106 @@
+<!--
+  Button.
+
+  DESIGN.md has no filled accent button: colour carries provider identity and status only.
+  So the default button is an outline - 1px Border, Surface ground, TextPrimary label - and
+  the two variants remove the outline (quiet) or move the outline and the label to
+  StatusError (destructive). None of them fills with colour.
+
+  32px minimum height, radius 6, sentence case. The focus ring is a 2px TextPrimary ring
+  offset 2px outside the control; it is a template part, not a setter, so no style can
+  quietly remove it.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <ControlTheme x:Key="{x:Type Button}" TargetType="Button">
+    <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimBorderBrush}" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThickness}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource AltimCornerRadius6}" />
+    <Setter Property="Padding" Value="{DynamicResource AltimButtonPadding}" />
+    <Setter Property="MinHeight" Value="{DynamicResource AltimButtonMinHeight}" />
+    <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
+    <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightLabel}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="Button">
+        <Panel>
+          <Border Name="PART_FocusRing"
+                  IsVisible="False"
+                  IsHitTestVisible="False"
+                  Margin="{DynamicResource AltimFocusRingMargin}"
+                  BorderThickness="{DynamicResource AltimFocusRingThickness}"
+                  BorderBrush="{DynamicResource AltimFocusRingBrush}"
+                  CornerRadius="{DynamicResource AltimCornerRadius8}" />
+          <Border Name="PART_Body"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{TemplateBinding CornerRadius}">
+            <ContentPresenter Name="PART_ContentPresenter"
+                              Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                              Padding="{TemplateBinding Padding}"
+                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+          </Border>
+        </Panel>
+      </ControlTemplate>
+    </Setter>
+
+    <Style Selector="^:pointerover /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimHoverBrush}" />
+    </Style>
+
+    <Style Selector="^:pressed /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimHoverBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AltimTextSecondaryBrush}" />
+    </Style>
+
+    <Style Selector="^:focus-visible /template/ Border#PART_FocusRing">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <Style Selector="^:disabled">
+      <Setter Property="Opacity" Value="{DynamicResource AltimDisabledOpacity}" />
+    </Style>
+  </ControlTheme>
+
+  <!-- Quiet: no ground, no outline. For the actions that sit beside a primary one. -->
+  <ControlTheme x:Key="AltimQuietButton"
+                TargetType="Button"
+                BasedOn="{StaticResource {x:Type Button}}">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="{DynamicResource AltimBorderThicknessNone}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimTextSecondaryBrush}" />
+
+    <Style Selector="^:pointerover /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimHoverBrush}" />
+    </Style>
+
+    <Style Selector="^:pointerover">
+      <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    </Style>
+
+    <Style Selector="^:pressed /template/ Border#PART_Body">
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+  </ControlTheme>
+
+  <!-- Destructive: status colour on the outline and the label. Never a red fill. -->
+  <ControlTheme x:Key="AltimDestructiveButton"
+                TargetType="Button"
+                BasedOn="{StaticResource {x:Type Button}}">
+    <Setter Property="Foreground" Value="{DynamicResource AltimStatusErrorBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimStatusErrorBrush}" />
+
+    <Style Selector="^:pressed /template/ Border#PART_Body">
+      <Setter Property="BorderBrush" Value="{DynamicResource AltimStatusErrorBrush}" />
+    </Style>
+  </ControlTheme>
+
+</ResourceDictionary>

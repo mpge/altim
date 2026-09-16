@@ -1,0 +1,33 @@
+<!--
+  Separator.
+
+  DESIGN.md puts separators and whitespace where another design system would put a card
+  inside a card. So this is exactly what it says it is: 1px of Border colour, no margin
+  tricks, no inset, no double rule. The vertical variant is the same rule turned 90 degrees.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <ControlTheme x:Key="{x:Type Separator}" TargetType="Separator">
+    <Setter Property="Background" Value="{DynamicResource AltimSeparatorBrush}" />
+    <Setter Property="Height" Value="{DynamicResource AltimHairline}" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="Separator">
+        <Border Background="{TemplateBinding Background}" />
+      </ControlTemplate>
+    </Setter>
+  </ControlTheme>
+
+  <ControlTheme x:Key="AltimVerticalSeparator"
+                TargetType="Separator"
+                BasedOn="{StaticResource {x:Type Separator}}">
+    <Setter Property="Height" Value="NaN" />
+    <Setter Property="Width" Value="{DynamicResource AltimHairline}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+  </ControlTheme>
+
+</ResourceDictionary>
