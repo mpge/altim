@@ -5,7 +5,9 @@ using Xunit;
 namespace Altim.Providers.Tests;
 
 /// <summary>
-/// Resolution order on Windows, where a command name is not a file name.
+/// A command name is not a file name on Windows, and is exactly a file name everywhere else.
+/// Both rules are asserted: the Windows-only cases are skipped off Windows rather than deleted,
+/// and each has a counterpart proving the extension search does not happen on other platforms.
 /// </summary>
 /// <remarks>
 /// The npm installation of the Codex CLI drops three files into one directory:
@@ -17,7 +19,7 @@ namespace Altim.Providers.Tests;
 /// </remarks>
 public sealed class ExecutableResolverTests
 {
-    [Fact]
+    [WindowsFact]
     public void TheNpmShimLayoutResolvesToTheStartableExtensionRatherThanTheShellScript()
     {
         using var workspace = new TempWorkspace();
@@ -27,6 +29,21 @@ public sealed class ExecutableResolverTests
 
         Assert.True(ExecutableResolver.TryResolveIn([workspace.Path_("bin")], "codex", out string? resolved));
         Assert.Equal(Path.GetFullPath(shim), resolved);
+    }
+
+    [UnixFact]
+    public void TheNpmShimLayoutResolvesToTheShellScriptOffWindows()
+    {
+        // The same three files, where the shell script is the one that starts and the
+        // .cmd is the useless one. Appending an extension here would be the mirror of
+        // the Windows defect.
+        using var workspace = new TempWorkspace();
+        string script = workspace.Write("bin/codex", "#!/bin/sh\nexec node cli.js \"$@\"\n");
+        _ = workspace.Write("bin/codex.cmd", "@echo off\r\nnode cli.js %*\r\n");
+        _ = workspace.Write("bin/codex.ps1", "#!/usr/bin/env pwsh\n");
+
+        Assert.True(ExecutableResolver.TryResolveIn([workspace.Path_("bin")], "codex", out string? resolved));
+        Assert.Equal(Path.GetFullPath(script), resolved);
     }
 
     [Fact]
@@ -53,7 +70,7 @@ public sealed class ExecutableResolverTests
         Assert.Equal(Path.GetFullPath(bare), resolved);
     }
 
-    [Fact]
+    [WindowsFact]
     public void ExtensionsAreTriedInTheOrderTheShellWouldTryThem()
     {
         using var workspace = new TempWorkspace();
@@ -63,15 +80,31 @@ public sealed class ExecutableResolverTests
         Assert.True(ExecutableResolver.TryResolveIn([workspace.Path_("bin")], "multi", out string? resolved));
 
         // PATHEXT lists .EXE before .CMD, and so does the fallback list.
-        Assert.Equal(OperatingSystem.IsWindows() ? Path.GetFullPath(exe) : Path.GetFullPath(workspace.Path_("bin", "multi.cmd")), resolved);
+        Assert.Equal(Path.GetFullPath(exe), resolved);
+    }
+
+    [UnixFact]
+    public void NoExtensionIsEverAppendedOffWindows()
+    {
+        // A directory holding only multi.cmd and multi.exe holds no command called
+        // "multi" anywhere but Windows, and saying otherwise would hand the process
+        // start a file the kernel cannot execute.
+        using var workspace = new TempWorkspace();
+        _ = workspace.Write("bin/multi.cmd", "@echo off\r\n");
+        _ = workspace.Write("bin/multi.exe", "MZ");
+
+        Assert.False(ExecutableResolver.TryResolveIn([workspace.Path_("bin")], "multi", out _));
     }
 
     [Fact]
     public void EarlierDirectoriesWinOverLaterOnes()
     {
+        // Name the files the way the running platform names commands, so the test is
+        // about ordering rather than about extensions.
+        string name = OperatingSystem.IsWindows() ? "dup.cmd" : "dup";
         using var workspace = new TempWorkspace();
-        string first = workspace.Write("one/dup.cmd", "@echo off\r\n");
-        _ = workspace.Write("two/dup.cmd", "@echo off\r\n");
+        string first = workspace.Write($"one/{name}", "@echo off\r\n");
+        _ = workspace.Write($"two/{name}", "@echo off\r\n");
 
         Assert.True(
             ExecutableResolver.TryResolveIn([workspace.Path_("one"), workspace.Path_("two")], "dup", out string? resolved));
@@ -92,7 +125,7 @@ public sealed class ExecutableResolverTests
     public void AnUnreadableOrMalformedSearchDirectoryIsSkippedRatherThanFatal()
     {
         using var workspace = new TempWorkspace();
-        string shim = workspace.Write("bin/codex.cmd", "@echo off\r\n");
+        string shim = workspace.Write(OperatingSystem.IsWindows() ? "bin/codex.cmd" : "bin/codex", "@echo off\r\n");
 
         Assert.True(
             ExecutableResolver.TryResolveIn(["\0not a directory", workspace.Path_("bin")], "codex", out string? resolved));
