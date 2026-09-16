@@ -1,4 +1,6 @@
 using Altim.UI.Controls;
+using Altim.UI.Themes;
+using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Controls;
 using Avalonia.Animation.Easings;
@@ -229,4 +231,62 @@ public sealed class MeterTests
     [AvaloniaFact]
     public void RendersAtZeroWidth() =>
         DesignSystem.AssertRenders(new Meter { Value = 50d }, width: 1d, height: 1d);
+
+    /// <summary>
+    /// A meter asks for a width. It reports a level by how far its fill runs, so one laid
+    /// out at zero width reports nothing at all - and an auto sized column will do exactly
+    /// that, with no layout error and nothing on screen to notice.
+    /// </summary>
+    [AvaloniaFact]
+    public void AskedForNoRoomItStillAsksForItsMinimumWidth()
+    {
+        var meter = new Meter { Value = 40d };
+
+        // An auto sized column measures its children with infinite width.
+        var column = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto") };
+        column.Children.Add(meter);
+
+        using (WriteableBitmap frame = DesignSystem.Render(column, width: 200d, height: 32d))
+        {
+            Assert.True(frame.PixelSize.Width > 0);
+        }
+
+        Assert.Equal(48d, Meter.MinimumWidth);
+        Assert.True(
+            meter.Bounds.Width >= Meter.MinimumWidth,
+            $"An auto sized column laid the meter out at {meter.Bounds.Width}.");
+        Assert.True(meter.RenderedFillWidth > 0d, "A meter with a level drew no fill.");
+    }
+
+    /// <summary>
+    /// Offered unlimited room the meter asks for its floor, and offered less than that it
+    /// asks for what it was offered, so the floor can never push a layout into overflow.
+    /// </summary>
+    [AvaloniaFact]
+    public void ItAsksForItsFloorButNeverForMoreRoomThanItWasOffered()
+    {
+        var unbounded = new Meter { Value = 40d };
+        unbounded.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Assert.Equal(Meter.MinimumWidth, unbounded.DesiredSize.Width, 6);
+        Assert.Equal(Meter.RailHeight, unbounded.DesiredSize.Height, 6);
+
+        var squeezed = new Meter { Value = 40d };
+        squeezed.Measure(new Size(12d, 32d));
+        Assert.Equal(12d, squeezed.DesiredSize.Width, 6);
+    }
+
+    /// <summary>
+    /// The design system's copy of the minimum width is the control's. Two numbers that
+    /// have to agree and are written down twice always drift, so this is the guard.
+    /// </summary>
+    [AvaloniaFact]
+    public void TheMinimumWidthTokenIsTheControlsMinimumWidth()
+    {
+        AltimTheme theme = DesignSystem.LoadStandalone();
+
+        Assert.True(
+            theme.TryGetResource("AltimMeterMinWidth", ThemeVariant.Light, out object? token),
+            "AltimMeterMinWidth does not resolve.");
+        Assert.Equal(Meter.MinimumWidth, Assert.IsType<double>(token));
+    }
 }

@@ -1,10 +1,15 @@
 <!--
   Altim colour tokens.
 
-  Every colour in docs/DESIGN.md, and nothing else. Values are repeated literally in
-  each bucket rather than aliased with StaticResource: a theme dictionary entry is
-  resolved per variant at runtime, and StaticResource has no variant to resolve
-  against, so it throws. Consumers must use DynamicResource for everything here.
+  Every colour in docs/DESIGN.md, and nothing else. Values are repeated literally in each
+  bucket rather than aliased with StaticResource, because a theme dictionary entry is
+  resolved per variant at runtime and an alias would freeze one variant's value.
+
+  Consumers must use DynamicResource for every key in this file. StaticResource does NOT
+  throw on a theme key: it resolves the Default bucket once, at load, and freezes it, so a
+  static reference to a colour ships a light patch into dark mode silently. There is a test
+  that fails if any {StaticResource Altim*Brush|Color|Shadow} reaches the XAML, because the
+  framework will not tell you.
 
   Dark is the designed palette from the brief, not an inversion of Light: backgrounds
   lift, borders stay lower contrast than text, and pure black is never a surface.
@@ -42,6 +47,7 @@
       <!-- Role aliases. The value repeats, the name carries the reason. -->
       <SolidColorBrush x:Key="AltimSeparatorBrush" Color="#EAEAEA" />
       <SolidColorBrush x:Key="AltimHoverBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="AltimHoverMutedBrush" Color="#EAEAEA" />
       <SolidColorBrush x:Key="AltimFocusRingBrush" Color="#0A0A0A" />
       <SolidColorBrush x:Key="AltimMeterTrackBrush" Color="#EAEAEA" />
       <SolidColorBrush x:Key="AltimMeterFillBrush" Color="#0A0A0A" />
@@ -86,6 +92,7 @@
 
       <SolidColorBrush x:Key="AltimSeparatorBrush" Color="#EAEAEA" />
       <SolidColorBrush x:Key="AltimHoverBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="AltimHoverMutedBrush" Color="#EAEAEA" />
       <SolidColorBrush x:Key="AltimFocusRingBrush" Color="#0A0A0A" />
       <SolidColorBrush x:Key="AltimMeterTrackBrush" Color="#EAEAEA" />
       <SolidColorBrush x:Key="AltimMeterFillBrush" Color="#0A0A0A" />
@@ -129,6 +136,7 @@
 
       <SolidColorBrush x:Key="AltimSeparatorBrush" Color="#232326" />
       <SolidColorBrush x:Key="AltimHoverBrush" Color="#151517" />
+      <SolidColorBrush x:Key="AltimHoverMutedBrush" Color="#232326" />
       <SolidColorBrush x:Key="AltimFocusRingBrush" Color="#F2F2F3" />
       <SolidColorBrush x:Key="AltimMeterTrackBrush" Color="#232326" />
       <SolidColorBrush x:Key="AltimMeterFillBrush" Color="#F2F2F3" />

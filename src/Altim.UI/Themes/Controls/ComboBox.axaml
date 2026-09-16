@@ -4,6 +4,11 @@
   The closed box is the same shape as a TextBox - 32px, 1px border, radius 6 - with a
   hairline chevron rather than a filled glyph. The drop down reuses the popup panel shape
   from DESIGN.md: radius 8, 1px border, SurfaceMuted, and the one shadow the system allows.
+
+  Because the drop down's ground is SurfaceMuted, an item's hover cannot be SurfaceMuted:
+  it takes the next step along the same ramp, AltimHoverMutedBrush, which leaves Surface
+  free to mean selected. The closed box turns off ClipToBounds and nulls FocusAdorner for
+  the same reason every other focusable control does - see Button.axaml.
 -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -35,7 +40,7 @@
     </Setter>
 
     <Style Selector="^:pointerover /template/ Border#PART_Body">
-      <Setter Property="Background" Value="{DynamicResource AltimSurfaceBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AltimHoverMutedBrush}" />
     </Style>
 
     <Style Selector="^:selected /template/ Border#PART_Body">
@@ -71,6 +76,8 @@
     <Setter Property="PlaceholderForeground" Value="{DynamicResource AltimTextSecondaryBrush}" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="ClipToBounds" Value="False" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
     <Setter Property="Template">
       <ControlTemplate TargetType="ComboBox">
         <Panel>

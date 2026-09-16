@@ -12,15 +12,13 @@
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="Avalonia.Headless.XUnit" />
-    <!-- Fluent is a test-only dependency. The headless host needs a complete control
-         theme to measure and arrange against, and loading Fluent here keeps the
-         Simple based design system out of the assertions. -->
+    <!-- Headless drawing renders nothing, so a captured frame comes back null. Skia is what
+         makes CaptureRenderedFrame return real pixels, and Avalonia.Desktop is the only
+         centrally versioned package that carries it: Directory.Packages.props has no
+         PackageVersion for Avalonia.Skia, and this project cannot add one. No windowing
+         backend is initialised, because the session is headless. -->
+    <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
-    <!-- Skia is a test-only dependency too. The headless platform's stub drawing backend
-         measures and arranges but never rasterises, so CaptureRenderedFrame returns null
-         against it and a render assertion would assert nothing. The version is pinned
-         here rather than centrally because nothing the app ships needs it. -->
-    <PackageReference Include="Avalonia.Skia" VersionOverride="12.1.2" />
   </ItemGroup>
 
 </Project>

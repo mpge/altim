@@ -5,7 +5,9 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Shapes;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
 using Xunit;
@@ -23,6 +25,7 @@ public sealed class ControlThemeTests
     public static TheoryData<string> ControlNames =>
     [
         "Button",
+        "PrimaryButton",
         "QuietButton",
         "DestructiveButton",
         "ToggleSwitch",
@@ -183,6 +186,40 @@ public sealed class ControlThemeTests
         Assert.Equal(1, body.BoxShadow.Count);
     }
 
+    /// <summary>
+    /// The track is a pill, and the knob fits it. The radius has to be half the height or
+    /// the ends are not semicircles: at the control radius of 6 a 16 tall track reads as a
+    /// rounded rectangle. The knob inset is a hairline rather than a spacing step because
+    /// the track border already takes a pixel from each side - at a 2 inset the knob
+    /// measured 10 and sat squashed inside a track one border too small for it.
+    /// </summary>
+    [AvaloniaFact]
+    public void TheToggleTrackIsAPillWithAKnobThatFitsIt()
+    {
+        var toggle = new ToggleSwitch { Content = "Start with the system" };
+
+        using WriteableBitmap frame = DesignSystem.Render(toggle, width: 240d, height: 48d);
+        Assert.True(frame.PixelSize.Width > 0);
+
+        Border track = Assert.IsType<Border>(Part<Border>(toggle, "PART_Track"));
+        Panel knobs = Assert.IsType<Panel>(Part<Panel>(toggle, "PART_MovingKnobs"));
+        Border knob = Assert.IsType<Border>(Part<Border>(toggle, "PART_Knob"));
+
+        Assert.Equal(28d, track.Bounds.Width, 6);
+        Assert.Equal(16d, track.Bounds.Height, 6);
+
+        // Half the height on every corner: the ends are semicircles, not soft corners.
+        Assert.Equal(new CornerRadius(track.Bounds.Height / 2d), track.CornerRadius);
+        Assert.Equal(new CornerRadius(knob.Bounds.Height / 2d), knob.CornerRadius);
+
+        // 16 track - 2 border - 2 inset = 12, which is the knob's own size.
+        Assert.Equal(12d, knobs.Bounds.Height, 6);
+        Assert.Equal(12d, knobs.Bounds.Width, 6);
+
+        // The travel is one spacing step: 28 - 12 - 2 border - 2 inset = 12.
+        Assert.Equal(12d, track.Bounds.Width - knobs.Bounds.Width - 4d, 6);
+    }
+
     /// <summary>The toggle moves its knob across and colours the track when checked.</summary>
     [AvaloniaFact]
     public void ToggleSwitchMovesItsKnob()
@@ -198,25 +235,20 @@ public sealed class ControlThemeTests
     }
 
     /// <summary>
-    /// The popup panel window theme renders: 320 wide, radius 8, one border, one shadow.
+    /// The popup panel window theme renders the shape DESIGN.md specifies: a 320 wide
+    /// PANEL, radius 8, one border, one shadow. The window is wider than the panel by the
+    /// shadow inset on both sides, which is the transparent room the shadow falls into.
     /// </summary>
+    /// <remarks>
+    /// The old form of this test asserted the WINDOW was 320 and passed while the panel
+    /// measured 272: the inset ate 48px and the thing the user sees was the wrong width.
+    /// The panel's laid out width is the assertion that cannot be satisfied by a wrong
+    /// panel inside a right window.
+    /// </remarks>
     [AvaloniaFact]
     public void PopupWindowThemeRenders()
     {
-        DesignSystem.Ensure();
-        Application app = Assert.IsAssignableFrom<Application>(Application.Current);
-        Assert.True(
-            app.Resources.TryGetResource("AltimPopupWindow", ThemeVariant.Light, out object? theme));
-
-        var window = new Window
-        {
-            WindowDecorations = WindowDecorations.None,
-            ShowInTaskbar = false,
-            SizeToContent = SizeToContent.Height,
-            RequestedThemeVariant = ThemeVariant.Dark,
-            Theme = Assert.IsType<ControlTheme>(theme),
-            Content = new TextBlock { Text = "Usage has reset." },
-        };
+        Window window = DesignSystem.PopupWindow(transparent: true);
 
         try
         {
@@ -227,17 +259,62 @@ public sealed class ControlThemeTests
             using WriteableBitmap? frame = window.CaptureRenderedFrame();
             Assert.NotNull(frame);
 
+            Assert.Equal(WindowTransparencyLevel.Transparent, window.ActualTransparencyLevel);
+
             Border panel = Assert.IsType<Border>(Part<Border>(window, "PART_PopupPanel"));
             Assert.Equal(new CornerRadius(8d), panel.CornerRadius);
             Assert.Equal(new Thickness(1d), panel.BorderThickness);
             Assert.Equal(1, panel.BoxShadow.Count);
-            Assert.Equal(320d, window.Width);
+
+            // The panel is the 320. The window is 320 plus the inset on both sides.
+            Assert.Equal(320d, panel.Bounds.Width, 6);
+            Assert.Equal(new Thickness(24d, 16d, 24d, 32d), panel.Margin);
+            Assert.Equal(368d, window.Width);
         }
         finally
         {
             window.Close();
         }
     }
+
+    /// <summary>
+    /// Without transparency the shadow goes and the panel stays exactly where it was: the
+    /// inset is still there, painted in the fallback ground rather than left as the black
+    /// an unpainted transparent surface renders as. The panel is 320 in both states.
+    /// </summary>
+    [AvaloniaFact]
+    public void PopupWindowDropsItsShadowWithoutTransparency()
+    {
+        Window window = DesignSystem.PopupWindow(transparent: false);
+
+        try
+        {
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+            using WriteableBitmap? frame = window.CaptureRenderedFrame();
+            Assert.NotNull(frame);
+
+            Assert.Equal(WindowTransparencyLevel.None, window.ActualTransparencyLevel);
+
+            Border panel = Assert.IsType<Border>(Part<Border>(window, "PART_PopupPanel"));
+            Assert.Equal(320d, panel.Bounds.Width, 6);
+            Assert.Equal(new Thickness(24d, 16d, 24d, 32d), panel.Margin);
+            Assert.Equal(0, panel.BoxShadow.Count);
+
+            // The fallback ground is the panel's own colour, so the inset is never black.
+            Border fallback = Assert.IsType<Border>(Part<Border>(window, "PART_TransparencyFallback"));
+            var ground = Assert.IsAssignableFrom<ISolidColorBrush>(fallback.Background);
+            var expected = Assert.IsAssignableFrom<ISolidColorBrush>(panel.Background);
+            Assert.Equal(expected.Color, ground.Color);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
 
     private static T? Part<T>(Visual root, string name)
         where T : Visual =>
@@ -246,6 +323,7 @@ public sealed class ControlThemeTests
     private static Control Build(string name) => name switch
     {
         "Button" => new Button { Content = "Retry" },
+        "PrimaryButton" => Themed(new Button { Content = "Open Altim" }, "AltimPrimaryButton"),
         "QuietButton" => Themed(new Button { Content = "Clear history" }, "AltimQuietButton"),
         "DestructiveButton" => Themed(new Button { Content = "Delete history" }, "AltimDestructiveButton"),
         "ToggleSwitch" => new ToggleSwitch { Content = "Start with the system", IsChecked = true },

@@ -1,14 +1,18 @@
 <!--
   Button.
 
-  DESIGN.md has no filled accent button: colour carries provider identity and status only.
-  So the default button is an outline - 1px Border, Surface ground, TextPrimary label - and
-  the two variants remove the outline (quiet) or move the outline and the label to
-  StatusError (destructive). None of them fills with colour.
+  DESIGN.md has no filled ACCENT button: colour carries provider identity and status only.
+  It does not forbid a filled button, so the primary variant fills with TextPrimary - the
+  same ink the figures are set in - and the rest do not fill at all. The default button is
+  an outline (1px Border, Surface ground, TextPrimary label) and the two quiet variants
+  remove the outline or move the outline and the label to StatusError.
 
   32px minimum height, radius 6, sentence case. The focus ring is a 2px TextPrimary ring
   offset 2px outside the control; it is a template part, not a setter, so no style can
-  quietly remove it.
+  quietly remove it. Drawing outside the control's own bounds needs two things the theme
+  must state: ClipToBounds="False", because TemplatedControl clips by default and would
+  otherwise erase the ring, and FocusAdorner="{x:Null}", because the base theme's dashed
+  rectangle is drawn by the framework and would otherwise appear beside it.
 -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
@@ -26,6 +30,8 @@
     <Setter Property="FontWeight" Value="{DynamicResource AltimFontWeightLabel}" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="ClipToBounds" Value="False" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
     <Setter Property="Template">
       <ControlTemplate TargetType="Button">
         <Panel>
@@ -70,7 +76,32 @@
     </Style>
   </ControlTheme>
 
-  <!-- Quiet: no ground, no outline. For the actions that sit beside a primary one. -->
+  <!-- Primary: the one action a surface is asking for - "Retry", "Open Altim". It fills
+       with TextPrimary and sets its label in Surface, which is the figure ink and the page
+       ground, not an accent. One per surface. -->
+  <ControlTheme x:Key="AltimPrimaryButton"
+                TargetType="Button"
+                BasedOn="{StaticResource {x:Type Button}}">
+    <Setter Property="Background" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource AltimSurfaceBrush}" />
+
+    <!-- Hover lightens the fill to the secondary ink rather than tinting it. -->
+    <Style Selector="^:pointerover /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimTextSecondaryBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AltimTextSecondaryBrush}" />
+    </Style>
+
+    <Style Selector="^:pressed /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimTextPrimaryBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AltimTextPrimaryBrush}" />
+    </Style>
+  </ControlTheme>
+
+  <!-- Quiet: no ground, no outline. For the actions that sit beside a primary one. It is
+       the button the popup and the sidebar use, so its hover cannot be the default one:
+       AltimHoverBrush is SurfaceMuted, which is exactly the ground those two are painted
+       on. It takes the next step along the same ramp instead - see States in DESIGN.md. -->
   <ControlTheme x:Key="AltimQuietButton"
                 TargetType="Button"
                 BasedOn="{StaticResource {x:Type Button}}">
@@ -79,7 +110,7 @@
     <Setter Property="Foreground" Value="{DynamicResource AltimTextSecondaryBrush}" />
 
     <Style Selector="^:pointerover /template/ Border#PART_Body">
-      <Setter Property="Background" Value="{DynamicResource AltimHoverBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AltimHoverMutedBrush}" />
     </Style>
 
     <Style Selector="^:pointerover">
@@ -87,6 +118,7 @@
     </Style>
 
     <Style Selector="^:pressed /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimHoverMutedBrush}" />
       <Setter Property="BorderBrush" Value="Transparent" />
     </Style>
   </ControlTheme>

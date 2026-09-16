@@ -20,8 +20,11 @@ namespace Altim.UI.Themes;
 /// </code>
 /// <para>
 /// Every colour token lives in a theme dictionary, so consumers must reach them with
-/// <c>DynamicResource</c>. <c>StaticResource</c> has no theme variant to resolve against
-/// and throws.
+/// <c>DynamicResource</c>. <c>StaticResource</c> does <em>not</em> throw on a theme key:
+/// it resolves the <c>Default</c> bucket once, at load, and freezes that value, so a
+/// static reference ships the light colour into dark mode and nothing reports it.
+/// <c>SourceShapeTests</c> fails the build if one reaches the XAML, because the framework
+/// will not.
 /// </para>
 /// </remarks>
 public partial class AltimTheme : ResourceDictionary

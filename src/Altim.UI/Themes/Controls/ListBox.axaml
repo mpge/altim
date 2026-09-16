@@ -6,7 +6,12 @@
 
   AltimSidebarItem is the second row shape DESIGN.md names: 32px, radius 6, a 13px label
   and a 16px icon, selected by taking the Surface colour back off the muted sidebar ground.
-  No accent bar, no bold.
+  No accent bar, no bold. Its hover cannot be SurfaceMuted, because the sidebar's own ground
+  is SurfaceMuted: it takes the next step along that ramp instead, which leaves the Surface
+  lift to mean selected and keeps the two states apart.
+
+  Both row shapes turn off ClipToBounds and null FocusAdorner, for the reason Button.axaml
+  states: the focus ring is drawn outside the row's bounds.
 -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
@@ -22,6 +27,8 @@
     <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="ClipToBounds" Value="False" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
     <Setter Property="Template">
       <ControlTemplate TargetType="ListBoxItem">
         <Panel>
@@ -75,7 +82,17 @@
     <Setter Property="MinHeight" Value="{DynamicResource AltimSidebarItemHeight}" />
     <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
 
+    <!-- Order matters: a selected row that is also hovered stays selected, because the
+         later style wins when both match. -->
+    <Style Selector="^:pointerover /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimHoverMutedBrush}" />
+    </Style>
+
     <Style Selector="^:selected /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource AltimSidebarSelectedBrush}" />
+    </Style>
+
+    <Style Selector="^:selected:pointerover /template/ Border#PART_Body">
       <Setter Property="Background" Value="{DynamicResource AltimSidebarSelectedBrush}" />
     </Style>
   </ControlTheme>

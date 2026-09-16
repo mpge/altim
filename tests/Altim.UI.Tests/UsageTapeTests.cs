@@ -1,5 +1,8 @@
 using Altim.UI.Controls;
+using Avalonia;
+using Avalonia.Controls.Documents;
 using Avalonia.Headless.XUnit;
+using Avalonia.Media;
 using Avalonia.Styling;
 using Xunit;
 
@@ -150,6 +153,129 @@ public sealed class UsageTapeTests
     public void RendersOutOfRangeSamples() =>
         RenderBothVariants(
             () => new UsageTape { Series = [new UsageTapeSeries("Claude", [-40d, 240d, double.NaN, 50d])] });
+
+    /// <summary>
+    /// Two series ending at the same level get their names pushed apart rather than set on
+    /// top of one another. The names are the legend - there is no legend box - so two of
+    /// them on one row makes the tape unreadable exactly where it is busiest.
+    /// </summary>
+    [AvaloniaFact]
+    public void LabelsAtTheSameLevelArePushedApart()
+    {
+        IReadOnlyList<double> placed = UsageTape.SpreadLabels([50d, 50d, 50d], 14d, 0d, 100d);
+
+        Assert.Equal(3, placed.Count);
+        Assert.Equal(50d, placed[0], 6);
+        Assert.Equal(64d, placed[1], 6);
+        Assert.Equal(78d, placed[2], 6);
+    }
+
+    /// <summary>A label that is already clear of its neighbours does not move.</summary>
+    [AvaloniaFact]
+    public void LabelsThatDoNotCollideStayWhereTheirLineEnds()
+    {
+        IReadOnlyList<double> placed = UsageTape.SpreadLabels([10d, 60d], 14d, 0d, 100d);
+
+        Assert.Equal(10d, placed[0], 6);
+        Assert.Equal(60d, placed[1], 6);
+    }
+
+    /// <summary>The result is in the order it was given, not in vertical order.</summary>
+    [AvaloniaFact]
+    public void LabelsComeBackInTheOrderTheyWereGiven()
+    {
+        IReadOnlyList<double> placed = UsageTape.SpreadLabels([80d, 10d, 82d], 14d, 0d, 100d);
+
+        Assert.Equal(80d, placed[0], 6);
+        Assert.Equal(10d, placed[1], 6);
+        Assert.Equal(94d, placed[2], 6);
+    }
+
+    /// <summary>
+    /// A stack that would run off the bottom is pulled back up, so a label is never drawn
+    /// outside the control it belongs to.
+    /// </summary>
+    [AvaloniaFact]
+    public void LabelsNearTheBottomArePulledBackInside()
+    {
+        IReadOnlyList<double> placed = UsageTape.SpreadLabels([96d, 98d, 99d], 14d, 0d, 100d);
+
+        Assert.All(placed, top => Assert.InRange(top, 0d, 100d));
+        Assert.Equal(72d, placed[0], 6);
+        Assert.Equal(86d, placed[1], 6);
+        Assert.Equal(100d, placed[2], 6);
+    }
+
+    /// <summary>Nothing to place is not an error.</summary>
+    [AvaloniaFact]
+    public void SpreadingNoLabelsIsEmpty() =>
+        Assert.Empty(UsageTape.SpreadLabels([], 14d, 0d, 100d));
+
+    /// <summary>
+    /// Two providers ending at a similar level render, and the tape is the shape that
+    /// makes their names collide: both lines finish at the right edge.
+    /// </summary>
+    [AvaloniaFact]
+    public void RendersTwoSeriesEndingAtTheSameLevel() =>
+        RenderBothVariants(
+            () => new UsageTape
+            {
+                Series =
+                [
+                    new UsageTapeSeries("Claude Code", [10d, 30d, 62d]),
+                    new UsageTapeSeries("Codex", [80d, 70d, 62d], UsageTapeEmphasis.Secondary),
+                ],
+            });
+
+    /// <summary>
+    /// The tape draws its own text, so the tabular figures the theme hands down have to
+    /// reach it: evenly spaced rules need evenly spaced labels.
+    /// </summary>
+    [AvaloniaFact]
+    public void TheThemeHandsTheTapeItsTabularFigures()
+    {
+        var tape = new UsageTape { Series = [new UsageTapeSeries("Claude", [20d, 60d])] };
+
+        DesignSystem.AssertRenders(tape, width: 360d, height: 140d);
+
+        FontFeatureCollection? features = TextElement.GetFontFeatures(tape);
+        Assert.NotNull(features);
+        Assert.Equal(2, features.Count);
+        Assert.Equal("tnum", features[0].Tag);
+        Assert.Equal("zero", features[1].Tag);
+    }
+
+    /// <summary>
+    /// The empty sentence wraps inside the control. Laid out on one line it is wider than
+    /// any panel in the product, so without a width it simply runs off the right edge,
+    /// which reads as a truncated sentence rather than a wrapped one.
+    /// </summary>
+    [AvaloniaFact]
+    public void TheEmptySentenceWrapsRatherThanRunningOffTheEdge()
+    {
+        var tape = new UsageTape();
+        using PixelHost host = PixelHost.Show(tape, width: 200d, height: 120d);
+
+        Frame frame = host.Capture();
+        Rect bounds = host.BoundsOf(tape);
+
+        // Ink on more than one line means it wrapped; ink in the last column would mean it
+        // was still running when the control ran out.
+        var body = new Rect(bounds.X, bounds.Y, bounds.Width - 1d, bounds.Height);
+        var lastColumn = new Rect(bounds.Right - 1d, bounds.Y, 1d, bounds.Height);
+
+        int rows = 0;
+        for (int y = (int)bounds.Y; y < (int)bounds.Bottom; y++)
+        {
+            if (frame.Any(new Rect(body.X, y, body.Width, 1d), colour => !Ink.Near(colour, Ink.Surface, 24)))
+            {
+                rows++;
+            }
+        }
+
+        Assert.True(rows > 14, $"The sentence occupies {rows} rows, so it did not wrap.");
+        Assert.Equal(0, frame.Count(lastColumn, colour => !Ink.Near(colour, Ink.Surface, 24)));
+    }
 
     private static UsageTapeSeries Ramp(string name, int count)
     {

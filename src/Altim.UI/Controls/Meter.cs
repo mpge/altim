@@ -27,11 +27,27 @@ namespace Altim.UI.Controls;
 /// number to another. It does not animate on the first value, on becoming unavailable, or
 /// on coming back from unavailable, because those are not a level changing.
 /// </para>
+/// <para>
+/// A meter reports a level by its width, so a meter with no width reports nothing. It asks
+/// for <see cref="MinimumWidth"/> at measure, which is what keeps it from collapsing to
+/// zero in an auto sized grid column and vanishing without any layout error.
+/// </para>
+/// <para>
+/// The threshold tick and the unavailable outline are hairlines, so both are snapped to
+/// whole device pixels through <see cref="Hairline"/>: at 125% an unsnapped 1px rule is
+/// spread over two rows of pixels at partial coverage and reads as a grey smear.
+/// </para>
 /// </remarks>
 public sealed class Meter : Control
 {
     /// <summary>The height of the rail in device independent pixels.</summary>
     public const double RailHeight = 6d;
+
+    /// <summary>
+    /// The narrowest a meter will measure to. It matches the <c>AltimMeterMinWidth</c>
+    /// token, which is the popup's half width less one step on the spacing scale.
+    /// </summary>
+    public const double MinimumWidth = 48d;
 
     /// <summary>How long the fill takes to travel to a new value.</summary>
     public static readonly TimeSpan FillDuration = TimeSpan.FromMilliseconds(180);
@@ -221,16 +237,30 @@ public sealed class Meter : Control
 
         if (Threshold is { } threshold && ThresholdBrush is { } tick)
         {
-            double x = Math.Clamp(FillWidthFor(threshold, rail.Width), 0d, Math.Max(0d, rail.Width - 1d));
-            context.FillRectangle(tick, new Rect(rail.X + x, rail.Y, 1d, rail.Height));
+            double scale = Hairline.ScaleOf(this);
+            double weight = Math.Min(Hairline.ThicknessFor(scale), rail.Width);
+            double x = Math.Clamp(
+                FillWidthFor(threshold, rail.Width),
+                0d,
+                Math.Max(0d, rail.Width - weight));
+
+            context.FillRectangle(
+                tick,
+                new Rect(Hairline.SnapEdge(rail.X + x, scale), rail.Y, weight, rail.Height));
         }
     }
 
     /// <inheritdoc />
     protected override Size MeasureOverride(Size availableSize)
     {
-        _ = availableSize;
-        return new Size(0d, RailHeight);
+        // Asking for a width is the whole point: a meter that measured to zero would be
+        // laid out at zero in an auto sized column, draw nothing, and report no error.
+        // It never asks for more room than it was offered, so it cannot force an overflow.
+        double width = double.IsNaN(availableSize.Width)
+            ? MinimumWidth
+            : Math.Min(MinimumWidth, availableSize.Width);
+
+        return new Size(width, RailHeight);
     }
 
     /// <inheritdoc />
@@ -279,14 +309,15 @@ public sealed class Meter : Control
             return;
         }
 
-        var outline = rail.Deflate(0.5d);
+        double weight = Hairline.ThicknessFor(Hairline.ScaleOf(this));
+        var outline = rail.Deflate(weight / 2d);
         if (outline.Width <= 0d || outline.Height <= 0d)
         {
             return;
         }
 
-        double outlineRadius = Math.Max(0d, radius - 0.5d);
-        context.DrawRectangle(null, new Pen(brush, 1d), outline, outlineRadius, outlineRadius);
+        double outlineRadius = Math.Max(0d, radius - (weight / 2d));
+        context.DrawRectangle(null, new Pen(brush, weight), outline, outlineRadius, outlineRadius);
     }
 
     private void UpdateAboveThreshold()

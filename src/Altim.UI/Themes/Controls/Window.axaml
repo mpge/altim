@@ -4,10 +4,29 @@
   The default window is a plain Surface ground carrying the Inter face and Body size, so
   every descendant inherits the family without a view setting it.
 
-  AltimPopupWindow is the tray panel from DESIGN.md: 320 wide, radius 8, 1px border,
-  SurfaceMuted, and the single shadow the system allows. It leaves a margin around the
-  panel for that shadow to fall into, which is why the window itself is transparent - a
-  borderless window cannot cast a shadow onto its own opaque background.
+  AltimPopupWindow is the tray panel from DESIGN.md: a 320 wide panel, radius 8, 1px border,
+  SurfaceMuted, and the single shadow the system allows. The 320 is on the PANEL. The window
+  is wider - AltimPopupWindowWidth, 320 plus the shadow inset on both sides - because the
+  window is transparent room for the shadow to fall into and the panel is the thing the user
+  sees. Positioning code therefore anchors the window, not the panel, and must subtract
+  AltimPopupShadowMargin to line the panel up with the tray icon.
+
+  The panel does not clip to its bounds. A BoxShadow is drawn outside them, so clipping
+  erases the one shadow in the system; and since ClipToBounds is a rectangular clip it never
+  rounded off the corners it looked like it was there to round off in the first place.
+
+  When the compositor gives the window no transparency the inset would render as whatever is
+  behind an unpainted surface, which is black. So TransparencyBackgroundFallback is the panel
+  ground rather than Transparent: the room reserved for the shadow paints in the panel's own
+  colour instead. The shadow itself goes, because there is nothing for it to fall onto, and
+  it goes by setting AltimNoShadow rather than an empty string - Avalonia's BoxShadows
+  converter rejects "" and the whole ControlTheme then fails to attach.
+
+  The window keeps its width in that state on purpose. ActualTransparencyLevel is not known
+  until the window has a platform impl, which is after its first measure, and Avalonia writes
+  the client width back to Window.Width as a local value the moment the platform reports a
+  size. A style that tried to shrink the window afterwards would be overridden and would read
+  as working while doing nothing.
 -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
@@ -44,11 +63,11 @@
 
   <ControlTheme x:Key="AltimPopupWindow" TargetType="Window">
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="TransparencyBackgroundFallback" Value="Transparent" />
+    <Setter Property="TransparencyBackgroundFallback" Value="{DynamicResource AltimPopupBackgroundBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource AltimTextPrimaryBrush}" />
     <Setter Property="FontFamily" Value="{DynamicResource AltimFontFamily}" />
     <Setter Property="FontSize" Value="{DynamicResource AltimFontSizeBody}" />
-    <Setter Property="Width" Value="{DynamicResource AltimPopupWidth}" />
+    <Setter Property="Width" Value="{DynamicResource AltimPopupWindowWidth}" />
     <Setter Property="Template">
       <ControlTemplate TargetType="Window">
         <Panel>
@@ -59,13 +78,14 @@
             <Panel Margin="{TemplateBinding WindowDecorationMargin}">
               <VisualLayerManager Name="PART_VisualLayerManager">
                 <Border Name="PART_PopupPanel"
+                        ClipToBounds="False"
+                        Width="{DynamicResource AltimPopupWidth}"
                         Margin="{DynamicResource AltimPopupShadowMargin}"
                         Background="{DynamicResource AltimPopupBackgroundBrush}"
                         BorderBrush="{DynamicResource AltimBorderBrush}"
                         BorderThickness="{DynamicResource AltimBorderThickness}"
                         CornerRadius="{DynamicResource AltimCornerRadius8}"
-                        BoxShadow="{DynamicResource AltimPopupShadow}"
-                        ClipToBounds="True">
+                        BoxShadow="{DynamicResource AltimPopupShadow}">
                   <ContentPresenter Name="PART_ContentPresenter"
                                     Content="{TemplateBinding Content}"
                                     ContentTemplate="{TemplateBinding ContentTemplate}"
@@ -79,6 +99,12 @@
         </Panel>
       </ControlTemplate>
     </Setter>
+
+    <!-- No transparency, no shadow. The inset stays and paints in the fallback ground, so
+         the panel sits exactly where it sits in the transparent case. -->
+    <Style Selector="^[ActualTransparencyLevel=None] /template/ Border#PART_PopupPanel">
+      <Setter Property="BoxShadow" Value="{DynamicResource AltimNoShadow}" />
+    </Style>
   </ControlTheme>
 
 </ResourceDictionary>

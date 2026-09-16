@@ -53,6 +53,33 @@ Meter fill is `TextPrimary` in both themes. Status and provider colour:
 A provider accent never fills a meter, a button, or a background. It marks identity at 16px
 and nothing else. Status colour appears as a 6px dot or a single word, never a tinted panel.
 
+A *filled* control is not the same thing as an accent. The one primary action on a surface —
+"Retry", "Open Altim" — fills with `TextPrimary` and sets its label in `Surface`: the figure
+ink and the page ground, both already in the palette. One per surface.
+
+## States
+
+Interaction runs along the same ramp the palette already has, and which step it uses depends
+on the ground the control is standing on. `SurfaceMuted` is the hover for anything on
+`Surface`. It is invisible on a muted ground, because it *is* that ground, so anything
+standing on `SurfaceMuted` — the popup, the sidebar, a drop down — hovers to `Border`
+instead, one step further along. That leaves `Surface` free to mean selected on a muted
+ground, and keeps hover and selected legibly apart.
+
+| Ground | Hover | Selected |
+|---|---|---|
+| `Surface` | `SurfaceMuted` | `SurfaceMuted` |
+| `SurfaceMuted` | `Border` | `Surface` light / `#1C1C1F` dark |
+
+- **Disabled** is 45% opacity over the whole control, not a colour. The palette has no
+  disabled colour and inventing one would put a value in a view that is not in this
+  document. The control keeps its shape and its label; it recedes, it does not change.
+- **Text selection** is inverse video: `TextPrimary` ground, `Surface` text, square ends,
+  no tint. The caret is `TextPrimary`.
+- **Focus** is the 2px ring below. It is drawn *outside* the control, so every control that
+  hosts it also turns off clipping and drops the framework's own focus adorner — one
+  mechanism for the ring, never two drawn at once.
+
 ## Type
 
 One family: **Inter** (variable, OFL, bundled), falling back to the platform UI face. Metrics
@@ -79,12 +106,17 @@ mixed families, no italics. Times read as `2h 14m` and `8:00 PM` in the user's l
 - Shadow: one only, on the popup — `0 8 24 rgba(0,0,0,0.12)` light, `0 8 24 rgba(0,0,0,0.5)` dark.
 - Focus: 2px `TextPrimary` ring offset 2px. Always visible, never removed.
 - Hit targets: 28px minimum height for rows, 32px for buttons.
+- Hairlines are snapped to whole device pixels. A 1px rule is one device independent pixel,
+  which is 1.25 or 1.5 device pixels at 125% or 150%: unsnapped it is spread over two rows
+  at partial coverage and reads as a grey smear rather than a line.
 
 ## Components
 
 **Meter.** 6px tall, radius 3, track `Border`, fill `TextPrimary`. A 1px `TextSecondary` tick
 marks a configured threshold. Fill animates 180ms ease-out only when the value changes. Above
 threshold the fill stays `TextPrimary`; the *label* turns `StatusWarn`. The bar never turns red.
+Minimum width 48. A meter reports a level by its width, so one collapsed to nothing by an
+auto-sized column reports nothing, silently.
 
 **Metric row.** Label left (`Label`, `TextSecondary`), figure right (`Figure` or `FigureSmall`),
 meter beneath spanning full width, optional sub-caption (`Caption`) under the label. Token
@@ -99,16 +131,22 @@ last refreshed right, both `Caption`.
 padding, hover `SurfaceMuted`.
 
 **Chart (history tape).** Hairline level lines at 25/50/75/100 in `Border` with `Caption` labels
-outside the plot; one 1.5px line per provider in `TextPrimary` (primary) and `TextSecondary`
-(secondary); 3px dots at samples only when fewer than 32 points; no fills, no gradients, no
-legend box — providers are named inline at the end of their line. Empty state is a single
-sentence, not an illustration.
+outside the plot, set in tabular figures so evenly spaced rules get evenly spaced labels; one
+1.5px line per provider in `TextPrimary` (primary) and `TextSecondary` (secondary); 3px dots at
+samples only when fewer than 32 points; no fills, no gradients, no legend box — providers are
+named inline at the end of their line, pushed apart vertically when two lines end at a similar
+level, because the names are the legend. Empty state is a single sentence, wrapped to the
+control rather than run off its edge, and not an illustration.
 
 **Sidebar.** 200px, `SurfaceMuted`, 1px right border. Items are 32px rows, radius 6, 13px label,
 16px icon; the selected row uses `Surface` (light) / `#1C1C1F` (dark) — no accent bar, no bold.
 
 **Popup panel.** 320px wide, radius 8, 1px border, `SurfaceMuted`, one shadow. Sections split by
 1px rules: providers, resets, status, actions. Opens in under 100ms and closes on deactivate.
+The 320 belongs to the *panel*. Its window is wider — 24 either side, 16 above, 32 below — and
+transparent, because that is the room the one shadow falls into; anything positioning the
+window against the tray icon subtracts that inset. Where the compositor grants no transparency
+the shadow goes and the inset paints in the panel's own ground, never as unpainted black.
 
 ## Motion
 

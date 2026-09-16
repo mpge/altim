@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Xunit;
@@ -97,6 +98,46 @@ internal static class DesignSystem
             // template that was applied to it.
             window.Close();
         }
+    }
+
+    /// <summary>
+    /// Builds the tray panel window: the AltimPopupWindow theme, a 320 panel inside a
+    /// window that is wider by the shadow inset on both sides.
+    /// </summary>
+    /// <param name="transparent">
+    /// Whether to ask the compositor for transparency. Without it the shadow cannot be
+    /// drawn, so the theme drops it and paints the inset in the panel ground instead.
+    /// </param>
+    /// <param name="variant">The theme variant to render under.</param>
+    /// <param name="content">The panel content.</param>
+    /// <returns>An unshown window.</returns>
+    public static Window PopupWindow(
+        bool transparent,
+        ThemeVariant? variant = null,
+        Control? content = null)
+    {
+        _ = Ensure();
+        Application app = Assert.IsAssignableFrom<Application>(Application.Current);
+        Assert.True(
+            app.Resources.TryGetResource("AltimPopupWindow", ThemeVariant.Light, out object? theme),
+            "AltimPopupWindow does not resolve.");
+
+        var window = new Window
+        {
+            WindowDecorations = WindowDecorations.None,
+            ShowInTaskbar = false,
+            SizeToContent = SizeToContent.Height,
+            RequestedThemeVariant = variant ?? ThemeVariant.Dark,
+            Theme = Assert.IsType<ControlTheme>(theme),
+            Content = content ?? new TextBlock { Text = "Usage has reset." },
+        };
+
+        if (transparent)
+        {
+            window.TransparencyLevelHint = [WindowTransparencyLevel.Transparent];
+        }
+
+        return window;
     }
 
     /// <summary>

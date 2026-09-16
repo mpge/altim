@@ -2,9 +2,12 @@
   TextBox.
 
   A 32px field with a 1px border and radius 6. Focus does two things: the border moves to
-  TextPrimary, and the 2px ring appears. Selection is inverse video - TextPrimary ground,
-  Surface text - because DESIGN.md has no selection colour and inventing one would put a
-  value in a view that is not in the doc.
+  TextPrimary, and the 2px ring appears. The ring is drawn outside the field, so the theme
+  also turns off ClipToBounds - TemplatedControl clips by default - and nulls FocusAdorner
+  so the framework's dashed rectangle cannot appear beside it.
+
+  Selection is inverse video: TextPrimary ground, Surface text. DESIGN.md now says so,
+  under Components, rather than leaving it to whoever styles a field next.
 -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
@@ -24,6 +27,8 @@
     <Setter Property="SelectionForegroundBrush" Value="{DynamicResource AltimSurfaceBrush}" />
     <Setter Property="PlaceholderForeground" Value="{DynamicResource AltimTextSecondaryBrush}" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="ClipToBounds" Value="False" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
     <Setter Property="Template">
       <ControlTemplate TargetType="TextBox">
         <Panel>
