@@ -1,12 +1,19 @@
 <!--
-  History: one line per provider over 24 hours, 7 days or 30 days.
+  History: a year of daily usage as a calendar, and one line per provider over 24 hours,
+  7 days or 30 days beneath it.
 
-  The page is the heading and the same panel Overview carries, at full width and full height.
-  Two surfaces drawing the same thing two different ways would be two things to learn, so the
-  panel is one view used twice and the page only decides how much room it gets.
+  The two answer different questions and are kept apart for that reason. The map answers how
+  much and when, over a year, one square to a day; the tape answers what a level did inside a
+  day or a month, and keeps its range picker. The picker moves the tape only - the map's span
+  is always the year behind today.
+
+  The map is scrolled sideways rather than squeezed. A year is fifty three week columns, and a
+  column that had to shrink to fit a narrow window would take the squares with it until a day
+  was a smudge.
 -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Altim.UI.Controls"
              xmlns:design="using:Altim.UI.ViewModels.Design"
              xmlns:views="using:Altim.UI.Views"
              xmlns:vm="using:Altim.UI.ViewModels"
@@ -18,7 +25,7 @@
     <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
   </UserControl.Styles>
 
-  <Grid Margin="{DynamicResource AltimInset32}" RowDefinitions="Auto,*">
+  <Grid Margin="{DynamicResource AltimInset32}" RowDefinitions="Auto,Auto,*">
 
     <StackPanel Grid.Row="0"
                 Margin="0,0,0,24"
@@ -29,7 +36,25 @@
                  Text="{Binding SubHeading}" />
     </StackPanel>
 
-    <views:UsageHistoryPanelView Grid.Row="1" MinHeight="280" />
+    <Border Grid.Row="1"
+            Margin="0,0,0,24"
+            Theme="{DynamicResource AltimPanel}">
+      <StackPanel Spacing="{DynamicResource AltimSpace16}">
+        <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding Map.PanelTitle}" />
+
+        <!-- The map is handed the one scale the whole page is ranked on. Left to rank itself
+             it would rank each map it is given on its own, and a square in one row would stop
+             meaning the same thing as a square in another. -->
+        <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Disabled">
+          <controls:UsageMap Rows="{Binding Map.Rows}"
+                             Scale="{Binding Map.Scale}"
+                             EmptyText="{Binding Map.EmptyText}" />
+        </ScrollViewer>
+      </StackPanel>
+    </Border>
+
+    <views:UsageHistoryPanelView Grid.Row="2" MinHeight="280" />
 
   </Grid>
 

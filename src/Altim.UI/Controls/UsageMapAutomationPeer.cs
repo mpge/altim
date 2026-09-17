@@ -1,0 +1,233 @@
+using System.Globalization;
+using Altim.UI.Formatting;
+using Avalonia;
+using Avalonia.Automation.Peers;
+
+namespace Altim.UI.Controls;
+
+/// <summary>
+/// What an assistive technology is handed in place of the map's drawn grid.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="UsageMap"/> paints a thousand squares into one element rather than building a
+/// thousand controls, which is the right trade for memory and the wrong one for accessibility:
+/// a drawn rectangle has no name, no position and no existence as far as automation is
+/// concerned, so the whole year reads as a single unlabelled shape. This peer restores it, by
+/// synthesising one child per square from the rows the map was given.
+/// </para>
+/// <para>
+/// The children are not visuals and are never laid out. Each one answers a name - the row, the
+/// date and the day's value - the square's own words as help text, and the square's rectangle,
+/// all read back from the map through <see cref="UsageMap.CellBounds"/> so the arithmetic that
+/// places a square is stated once.
+/// </para>
+/// <para>
+/// They are built on demand and thrown away whenever <see cref="UsageMap.Rows"/> is replaced.
+/// A screen reader that never visits the map never pays for them.
+/// </para>
+/// </remarks>
+public sealed class UsageMapAutomationPeer : ControlAutomationPeer
+{
+    /// <summary>What the map is called when nothing else names it.</summary>
+    public const string MapName = "Daily usage";
+
+    /// <summary>Initializes a peer over one map.</summary>
+    /// <param name="owner">The map the peer speaks for.</param>
+    public UsageMapAutomationPeer(UsageMap owner)
+        : base(owner)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        owner.PropertyChanged += OnOwnerPropertyChanged;
+    }
+
+    private UsageMap Map => (UsageMap)Owner;
+
+    /// <summary>
+    /// The words one square is read out as: the row it is in, the day it is, and what that day
+    /// counted.
+    /// </summary>
+    /// <param name="rowName">The row's label.</param>
+    /// <param name="cell">The day.</param>
+    /// <returns>A sentence naming the square.</returns>
+    /// <remarks>
+    /// A day nothing is known about says so rather than reading as a zero, which is the same
+    /// distinction the squares themselves are drawn to keep.
+    /// </remarks>
+    public static string NameFor(string rowName, UsageMapCell cell)
+    {
+        ArgumentNullException.ThrowIfNull(rowName);
+        ArgumentNullException.ThrowIfNull(cell);
+
+        string value = (cell.IsKnown, cell.Tokens) switch
+        {
+            (false, _) => "no data",
+            (true, { } tokens) => string.Concat(UsageFormat.Count(tokens), " tokens"),
+            _ => "no token figures reported",
+        };
+
+        return string.Concat(
+            rowName,
+            ", ",
+            cell.Day.ToString("D", CultureInfo.CurrentCulture),
+            ", ",
+            value);
+    }
+
+    /// <inheritdoc />
+    protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.List;
+
+    /// <inheritdoc />
+    protected override string GetClassNameCore() => nameof(UsageMap);
+
+    /// <inheritdoc />
+    protected override string? GetNameCore() => base.GetNameCore() is { Length: > 0 } named ? named : MapName;
+
+    /// <inheritdoc />
+    protected override IReadOnlyList<AutomationPeer> GetChildrenCore()
+    {
+        if (Map.Rows is not { } rows)
+        {
+            return [];
+        }
+
+        List<AutomationPeer> squares = [];
+        for (int index = 0; index < rows.Count; index++)
+        {
+            if (rows[index] is not { } row)
+            {
+                continue;
+            }
+
+            foreach (UsageMapCell cell in row.Cells)
+            {
+                // A day the map draws nothing for is a day outside the picture. Naming it
+                // would put a square in the reading order that is not on the screen.
+                if (cell is not null && Map.CellBounds(index, cell.Day) is not null)
+                {
+                    squares.Add(new UsageMapCellAutomationPeer(this, index, row.Name, cell));
+                }
+            }
+        }
+
+        return squares;
+    }
+
+    private void OnOwnerPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs change)
+    {
+        if (change.Property == UsageMap.RowsProperty)
+        {
+            InvalidateChildren();
+        }
+    }
+}
+
+/// <summary>
+/// One square of the map, as automation sees it.
+/// </summary>
+/// <remarks>
+/// There is no control behind this and there is deliberately no attempt to invent one. The
+/// peer exists to carry a name, a description and a rectangle for something that was drawn,
+/// and it answers everything else the way a label answers it: not focusable, not interactive,
+/// and with no children of its own.
+/// </remarks>
+internal sealed class UsageMapCellAutomationPeer : AutomationPeer
+{
+    private readonly UsageMapAutomationPeer _map;
+    private readonly int _rowIndex;
+    private readonly string _rowName;
+    private readonly UsageMapCell _cell;
+    private AutomationPeer? _parent;
+
+    /// <summary>Initializes a peer over one square.</summary>
+    /// <param name="map">The map's own peer, which is this one's parent.</param>
+    /// <param name="rowIndex">The index into the map's rows the square came from.</param>
+    /// <param name="rowName">The row's label.</param>
+    /// <param name="cell">The day.</param>
+    public UsageMapCellAutomationPeer(UsageMapAutomationPeer map, int rowIndex, string rowName, UsageMapCell cell)
+    {
+        _map = map;
+        _rowIndex = rowIndex;
+        _rowName = rowName;
+        _cell = cell;
+        _parent = map;
+    }
+
+    /// <inheritdoc />
+    protected override void BringIntoViewCore()
+    {
+        // The whole map is one element and never scrolls a square of its own accord.
+    }
+
+    /// <inheritdoc />
+    protected override string? GetAcceleratorKeyCore() => null;
+
+    /// <inheritdoc />
+    protected override string? GetAccessKeyCore() => null;
+
+    /// <inheritdoc />
+    protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.ListItem;
+
+    /// <inheritdoc />
+    protected override string? GetAutomationIdCore() => null;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Read back from the map rather than remembered, so a square that has moved - a different
+    /// square size from the theme, a different scaling - reports where it actually is. The map
+    /// answers in its own coordinates and the map's peer turns those into screen ones.
+    /// </remarks>
+    protected override Rect GetBoundingRectangleCore() =>
+        ((UsageMap)_map.Owner).CellBounds(_rowIndex, _cell.Day) is { } bounds
+            ? _map.ToScreen(bounds) ?? default
+            : default;
+
+    /// <inheritdoc />
+    protected override string GetClassNameCore() => nameof(UsageMapCell);
+
+    /// <inheritdoc />
+    protected override string? GetHelpTextCore() => _cell.Detail;
+
+    /// <inheritdoc />
+    protected override AutomationPeer? GetLabeledByCore() => null;
+
+    /// <inheritdoc />
+    protected override string? GetNameCore() => UsageMapAutomationPeer.NameFor(_rowName, _cell);
+
+    /// <inheritdoc />
+    protected override IReadOnlyList<AutomationPeer> GetOrCreateChildrenCore() => [];
+
+    /// <inheritdoc />
+    protected override AutomationPeer? GetParentCore() => _parent;
+
+    /// <inheritdoc />
+    protected override bool HasKeyboardFocusCore() => false;
+
+    /// <inheritdoc />
+    protected override bool IsContentElementCore() => true;
+
+    /// <inheritdoc />
+    protected override bool IsControlElementCore() => true;
+
+    /// <inheritdoc />
+    protected override bool IsEnabledCore() => true;
+
+    /// <inheritdoc />
+    protected override bool IsKeyboardFocusableCore() => false;
+
+    /// <inheritdoc />
+    protected override void SetFocusCore()
+    {
+        // Nothing to focus: the square is paint, and the map is the focusable element.
+    }
+
+    /// <inheritdoc />
+    protected override bool ShowContextMenuCore() => false;
+
+    /// <inheritdoc />
+    protected override bool TrySetParent(AutomationPeer? parent)
+    {
+        _parent = parent ?? _map;
+        return true;
+    }
+}

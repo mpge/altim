@@ -63,10 +63,21 @@ public sealed partial class HistoryViewModel : ObservableObject, IDashboardPage
         _providers = [.. providers];
         _history = history;
         _timeProvider = timeProvider;
+        Map = new UsageMapViewModel(_providers, history, timeProvider);
     }
 
     /// <inheritdoc />
     public string Title => "History";
+
+    /// <summary>
+    /// The calendar above the tape: a year of daily totals, one square per day per provider.
+    /// </summary>
+    /// <remarks>
+    /// The map answers how much and when, over a year; the tape answers what a level did
+    /// during a day or a month. They read the same store and are loaded together, but the map
+    /// does not follow the range picker: its span is a year and the picker moves the tape.
+    /// </remarks>
+    public UsageMapViewModel Map { get; }
 
     /// <summary>The panel's own heading, wherever the tape is shown inside one.</summary>
     public string PanelTitle => "Usage history";
@@ -93,6 +104,10 @@ public sealed partial class HistoryViewModel : ObservableObject, IDashboardPage
         int generation = ++_generation;
         HistoryRange range = SelectedRange;
         IsLoading = true;
+
+        // Started before the tape's own reads rather than after them, so the two queries
+        // overlap instead of the page waiting out a year of days and then a range of samples.
+        Task map = Map.LoadAsync(ct);
 
         try
         {
@@ -155,6 +170,10 @@ public sealed partial class HistoryViewModel : ObservableObject, IDashboardPage
         }
         finally
         {
+            // Awaited however the tape's own load ended, so navigating away part way through
+            // does not leave a year of days in flight with nobody watching it.
+            await map.ConfigureAwait(true);
+
             if (generation == _generation)
             {
                 IsLoading = false;

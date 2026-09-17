@@ -17,6 +17,31 @@ internal sealed class FakeHistoryService : IUsageHistoryService
     private readonly Dictionary<(string Provider, DateOnly Day), UsageDay> _days = [];
     private TaskCompletionSource _queried = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    /// <summary>How many day reads have been asked for.</summary>
+    public int DayReads { get; private set; }
+
+    /// <summary>
+    /// The managed thread the last day read ran on, or null when none has been. A year of
+    /// days is read for every provider each time the page opens, so the test that proves it
+    /// is not read on the dispatcher compares this against the thread it is asserting from.
+    /// </summary>
+    public int? DaysReadOnThreadId { get; private set; }
+
+    /// <summary>
+    /// Held by a test that wants a day read to stay in flight. The read waits on it before
+    /// answering, which is how a test proves a view model did not await a load in its
+    /// constructor.
+    /// </summary>
+    public TaskCompletionSource? DayGate { get; set; }
+
+    /// <summary>
+    /// Set the moment a day read begins, before it waits on <see cref="DayGate"/>. A test
+    /// that wants to prove no read was started cannot do it by looking at a counter straight
+    /// away - a read handed to the thread pool has not necessarily reached it yet - so it
+    /// waits on this instead and asserts the wait times out.
+    /// </summary>
+    public ManualResetEventSlim? DayEntered { get; set; }
+
     /// <summary>How many times the store has been emptied.</summary>
     public int Clears { get; private set; }
 
@@ -40,6 +65,12 @@ internal sealed class FakeHistoryService : IUsageHistoryService
 
     /// <summary>Whether the next read throws.</summary>
     public Exception? Failure { get; set; }
+
+    /// <summary>
+    /// Providers whose day reads throw while the rest answer normally, which is how one
+    /// unreadable store is told apart from an empty one.
+    /// </summary>
+    public HashSet<string> UnreadableProviders { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Completes when the next range query lands. The history page reloads itself when the span
@@ -121,16 +152,41 @@ internal sealed class FakeHistoryService : IUsageHistoryService
         return ValueTask.FromResult<IReadOnlyList<UsageSample>>([.. latest.Values]);
     }
 
+    /// <summary>Adds days to the store, bypassing the precedence rule.</summary>
+    /// <param name="days">The days to add.</param>
+    public void AddDays(params UsageDay[] days)
+    {
+        ArgumentNullException.ThrowIfNull(days);
+        foreach (UsageDay day in days)
+        {
+            _days[(day.ProviderId, day.Day)] = day;
+        }
+    }
+
     /// <inheritdoc />
-    public ValueTask<IReadOnlyList<UsageDay>> GetDaysAsync(
+    public async ValueTask<IReadOnlyList<UsageDay>> GetDaysAsync(
         string providerId,
         DateOnly from,
         DateOnly to,
         CancellationToken ct)
     {
+        DayReads++;
+        DaysReadOnThreadId = Environment.CurrentManagedThreadId;
+        DayEntered?.Set();
+
+        if (DayGate is { } gate)
+        {
+            await gate.Task.WaitAsync(ct).ConfigureAwait(false);
+        }
+
         if (Failure is { } failure)
         {
-            return ValueTask.FromException<IReadOnlyList<UsageDay>>(failure);
+            throw failure;
+        }
+
+        if (UnreadableProviders.Contains(providerId))
+        {
+            throw new IOException("locked");
         }
 
         List<UsageDay> kept = [];
@@ -145,7 +201,7 @@ internal sealed class FakeHistoryService : IUsageHistoryService
         }
 
         kept.Sort((left, right) => left.Day.CompareTo(right.Day));
-        return ValueTask.FromResult<IReadOnlyList<UsageDay>>(kept);
+        return kept;
     }
 
     /// <inheritdoc />

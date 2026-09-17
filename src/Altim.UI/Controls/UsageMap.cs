@@ -1,9 +1,12 @@
 using System.Globalization;
 using Altim.UI.History;
 using Avalonia;
+using Avalonia.Automation.Peers;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Rendering;
 
 namespace Altim.UI.Controls;
 
@@ -26,7 +29,20 @@ namespace Altim.UI.Controls;
 /// unknown; a day it was watching that reported no volume is known, and the two are
 /// different squares.
 /// </param>
-public sealed record UsageMapCell(DateOnly Day, long? Tokens, double? PeakPercent, bool IsKnown);
+/// <param name="Detail">
+/// The words that go with the square: the tooltip a pointer brings up, and the help text an
+/// assistive technology reads after the name. It is composed by whoever built the row rather
+/// than here, because the square carries one total and one percentage while the words carry
+/// the four components it was reported in, whether the day was observed or backfilled, and -
+/// on the combined row - which providers the figure covers and which had nothing.
+/// <see langword="null"/> means there is nothing to say, and no tip is shown.
+/// </param>
+public sealed record UsageMapCell(
+    DateOnly Day,
+    long? Tokens,
+    double? PeakPercent,
+    bool IsKnown,
+    string? Detail = null);
 
 /// <summary>
 /// One labelled row of the map: a provider, or the combined row beneath them.
@@ -100,8 +116,17 @@ public readonly record struct UsageMapHit(int RowIndex, UsageMapCell Cell, Rect 
 /// rows is a second thousand objects held for a risk that is not present. A caller that
 /// does mutate a list in place will not see the map repaint: assign a new list.
 /// </para>
+/// <para>
+/// Because the grid is one element, the two ways a square is read are both arranged here
+/// from <see cref="HitTest"/> and <see cref="CellBounds"/>. A pointer over a square opens
+/// that day's <see cref="UsageMapCell.Detail"/> as a tooltip, and
+/// <see cref="UsageMapAutomationPeer"/> gives an assistive technology one named child per
+/// square. Neither is decoration: a year of unlabelled rectangles is silence to a screen
+/// reader, and a square whose only figure is a shade of grey says nothing about what day it
+/// is or what it counted.
+/// </para>
 /// </remarks>
-public sealed class UsageMap : Control
+public sealed class UsageMap : Control, ICustomHitTest
 {
     /// <summary>How many steps the ramp has. The scale is built with the same number.</summary>
     public const int LevelCount = 5;
@@ -186,6 +211,7 @@ public sealed class UsageMap : Control
     private const double DefaultWidth = 320d;
 
     private MapLayout? _layout;
+    private UsageMapCell? _hovered;
 
     static UsageMap()
     {
@@ -404,6 +430,20 @@ public sealed class UsageMap : Control
         return null;
     }
 
+    /// <summary>
+    /// Whether a point counts as being on the map at all.
+    /// </summary>
+    /// <param name="point">A position in the map's own coordinates.</param>
+    /// <returns>Whether the map takes the pointer there.</returns>
+    /// <remarks>
+    /// The whole rectangle, not only the squares. A control that drew nothing in the gaps
+    /// between days would take the pointer on a square and lose it a pixel later, so the
+    /// tooltip would flicker its way across a week. Taking the whole area means the gaps are
+    /// handled the same way as the squares: <see cref="HitTest"/> answers nothing there, and
+    /// the tip closes rather than the pointer leaving the control entirely.
+    /// </remarks>
+    bool ICustomHitTest.HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
     /// <inheritdoc />
     public override void Render(DrawingContext context)
     {
@@ -480,6 +520,30 @@ public sealed class UsageMap : Control
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// One peer for the map with one synthesised child per square. The grid is drawn rather
+    /// than built out of controls, so without this an assistive technology is handed a single
+    /// rectangle where a year of days is.
+    /// </remarks>
+    protected override AutomationPeer OnCreateAutomationPeer() => new UsageMapAutomationPeer(this);
+
+    /// <inheritdoc />
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+
+        base.OnPointerMoved(e);
+        Hover(HitTest(e.GetPosition(this))?.Cell);
+    }
+
+    /// <inheritdoc />
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        Hover(null);
+    }
+
+    /// <inheritdoc />
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -492,7 +556,33 @@ public sealed class UsageMap : Control
             || change.Property == TextElement.FontFamilyProperty)
         {
             _layout = null;
+
+            // Whatever the pointer was on belonged to the picture that has just been
+            // replaced. Leaving the tip up would caption a new square with an old day.
+            Hover(null);
         }
+    }
+
+    /// <summary>
+    /// Shows one square's words, or takes them away.
+    /// </summary>
+    /// <param name="cell">The square under the pointer, or <see langword="null"/> for none.</param>
+    /// <remarks>
+    /// The tip is opened here rather than left to the hover service. That service arms itself
+    /// when <c>ToolTip.Tip</c> stops being null, and by the time the map knows which square
+    /// the pointer is on the pointer has already entered - so a tip merely set would not
+    /// appear until the pointer left the map and came back onto the same square.
+    /// </remarks>
+    private void Hover(UsageMapCell? cell)
+    {
+        if (ReferenceEquals(cell, _hovered))
+        {
+            return;
+        }
+
+        _hovered = cell;
+        ToolTip.SetTip(this, cell?.Detail);
+        ToolTip.SetIsOpen(this, cell?.Detail is { Length: > 0 });
     }
 
     private static FormattedText Text(string text, Typeface typeface, double size, IBrush? brush) =>
