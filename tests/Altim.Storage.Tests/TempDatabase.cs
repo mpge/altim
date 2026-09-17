@@ -157,10 +157,19 @@ internal sealed class TempDatabase : IDisposable
     }
 
     /// <summary>
-    /// Deletes the directory, retrying briefly. Windows releases a closed file handle
-    /// asynchronously often enough that one attempt would be flaky, and a retry loop
-    /// that ends in a throw still fails on a genuine leak.
+    /// Deletes the directory, retrying with a growing delay. Windows releases a closed
+    /// file handle asynchronously often enough that one attempt would be flaky, and a
+    /// retry loop that ends in a throw still fails on a genuine leak.
     /// </summary>
+    /// <remarks>
+    /// The budget is around five seconds rather than the half-second it started as. A
+    /// handle that is merely slow to be released is what a busy machine produces — every
+    /// test here creates a database, and a parallel build on the same box delays the
+    /// release well past 500ms — while a handle that was genuinely leaked is never
+    /// released at all. Waiting longer therefore costs nothing in detection: the leak
+    /// still fails the test that leaked it, just later. A tight budget buys no rigour and
+    /// turns other people's load into red builds here.
+    /// </remarks>
     private static void Delete(string directory)
     {
         for (int attempt = 1; ; attempt++)
@@ -170,10 +179,10 @@ internal sealed class TempDatabase : IDisposable
                 Directory.Delete(directory, recursive: true);
                 return;
             }
-            catch (Exception error) when (attempt < 10 && error is IOException
+            catch (Exception error) when (attempt < 25 && error is IOException
                                           or UnauthorizedAccessException)
             {
-                Thread.Sleep(50);
+                Thread.Sleep(Math.Min(25 * attempt, 250));
             }
         }
     }

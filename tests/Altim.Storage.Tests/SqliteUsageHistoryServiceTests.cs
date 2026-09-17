@@ -493,7 +493,10 @@ public sealed class SqliteUsageHistoryServiceTests
 
             // Throws a TimeoutException if it did not finish, which is the failure this
             // test is for: an unchanged reading waiting for a writer it has no use for.
-            await unchanged.WaitAsync(TimeSpan.FromSeconds(5), Ct);
+            // The budget is a deadlock guard rather than part of the assertion — the proof
+            // is that it finishes while somebody else holds the writer, not that it
+            // finishes quickly — so it is generous enough to survive a loaded machine.
+            await unchanged.WaitAsync(TimeSpan.FromSeconds(30), Ct);
 
             // The control: a value that moved does need the writer, and waits for it.
             changed = history
