@@ -65,11 +65,12 @@ one non-empty bucket rather than producing empty ranges.
 |---|---|---|---|
 | Codex daily buckets | ~97 days | best-effort | one network call, subject to the existing permission setting and rate gate |
 | Claude transcript scan | ~30 days | best-effort | local only; reuses the incremental scanner |
-| Altim's own samples | from install | best-effort | rolled up nightly and on demand |
+| Altim's own samples | from install | best-effort | supplies the day's **peak percentage only**, never its tokens |
 
-**Precedence: observed beats backfilled.** A day Altim watched itself is authoritative; a backfilled
-row fills gaps and never overwrites an observed one. Each row records which it is, so a later
-backfill cannot silently rewrite history and the tooltip can say where the number came from.
+**Token figures come from the per-day sources only.** Altim's own samples contribute the day's peak
+percentage and never its token count, for the reason given under Rollup: the readings they carry are
+running totals rather than daily amounts. Each row records where its token figure came from, so the
+tooltip can say.
 
 **Backfill runs once per provider**, on a schedule no tighter than daily, and is skipped entirely
 when its source is unavailable — no network permission, no CLI, an unreadable store. A skipped
@@ -106,26 +107,43 @@ rather than an instant so a timezone change cannot silently re-bucket history.
 
 ## Rollup
 
-Daily rows are derived from `usage_sample` for days Altim observed. Token totals in a sample are
-cumulative per reading, so summing readings is wrong — the same trap the retention pass got wrong
-and had to be fixed for. The day's value is the **highest reading of that day**, taken per token
-component.
+**A day's token figure comes only from a per-day source. The samples supply the peak percentage and
+nothing else.**
 
-The obvious rule, the day's *last* reading, is only safe for a counter that cannot fall within a
-day, and ours can: the Codex figure is summed over a bounded window of the most recent rollout
-files, so on a busy day older sessions drop out of that window and a later reading legitimately
-reports a smaller number. Claude raises the same question around session eviction and around a
-restart rebuilding cumulative totals from the scanner cursor. Wherever the counter does behave, the
-highest reading *is* the last one, so the rule costs nothing there and never understates a day where
-it does not.
+This was written the other way round first, and a run against real data disproved it. A sample's
+token figure is not a daily amount: the transcript provider reports a cumulative total over
+everything it has scanned, and the Codex provider reports a sum over a bounded window of the most
+recent session files, which visibly oscillates between two values inside the same minute. The
+largest such reading seen during a day is a running total that happened to be observed that day, not
+the tokens spent in it. Summing readings is wrong, taking the last is wrong, and taking the highest
+is wrong, because none of the readings is ever a per-day quantity in the first place.
 
-Because components are maximised independently, a row is a composite rather than a snapshot of one
-instant. That is deliberate: each component is its own cumulative counter, and the day's highest is
-the most of it Altim ever actually saw. Peak percent is likewise the maximum across that day's
-samples for that provider.
+Both providers do expose true per-day token figures, through the backfill sources below. Those are
+the only source of a square's value.
 
-The rollup must be idempotent: recomputing a day produces the same row, and recomputing an observed
-day never demotes it to backfilled.
+A percentage is different in kind. Each reading is a point-in-time measurement against a live
+window, so the largest one seen during a day is a real fact about that day: this is how close to the
+limit the user came. That is what the rollup keeps, normalised through `UsagePercent.Normalise`.
+
+The rollup must be idempotent: recomputing a day produces the same row.
+
+### Precedence is per field, not per row
+
+A row is written by two different writers that never overlap:
+
+| Field | Written by | Rule |
+|---|---|---|
+| The four token components, and `source` | backfill only | a later backfill replaces an earlier one; a row that reports no tokens leaves them alone |
+| `peak_percent` | the sample rollup only | the day's maximum, and a later rollup never lowers it |
+
+So an upsert merges rather than replacing. A write that carries no tokens must leave the tokens
+already there untouched, and a write that carries no peak must leave the peak alone. The earlier
+rule — "observed beats backfilled", whole row — is what allowed a rollup to erase a correct
+per-day figure with a running total, and it is retired.
+
+`source` describes where the **token figure** came from, because that is the number the square
+draws. A day that has a peak and no tokens draws as unknown: we know how close to the limit the user
+came, and not how much they spent.
 
 ## Interface
 
@@ -177,8 +195,9 @@ line stating that daily totals are kept indefinitely while samples are not.
 
 ## Testing
 
-- Rollup: cumulative tokens take the day's highest reading, never a sum, and a counter that falls
-  within a day still reports the day's highest; peak is the day's maximum;
+- Rollup: a rolled-up day carries a peak and no tokens, whatever its samples reported; peak is the
+  day's maximum; a rollup never erases or lowers a backfilled token figure, and a backfill never
+  erases a peak;
   recomputation is idempotent; an observed day is never demoted by a later backfill.
 - Quantiles: all-zero history, one day, identical values, fewer days than buckets, one extreme
   outlier not flattening the rest.
