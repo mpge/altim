@@ -7,10 +7,30 @@ namespace Altim.UI.Formatting;
 /// </summary>
 /// <remarks>
 /// <para>
-/// DESIGN.md names two provider accents and says the glyph marks identity and nothing else,
-/// but it does not supply mark artwork, so the marks here are plain geometric shapes on the
-/// 16px box: a diamond for Anthropic, a hexagon for OpenAI, a circle for anything else. The
+/// Each of the two providers is drawn as its own vendor's mark: Claude's radial burst of
+/// tapered spokes, Codex's knotted hexagonal form. Anything else wears the neutral circle.
+/// Every mark is a single monochrome path on the 16px box, filled in the provider's accent,
+/// because the accent is what carries identity - a mark drawn in its vendor's own colours
+/// would repeat what the palette already says, in colours the palette does not hold. The
 /// views stretch that box to 16, 20 or 28 depending on what the mark is standing beside.
+/// </para>
+/// <para>
+/// These marks identify the vendors' own products, which is nominative use. Altim claims no
+/// endorsement by, or affiliation with, Anthropic or OpenAI. Neither mark is restyled or
+/// combined with Altim's own, and neither stands for Altim. DESIGN.md records the same.
+/// </para>
+/// <para>
+/// <strong>Every path fills the 16x16 box exactly, on all four sides.</strong> A shape with
+/// <c>Stretch="Uniform"</c> is scaled to its own bounds and pinned to the top left of its
+/// slot rather than centred, so a mark whose bounds are not square sits visibly off centre
+/// beside the label it belongs to - which is what the old placeholder hexagon, 13 wide in a
+/// 15 tall box, did. <c>ProviderGlyphTests</c> holds every mark to all four sides.
+/// </para>
+/// <para>
+/// <strong>Every path opens <c>F1</c>, the non-zero fill rule.</strong> The knot is six bars
+/// that lap over one another at the corners, and under the default even-odd rule each lap
+/// would cancel itself out into a hole. The burst does not overlap itself today, but it
+/// carries the rule too so that widening a spoke cannot quietly punch holes in it.
 /// </para>
 /// <para>
 /// Neither the accent nor the mark is handed to a view model. Brushes live in the theme
@@ -37,11 +57,46 @@ public static class ProviderIdentity
     /// <summary>The provider identifier Codex reports.</summary>
     public const string CodexId = "codex";
 
-    /// <summary>The Anthropic mark, as path data on the 16px box.</summary>
-    public const string DiamondPath = "M 8,0.5 L 15.5,8 L 8,15.5 L 0.5,8 Z";
+    /// <summary>
+    /// The Anthropic mark, as path data on the 16px box: a radial burst of nine tapered
+    /// spokes of uneven length, pinched where they meet and blunt at the tip.
+    /// </summary>
+    /// <remarks>
+    /// Nine is what the box holds. A spoke narrower than about a pixel and a half is grey
+    /// smear rather than a spoke at 16px, and nine of them at that weight still leave a gap
+    /// between neighbours out at the rim. The name is the placeholder diamond's; it stays
+    /// because <c>Views/Shared.axaml</c> and the platform-free tests reach the member by it.
+    /// </remarks>
+    public const string DiamondPath =
+        "F1 "
+        + "M 7.73,8.08 L 9.06,5 L 8.82,0.55 L 8.31,0.5 L 7.11,4.81 Z "
+        + "M 7.73,8.08 L 10.53,6.8 L 12.96,3.61 L 12.61,3.26 L 9.17,5.46 Z "
+        + "M 7.73,8.08 L 11.06,8.79 L 15.5,7.8 L 15.46,7.32 L 10.92,6.93 Z "
+        + "M 7.73,8.08 L 9.65,10.55 L 13.52,12.38 L 13.82,11.98 L 10.8,9.05 Z "
+        + "M 7.73,8.08 L 7.59,11.39 L 9.42,15.5 L 9.91,15.38 L 9.49,10.94 Z "
+        + "M 7.73,8.08 L 5.54,10.23 L 4.38,14.06 L 4.83,14.28 L 7.3,11.04 Z "
+        + "M 7.73,8.08 L 4.39,8.47 L 0.63,10.82 L 0.83,11.26 L 5.19,10.17 Z "
+        + "M 7.73,8.08 L 4.99,6.36 L 0.64,5.89 L 0.5,6.36 L 4.45,8.15 Z "
+        + "M 7.73,8.08 L 6.69,4.95 L 3.54,1.73 L 3.12,2 L 5.07,5.99 Z";
 
-    /// <summary>The OpenAI mark, as path data on the 16px box.</summary>
-    public const string HexagonPath = "M 8,0.5 L 14.5,4.25 L 14.5,11.75 L 8,15.5 L 1.5,11.75 L 1.5,4.25 Z";
+    /// <summary>
+    /// The OpenAI mark, as path data on the 16px box: the knotted hexagonal form, drawn as
+    /// six bars of one weight, each turned a little off its edge so that consecutive bars
+    /// lap past one another at the corners and the ring reads as woven rather than welded.
+    /// </summary>
+    /// <remarks>
+    /// Hollow where the burst is solid, which is what keeps the two apart at 16px, and what
+    /// balances an OpenAI accent that is very nearly the ink colour itself. The name is the
+    /// placeholder hexagon's, kept for the same reason <see cref="DiamondPath"/>'s is.
+    /// </remarks>
+    public const string HexagonPath =
+        "F1 "
+        + "M 6.79,1.83 L 13.91,6.65 L 15.11,5.32 L 7.98,0.5 Z "
+        + "M 13.56,4 L 12.3,11.76 L 14.23,12 L 15.48,4.24 Z "
+        + "M 14.77,10.17 L 6.39,13.11 L 7.12,14.67 L 15.5,11.74 Z "
+        + "M 9.21,14.17 L 2.09,9.35 L 0.89,10.68 L 8.02,15.5 Z "
+        + "M 2.44,12 L 3.7,4.24 L 1.77,4 L 0.52,11.76 Z "
+        + "M 1.23,5.83 L 9.61,2.89 L 8.88,1.33 L 0.5,4.26 Z";
 
     /// <summary>The mark any other provider wears, as path data on the 16px box.</summary>
     public const string CirclePath = "M 8,0.5 A 7.5,7.5 0 1 0 8,15.5 A 7.5,7.5 0 1 0 8,0.5 Z";
@@ -50,10 +105,10 @@ public static class ProviderIdentity
     private static readonly Lazy<Geometry> LazyHexagon = Lazily(HexagonPath);
     private static readonly Lazy<Geometry> LazyCircle = Lazily(CirclePath);
 
-    /// <summary>The Anthropic mark. Parsed on first read, never at type initialisation.</summary>
+    /// <inheritdoc cref="DiamondPath" />
     public static Geometry Diamond => LazyDiamond.Value;
 
-    /// <summary>The OpenAI mark. Parsed on first read, never at type initialisation.</summary>
+    /// <inheritdoc cref="HexagonPath" />
     public static Geometry Hexagon => LazyHexagon.Value;
 
     /// <summary>The default mark. Parsed on first read, never at type initialisation.</summary>

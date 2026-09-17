@@ -197,11 +197,32 @@ over `TextPrimary`, so it is ink in Light and ink in Dark from one asset. It app
 sidebar's brand header and the popup's header.
 
 **Line icons.** A 16px box, stroked 1.5 in the ink of the surface, round joins and caps: home,
-clock, gear, chevron right, chevron down, arrow right. Drawn rather than imported, for the same
-reason the provider marks are: an imported set would need a second copy for Dark, would not
-follow the ink, and would put somebody else's artwork in the repository. The panel's status icon
-is the one filled mark: an 18px disc in `TextPrimary`, or `StatusError` when a provider failed,
-with a tick or an alert cut through it in `Surface`.
+clock, gear, chevron right, chevron down, arrow right. Drawn as path data rather than imported
+as assets, for the same reason the provider marks are: an imported set would need a second copy
+for Dark, would not follow the ink, and would carry licence terms a repository cannot honour by
+copying a binary into it. The panel's status icon is the one filled mark: an 18px disc in
+`TextPrimary`, or `StatusError` when a provider failed, with a tick or an alert cut through it
+in `Surface`.
+
+**Provider marks.** Each provider wears its own vendor's mark, on the same 16px box the line
+icons use but filled rather than stroked, in that provider's accent: Claude's is a radial burst
+of tapered spokes, Codex's is the knotted hexagonal form. Any other provider keeps a plain
+circle. Each is a **single monochrome path** — the accent is what marks identity, so a mark in
+its vendor's own colours would repeat what the palette has already said, in colours the palette
+does not hold, and would break the rule that provider colour marks identity and nothing else.
+Drawn at three sizes from one path: 16 beside a label, 20 in an activity row, 28 where a
+provider heads a card.
+
+Every mark fills its 16×16 box on all four sides. A shape stretched `Uniform` is scaled to its
+own bounds and pinned to the top left of its slot rather than centred, so a mark whose bounds
+are not square hangs to one side of the label it belongs to — which is what a hexagon 13 wide
+in a 15 tall box did. One mark is solid and the other hollow, which is what tells them apart at
+16px and what balances an `AccentOpenAI` that is very nearly the ink colour itself.
+
+**Trademarks.** The provider marks are the vendors' own and identify the vendors' own products,
+which is nominative use. Altim claims no endorsement by, or affiliation with, Anthropic or
+OpenAI. Neither mark is restyled or recoloured beyond the single ink it is drawn in, neither is
+combined with Altim's own mark, and neither ever stands for Altim.
 
 **Geometry is never held by a view model.** A `Geometry` cannot be built before Avalonia's
 rendering platform exists, and the failure lands inside a type initialiser, which the CLR caches
