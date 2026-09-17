@@ -62,10 +62,14 @@
   </PropertyGroup>
 
   <!-- Idle footprint. ARCHITECTURE.md's budgets are under 120MB working set and under
-       2% of one core, both of which this file's settings are part of meeting; the older
-       80MB and "0.1% average" numbers this comment used to cite were retired, the first
-       because nothing ever met it and the second because a share of the machine is not a
-       property of the program. The workstation non-concurrent collector with
+       5% of one core, both of which this file's settings are part of meeting. Three
+       numbers this comment has cited were retired: 80MB, because nothing ever met it;
+       "0.1% average", because a share of the machine is not a property of the program;
+       and 2% of one core, which the CPU budget moved off once child processes were
+       counted, and which this comment went on repeating after the documents had changed.
+       Measured 2026-09-17 on the native-compiled build with the usage map in place:
+       115.5MB working set, and 2.53% of one core over a 90 second window on a machine
+       that was actively running agents. The workstation non-concurrent collector with
        ConserveMemory set is what the technique list prescribes: no background GC thread
        waking a machine that is doing nothing, and a heap that is returned rather than
        held. -->
