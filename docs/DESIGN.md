@@ -209,25 +209,45 @@ copying a binary into it. The panel's status icon is the one filled mark: an 18p
 in `Surface`.
 
 **Provider marks.** Each provider wears its own vendor's mark, on the same 16px box the line
-icons use but filled rather than stroked, in that provider's accent: Claude's is a radial burst
-of tapered spokes, Codex's is the knotted hexagonal form. Any other provider keeps a plain
-circle. Each is a **single monochrome path** — the accent is what marks identity, so a mark in
-its vendor's own colours would repeat what the palette has already said, in colours the palette
-does not hold, and would break the rule that provider colour marks identity and nothing else.
-Drawn at three sizes from one path: 16 beside a label, 20 in an activity row, 28 where a
-provider heads a card.
+icons use but filled rather than stroked, in that provider's accent: Claude's is Anthropic's
+radial burst, whose tapered spokes run out from a solid centre at uneven lengths, widths and
+spacings; Codex's is OpenAI's interlocking knot, six braided strands around an open hexagon.
+Any other provider keeps a plain circle. Each is a **single monochrome path** — the accent is
+what marks identity, so a mark in its vendor's own colours would repeat what the palette has
+already said, in colours the palette does not hold, and would break the rule that provider
+colour marks identity and nothing else. Drawn at three sizes from one path: 16 beside a label,
+20 in an activity row, 28 where a provider heads a card.
+
+**The path data is the vendors' own outlines, not a drawing of them.** Both come from the
+[Simple Icons](https://simpleicons.org) set, which is CC0 and traces each mark from the
+vendor's own published brand asset. Each was moved onto the 16px box by scale and translation
+alone, so the outline is still the vendor's: the burst is one closed figure of 158 segments,
+the knot is a silhouette with seven counters cut out of it. A mark redrawn from memory is a
+different mark that resembles one, and resembling one is the failure mode that gets shipped —
+it passes every test a path can be held to and still reads wrong to anyone who knows the mark.
 
 Every mark fills its 16×16 box on all four sides. A shape stretched `Uniform` is scaled to its
 own bounds and pinned to the top left of its slot rather than centred, so a mark whose bounds
 are not square hangs to one side of the label it belongs to — which is what a hexagon 13 wide
-in a 15 tall box did. One mark is solid and the other hollow, which is what tells them apart at
-16px and what balances an `AccentOpenAI` that is very nearly the ink colour itself.
+in a 15 tall box did. Neither vendor's ink is square on its own grid — the burst is 0.08 per
+cent narrower than it is tall, the knot 1.4 per cent — so each axis is scaled to the box on its
+own. One mark is solid at the centre and the other open there, which is what tells them apart
+at 16px and what balances an `AccentOpenAI` that is very nearly the ink colour itself.
+
+Both paths declare `F1`, the non-zero fill rule, because that is the rule SVG applies when a
+file names none and therefore the rule the vendors' own files are drawn under. On this artwork
+it changes nothing — no two subpaths overlap and the knot's counters are nested rather than
+lapped, so even-odd draws the same picture, which `ProviderGlyphTests` checks rather than
+assumes. It is declared anyway: re-tracing either mark from a newer vendor asset whose subpaths
+do lap would otherwise hole those laps out with no error and no failing parse.
 
 **Trademarks.** The provider marks are the vendors' own and identify the vendors' own products,
 which is nominative use. Altim claims no endorsement by, or affiliation with, Anthropic or
 OpenAI. Neither mark is restyled or recoloured beyond the single ink it is drawn in, neither is
-combined with Altim's own mark, and neither ever stands for Altim. The full notice, including
-what the MIT licence does not grant a fork, is in [TRADEMARKS.md](../TRADEMARKS.md).
+combined with Altim's own mark, and neither ever stands for Altim. Simple Icons' CC0 waiver
+covers the traced path data and nothing else: the vendors' trademark rights in the marks those
+paths depict are untouched by it. The full notice, including what the MIT licence does not
+grant a fork, is in [TRADEMARKS.md](../TRADEMARKS.md).
 
 **Geometry is never held by a view model.** A `Geometry` cannot be built before Avalonia's
 rendering platform exists, and the failure lands inside a type initialiser, which the CLR caches

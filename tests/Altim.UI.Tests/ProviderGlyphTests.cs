@@ -15,8 +15,11 @@ namespace Altim.UI.Tests;
 /// <remarks>
 /// <para>
 /// Both providers used to be drawn with placeholder geometry - a diamond and a hexagon -
-/// because the design system named the accents and supplied no artwork. They now carry each
-/// vendor's own mark, which is nominative use: see <c>docs/DESIGN.md</c>.
+/// because the design system named the accents and supplied no artwork, and then with marks
+/// drawn from memory, which passed every assertion here and still looked wrong. They now
+/// carry each vendor's own outline, traced by the Simple Icons set from the vendor's own
+/// brand asset and moved onto the box by scale and translation alone. That is nominative
+/// use: see <c>docs/DESIGN.md</c>.
 /// </para>
 /// <para>
 /// Path data is easy to assert nothing about. A mark that parsed, sat in the box and drew a
@@ -85,9 +88,18 @@ public sealed class ProviderGlyphTests
     }
 
     /// <summary>
-    /// Neither vendor mark is the placeholder it replaced, and neither is a single closed
-    /// outline: a burst of spokes and a knot of lapped bars are both several figures.
+    /// Neither vendor mark is the placeholder it replaced, and neither is the handful of
+    /// straight segments a placeholder is: the burst is one long outline and the knot is
+    /// eight figures, which is how the vendors' own artwork is built.
     /// </summary>
+    /// <remarks>
+    /// The figure counts are the shape of the real marks, not of a drawing of them. The
+    /// burst is a single closed outline that travels out along one flank of each spoke and
+    /// back down the other - a mark redrawn as one figure per spoke would be nine, which is
+    /// what the drawn placeholder this replaced was. The knot is a silhouette plus the seven
+    /// counters cut out of it. Both are held to a segment count no placeholder can reach, so
+    /// a path that collapsed back to a few straight lines cannot pass this quietly.
+    /// </remarks>
     [Fact]
     public void NeitherMarkIsThePlaceholderItReplaced()
     {
@@ -97,11 +109,14 @@ public sealed class ProviderGlyphTests
         Assert.NotEqual(PlaceholderDiamond, claude);
         Assert.NotEqual(PlaceholderHexagon, codex);
 
-        Assert.True(Figures(claude) >= 6, $"The burst is {Figures(claude)} figures, not a burst.");
+        Assert.Equal(1, Figures(claude));
         Assert.True(Figures(codex) >= 6, $"The knot is {Figures(codex)} figures, not a knot.");
 
-        // Both open with the non-zero fill rule. Even-odd holes out every lap and every
-        // overlap, which is a silent change: the path still parses and still draws.
+        Assert.True(Segments(claude) >= 100, $"The burst is {Segments(claude)} segments, not a burst.");
+        Assert.True(Segments(codex) >= 50, $"The knot is {Segments(codex)} segments, not a knot.");
+
+        // Both open with the non-zero fill rule, which is the rule SVG applies when a file
+        // names none and therefore the rule the vendors' own files are drawn under.
         Assert.StartsWith("F1 ", claude, StringComparison.Ordinal);
         Assert.StartsWith("F1 ", codex, StringComparison.Ordinal);
     }
@@ -180,49 +195,94 @@ public sealed class ProviderGlyphTests
     }
 
     /// <summary>
-    /// The burst is solid where its spokes meet and the knot is hollow, which is what keeps
-    /// the two apart at 16px - and what balances an OpenAI accent that is very nearly the
-    /// ink colour against an Anthropic accent that is not.
+    /// The burst is solid where its spokes meet and the knot is open at its centre, which is
+    /// what keeps the two apart at 16px - and what balances an OpenAI accent that is very
+    /// nearly the ink colour against an Anthropic accent that is not.
     /// </summary>
-    [AvaloniaFact]
-    public void TheBurstIsSolidAtItsCentreAndTheKnotIsHollow()
+    /// <param name="size">The glyph size, in device independent pixels.</param>
+    /// <remarks>
+    /// One box at the middle of the mark, an eighth of it across, read twice. The knot's
+    /// counter is the hexagon in OpenAI's own artwork, a little over a fifth of the mark
+    /// wide; the old drawn mark's hollow was half the box wide, so a probe sized for that one
+    /// runs over the strands here and reads ink. This is the largest box the real counter
+    /// holds at both sizes, and the burst fills the same box solid.
+    /// </remarks>
+    [AvaloniaTheory]
+    [InlineData(16)]
+    [InlineData(28)]
+    public void TheBurstIsSolidAtItsCentreAndTheKnotIsOpen(int size)
     {
-        var middle = new Rect(6d, 6d, 4d, 4d);
+        var centre = new Rect(size * 7d / 16d, size * 7d / 16d, size / 8d, size / 8d);
 
-        using (PixelHost claude = Draw(ProviderIdentity.ClaudeId, 16))
+        using (PixelHost claude = Draw(ProviderIdentity.ClaudeId, size))
         {
             Frame frame = claude.Capture();
             Assert.True(
-                frame.Count(middle, Ink.IsInk) >= 12,
-                $"The burst is hollow where its spokes meet: {frame.Describe(middle)}");
+                frame.Count(centre, Ink.IsInk) == frame.Count(centre, _ => true),
+                $"The burst is not solid where its spokes meet at {size}px: {frame.Describe(centre)}");
         }
 
-        using PixelHost codex = Draw(ProviderIdentity.CodexId, 16);
+        using PixelHost codex = Draw(ProviderIdentity.CodexId, size);
         Frame knot = codex.Capture();
         Assert.True(
-            knot.Count(middle, Painted) == 0,
-            $"The knot is filled where it should be open: {knot.Describe(middle)}");
+            knot.Count(centre, Painted) == 0,
+            $"The knot's centre is filled at {size}px: {knot.Describe(centre)}");
     }
 
     /// <summary>
-    /// The knot's laps are filled rather than holed out. Its six bars run past one another
-    /// at the corners, and under the default even-odd rule each overlap cancels itself into
-    /// a hole - which the leading <c>F1</c> in the path data is there to prevent.
+    /// The knot's counters are holes, its strands are filled, and the fill rule it declares
+    /// is not what decides either: the vendors' artwork reads the same under both rules.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This replaces an assertion that the leading <c>F1</c> was load bearing, which was true
+    /// of the drawn mark it guarded - six bars lapping at the corners, every lap holed out by
+    /// even-odd - and is not true of OpenAI's own. The real knot is a silhouette with seven
+    /// counters nested inside it and no two subpaths overlapping anywhere, so both rules draw
+    /// it identically. Asserting that is worth as much as the old assertion was: it is the
+    /// property that makes <c>F1</c> safe to declare, and the property that a re-trace from a
+    /// newer vendor asset could silently lose.
+    /// </para>
+    /// <para>
+    /// The rules are compared by geometry rather than by pixels, over a grid fine enough to
+    /// fall inside every counter the mark has, because a difference the rasteriser rounds
+    /// away at 16px is still a difference in the mark.
+    /// </para>
+    /// </remarks>
     [AvaloniaFact]
-    public void TheKnotsLapsAreFilledRatherThanHoledOut()
+    public void TheKnotsCountersAreHolesWhicheverFillRuleIsApplied()
     {
         string data = ProviderIdentity.GlyphPath(ProviderIdentity.CodexId);
         Geometry knot = Geometry.Parse(data);
         Geometry withoutTheRule = Geometry.Parse(data.Replace("F1 ", string.Empty, StringComparison.Ordinal));
 
-        // Inside the lap at the top corner, where two bars cross.
-        var lap = new Point(8.25d, 2d);
+        // The hexagon at the centre of the mark, and one point on each side of the braid.
+        Assert.False(knot.FillContains(new Point(8d, 8d)), "The knot's centre counter is filled in.");
+        foreach (Point strand in new[]
+        {
+            new Point(7.5d, 1d), new Point(1d, 7d), new Point(8.5d, 15d), new Point(15d, 9d),
+        })
+        {
+            Assert.True(knot.FillContains(strand), $"The knot has a hole at {strand}.");
+        }
 
-        Assert.True(knot.FillContains(lap), "The knot has a hole at its top corner.");
-        Assert.False(
-            withoutTheRule.FillContains(lap),
-            "Even-odd no longer holes the lap out, so the F1 this guards is not load bearing.");
+        int disagreements = 0;
+        for (int x = 0; x <= 160; x++)
+        {
+            for (int y = 0; y <= 160; y++)
+            {
+                var point = new Point(x / 10d, y / 10d);
+                if (knot.FillContains(point) != withoutTheRule.FillContains(point))
+                {
+                    disagreements++;
+                }
+            }
+        }
+
+        Assert.True(
+            disagreements == 0,
+            $"Even-odd draws a different knot at {disagreements} points, so the mark now depends "
+                + "on the rule rather than merely declaring the vendor's own.");
     }
 
     /// <summary>
@@ -265,4 +325,11 @@ public sealed class ProviderGlyphTests
     /// <summary>How many closed figures a path is made of.</summary>
     /// <param name="data">The path data.</param>
     private static int Figures(string data) => data.Count(character => character == 'M');
+
+    /// <summary>
+    /// How many drawing commands a path is made of, the leading fill rule aside.
+    /// </summary>
+    /// <param name="data">The path data.</param>
+    private static int Segments(string data) =>
+        data[(data.IndexOf(' ', StringComparison.Ordinal) + 1)..].Count(char.IsLetter);
 }

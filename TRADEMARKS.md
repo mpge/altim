@@ -18,8 +18,13 @@ That is nominative use, and Altim keeps inside its limits.
 
 - Each mark identifies that vendor's product and nothing else. Neither ever stands for Altim, and
   Altim's own mark is the only one used as Altim's identity.
-- The marks are drawn as vector paths in a single ink so they inherit the interface's foreground
-  colour. Beyond that they are not restyled, recoloured, distorted, animated, or redrawn.
+- The marks are the vendors' own outlines, taken from the [Simple Icons](https://simpleicons.org)
+  set, whose CC0 path data is traced from each vendor's published brand asset, and filled in a
+  single ink so they inherit the interface's foreground colour. That CC0 waiver covers the path
+  data and nothing else; it grants no rights in the trademarks the paths depict.
+- Beyond that single ink they are not restyled, recoloured, animated, or redrawn. Each is fitted to
+  its 16px box by scale and translation alone. Neither mark is square as the vendor draws it, so
+  squaring it widens the knot by 1.4 per cent relative to its height, and the burst by 0.08.
 - Neither mark is combined, locked up, or overlaid with Altim's mark or with each other.
 - No more of each mark is used than identification needs: a 16px glyph beside the provider's name.
 - Nothing in the product, the documentation, or this repository claims endorsement, partnership,
