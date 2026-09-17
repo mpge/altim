@@ -30,11 +30,16 @@
        It is a verification switch and nothing sets it by default:
 
            dotnet build src/Altim.App -c Release -p:AltimPortableBuild=true
-               -p:BaseIntermediateOutputPath=[scratch]/obj/ -p:BaseOutputPath=[scratch]/bin/
+               --artifacts-path [scratch]
 
-       The output paths are redirected because restore writes the chosen framework
-       into obj/project.assets.json, and sharing it with the normal build makes each
-       one invalidate the other. -->
+       The output is redirected because restore writes the chosen framework into
+       obj/project.assets.json, and sharing it with the normal build makes each one
+       invalidate the other. Use --artifacts-path, not BaseIntermediateOutputPath:
+       that one applies to every project in the graph, so they all land in a single
+       obj folder and the build fails with a circular dependency on
+       ResolveProjectReferences. --artifacts-path keeps a subfolder per project.
+       Verified on 2026-09-17: 0 warnings, and the repository's own obj is left
+       alone, so the next ordinary build is not invalidated. -->
   <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$(AltimPortableBuild)' != 'true'">
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
