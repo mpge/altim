@@ -107,9 +107,22 @@ rather than an instant so a timezone change cannot silently re-bucket history.
 ## Rollup
 
 Daily rows are derived from `usage_sample` for days Altim observed. Token totals in a sample are
-cumulative per reading, so the day's value is the **last reading of that day**, not a sum of
-readings — the same trap the retention pass got wrong and had to be fixed for. Peak percent is the
-maximum across that day's samples for that provider.
+cumulative per reading, so summing readings is wrong — the same trap the retention pass got wrong
+and had to be fixed for. The day's value is the **highest reading of that day**, taken per token
+component.
+
+The obvious rule, the day's *last* reading, is only safe for a counter that cannot fall within a
+day, and ours can: the Codex figure is summed over a bounded window of the most recent rollout
+files, so on a busy day older sessions drop out of that window and a later reading legitimately
+reports a smaller number. Claude raises the same question around session eviction and around a
+restart rebuilding cumulative totals from the scanner cursor. Wherever the counter does behave, the
+highest reading *is* the last one, so the rule costs nothing there and never understates a day where
+it does not.
+
+Because components are maximised independently, a row is a composite rather than a snapshot of one
+instant. That is deliberate: each component is its own cumulative counter, and the day's highest is
+the most of it Altim ever actually saw. Peak percent is likewise the maximum across that day's
+samples for that provider.
 
 The rollup must be idempotent: recomputing a day produces the same row, and recomputing an observed
 day never demotes it to backfilled.
@@ -164,7 +177,8 @@ line stating that daily totals are kept indefinitely while samples are not.
 
 ## Testing
 
-- Rollup: cumulative tokens take the day's last reading, not a sum; peak is the day's maximum;
+- Rollup: cumulative tokens take the day's highest reading, never a sum, and a counter that falls
+  within a day still reports the day's highest; peak is the day's maximum;
   recomputation is idempotent; an observed day is never demoted by a later backfill.
 - Quantiles: all-zero history, one day, identical values, fewer days than buckets, one extreme
   outlier not flattening the rest.
