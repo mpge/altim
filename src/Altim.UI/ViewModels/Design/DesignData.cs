@@ -305,6 +305,11 @@ public static class DesignData
         public ValueTask UpsertDaysAsync(IReadOnlyList<UsageDay> days, CancellationToken ct) =>
             ValueTask.CompletedTask;
 
+        // The designer has no samples and no maintenance pass; nothing to roll up, nothing
+        // written.
+        public ValueTask<int> RollUpDaysAsync(DateOnly from, DateOnly to, CancellationToken ct) =>
+            ValueTask.FromResult(0);
+
         public ValueTask ClearAsync(CancellationToken ct) => ValueTask.CompletedTask;
     }
 

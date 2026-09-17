@@ -225,6 +225,14 @@ internal sealed class FakeHistoryService : IUsageHistoryService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Rolling days up belongs to the composition root's maintenance pass, not to a view
+    /// model, so nothing here ever calls it: it writes nothing and returns zero.
+    /// </remarks>
+    public ValueTask<int> RollUpDaysAsync(DateOnly from, DateOnly to, CancellationToken ct) =>
+        ValueTask.FromResult(0);
+
+    /// <inheritdoc />
     public ValueTask ClearAsync(CancellationToken ct)
     {
         Clears++;

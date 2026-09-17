@@ -240,31 +240,12 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
         transaction.Commit();
     }
 
-    /// <summary>
-    /// Rolls Altim's own samples up into one observed day row per provider per local
-    /// calendar day, across a range of days with both bounds inclusive.
-    /// </summary>
-    /// <param name="from">First local day to roll up, inclusive.</param>
-    /// <param name="to">
-    /// Last local day to roll up, inclusive. A <paramref name="to"/> before
-    /// <paramref name="from"/> names no days at all, which is nothing to do rather than
-    /// something to complain about: it reads and writes nothing and returns zero, the same
-    /// answer <see cref="GetDaysAsync"/> gives for the same bounds.
-    /// </param>
-    /// <param name="ct">Cancels the read and the write.</param>
-    /// <returns>
-    /// How many day rows were written. A day whose samples reported nothing at all rolls up
-    /// to nothing, is not written, and is not counted: it stays an unknown square rather
-    /// than becoming an empty observed row that would both read as unknown and outrank a
-    /// later backfill that did know what happened.
-    /// </returns>
+    /// <inheritdoc />
     /// <remarks>
     /// <para>
-    /// Every row it writes is <see cref="UsageDaySource.Observed"/> and each of its figures
-    /// is the highest any of that day's readings reported, so rolling a day up again can
-    /// only produce the same row or a higher one, never a lower one and never a second row.
-    /// That is what makes it safe to include <em>today</em> — a day still being lived, which
-    /// the maintenance pass rolls up over and over as it goes.
+    /// An empty range — a <paramref name="to"/> before <paramref name="from"/> — reads and
+    /// writes nothing and returns zero, the same answer <see cref="GetDaysAsync"/> gives
+    /// for the same bounds.
     /// </para>
     /// <para>
     /// The read runs on a worker and the write behind the writer lease, taken once for the
@@ -504,14 +485,36 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
         => new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).ToUnixTimeSeconds();
 
     /// <summary>
-    /// Inserts a day, or replaces the stored one when precedence allows it.
+    /// Inserts a day, or replaces the stored one when precedence allows it and it would
+    /// actually change something.
     /// </summary>
     /// <remarks>
-    /// The precedence rule is the <c>WHERE</c> on the conflict clause, and it is one
-    /// statement on purpose: read-then-write would leave a window in which a backfill
-    /// could still land on top of a day Altim had just observed. Observed beats
-    /// backfilled, observed replaces observed, and backfilled replaces only backfilled,
-    /// so a later backfill can fill a gap but can never rewrite history Altim watched.
+    /// <para>
+    /// The precedence rule is the first half of the <c>WHERE</c> on the conflict clause,
+    /// and it is one statement on purpose: read-then-write would leave a window in which a
+    /// backfill could still land on top of a day Altim had just observed. Observed beats
+    /// backfilled, observed replaces observed, and backfilled replaces only backfilled, so
+    /// a later backfill can fill a gap but can never rewrite history Altim watched.
+    /// </para>
+    /// <para>
+    /// The second half is what keeps a quiet machine quiet. The maintenance pass rolls
+    /// yesterday and today up on every tick, so a computer left on overnight offers the
+    /// same unchanged day over and over. Accepting each one would move SQLite's change
+    /// counter, and that counter is exactly what
+    /// <see cref="AltimDatabase.CheckpointIfIdleAsync"/> reads to decide the database has
+    /// been written to: the write-ahead log would then never be emptied again, by
+    /// construction, which is the trap <c>ReleaseWriter</c> documents from the other end.
+    /// A row whose figures and source are all unchanged is left alone, stamp included, so
+    /// <c>updated_at</c> means "when this day last moved" rather than "when something last
+    /// asked about it".
+    /// </para>
+    /// <para>
+    /// <c>IS NOT</c> rather than <c>&lt;&gt;</c> throughout, because every one of these
+    /// columns is nullable and an unreported component must compare equal to an unreported
+    /// component rather than to nothing at all. The source is compared too: a backfill that
+    /// guessed a day exactly right must still be promoted to observed, or the next backfill
+    /// would be free to rewrite it.
+    /// </para>
     /// </remarks>
     private static async ValueTask UpsertDayAsync(SqliteConnection connection, UsageDay day,
                                                   CancellationToken ct)
@@ -529,7 +532,13 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
               peak_percent = excluded.peak_percent,
               source = excluded.source,
               updated_at = excluded.updated_at
-            WHERE excluded.source = '{ObservedSource}' OR usage_day.source = '{BackfilledSource}'
+            WHERE (excluded.source = '{ObservedSource}' OR usage_day.source = '{BackfilledSource}')
+              AND (usage_day.input_tokens       IS NOT excluded.input_tokens
+                OR usage_day.output_tokens      IS NOT excluded.output_tokens
+                OR usage_day.cache_read_tokens  IS NOT excluded.cache_read_tokens
+                OR usage_day.cache_write_tokens IS NOT excluded.cache_write_tokens
+                OR usage_day.peak_percent       IS NOT excluded.peak_percent
+                OR usage_day.source             IS NOT excluded.source)
             """;
         command.Parameters.AddWithValue("$provider", day.ProviderId);
         command.Parameters.AddWithValue("$day", FormatDay(day.Day));

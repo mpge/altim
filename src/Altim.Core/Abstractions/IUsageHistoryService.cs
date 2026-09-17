@@ -86,6 +86,42 @@ public interface IUsageHistoryService
     ValueTask UpsertDaysAsync(IReadOnlyList<UsageDay> days, CancellationToken ct);
 
     /// <summary>
+    /// Rolls the samples this service already holds up into one observed day row per
+    /// provider per local calendar day, across a range with both bounds inclusive.
+    /// </summary>
+    /// <param name="from">First local day to roll up, inclusive.</param>
+    /// <param name="to">
+    /// Last local day to roll up, inclusive. A <paramref name="to"/> before
+    /// <paramref name="from"/> names no days at all, which is nothing to do rather than
+    /// something to complain about.
+    /// </param>
+    /// <param name="ct">Cancels the read and the write.</param>
+    /// <returns>
+    /// How many day rows were written. A day whose samples reported nothing at all rolls
+    /// up to nothing, is not written, and is not counted: it stays unknown rather than
+    /// becoming an empty observed row, which would render exactly like unknown while
+    /// outranking a backfill that did know what happened.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Every row it writes is <see cref="UsageDaySource.Observed"/> and each figure is the
+    /// highest any of that day's readings reported, so rolling a day up again produces the
+    /// same row or a higher one, never a lower one and never a second row. That is what
+    /// makes it safe to include <em>today</em>, a day still being lived, and to run the
+    /// whole thing over and over from a housekeeping pass.
+    /// </para>
+    /// <para>
+    /// This is on the interface rather than on the one implementation that does the work,
+    /// because the caller holds an <see cref="IUsageHistoryService"/> that degrades to a
+    /// no-op when the database could not be opened. Type-testing for the concrete class at
+    /// the call site would skip the rollup silently on that path — correct behaviour,
+    /// arrived at invisibly, with no way to test it. A no-op that returns zero says the
+    /// same thing out loud.
+    /// </para>
+    /// </remarks>
+    ValueTask<int> RollUpDaysAsync(DateOnly from, DateOnly to, CancellationToken ct);
+
+    /// <summary>
     /// Deletes all recorded history. Offered to the user as an explicit action; there
     /// is no automatic path that calls it.
     /// </summary>

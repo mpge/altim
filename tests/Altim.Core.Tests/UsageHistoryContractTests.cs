@@ -133,6 +133,13 @@ public sealed class UsageHistoryContractTests
             return ValueTask.CompletedTask;
         }
 
+        // Bucketing a sample into a local calendar day is the storage layer's work and is
+        // tested there, against a real timezone and a real table. Here it is a no-op that
+        // writes nothing and says so, which is exactly what the contract allows a history
+        // with nothing to roll up to answer.
+        public ValueTask<int> RollUpDaysAsync(DateOnly from, DateOnly to, CancellationToken ct) =>
+            ValueTask.FromResult(0);
+
         public ValueTask ClearAsync(CancellationToken ct)
         {
             _samples.Clear();

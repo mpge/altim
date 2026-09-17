@@ -44,6 +44,20 @@ internal sealed class StorageStack : IDisposable
     /// <summary>The down-sampler and compactor, or null when storage is unavailable.</summary>
     public UsageRetention? Retention { get; private init; }
 
+    /// <summary>
+    /// Raw key/value access to the <c>setting</c> table, or null when storage is
+    /// unavailable.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Settings"/> is the typed settings record and is all the rest of the
+    /// application wants. The maintenance pass keeps a couple of scalars that are not
+    /// settings at all — when each provider's backfill last ran — and they belong in the
+    /// same table beside the compaction stamp rather than in a file of their own. Null
+    /// here means those stamps do not survive a restart, which degrades to asking a
+    /// provider for its history once per run instead of once per day.
+    /// </remarks>
+    public SqliteSettingsStore? Scalars { get; private init; }
+
     /// <summary>The open database, or null when it could not be opened.</summary>
     public AltimDatabase? Database => _database;
 
@@ -70,13 +84,16 @@ internal sealed class StorageStack : IDisposable
                 " at schema version " +
                 database.SchemaVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
+            var settings = new SqliteSettingsStore(database);
+
             return new StorageStack(
                 database,
                 new SqliteUsageHistoryService(database),
-                new SqliteSettingsBackend(new SqliteSettingsStore(database)))
+                new SqliteSettingsBackend(settings))
             {
                 NotificationState = new NotificationStateStore(database),
                 Retention = new UsageRetention(database),
+                Scalars = settings,
             };
         }
         catch (OperationCanceledException)

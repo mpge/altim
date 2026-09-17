@@ -84,6 +84,17 @@ internal sealed class NullUsageHistoryService : IUsageHistoryService
         ValueTask.CompletedTask;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// There are no samples to roll up, so nothing is written and the answer is zero. The
+    /// maintenance pass calls this on every tick without knowing which history it holds,
+    /// which is the point: the no-database path skips the rollup out loud, in a line
+    /// somebody can read, rather than by a type test at the call site that would skip it
+    /// silently and could not be tested.
+    /// </remarks>
+    public ValueTask<int> RollUpDaysAsync(DateOnly from, DateOnly to, CancellationToken ct) =>
+        ValueTask.FromResult(0);
+
+    /// <inheritdoc />
     public ValueTask ClearAsync(CancellationToken ct) => ValueTask.CompletedTask;
 }
 

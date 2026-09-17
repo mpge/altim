@@ -293,6 +293,120 @@ public sealed class UsageDayRollupIntegrationTests
         Assert.Equal(UsageDaySource.Observed, day.Source);
     }
 
+    /// <summary>
+    /// The maintenance pass rolls days up on every tick, so a quiet machine rolls the same
+    /// unchanged day up again every five minutes for as long as it is left on. Rewriting
+    /// the row each time would move SQLite's change counter, which is what stamps the write
+    /// clock <see cref="AltimDatabase.CheckpointIfIdleAsync"/> watches, and the write-ahead
+    /// log would then never be emptied again — the same trap <c>ReleaseWriter</c> already
+    /// documents for merely taking the writer, arrived at from the other end. A day whose
+    /// figures have not moved is therefore left exactly as it was, stamp included.
+    /// </summary>
+    [Fact]
+    public async Task RollingUpADayWhoseFiguresHaveNotMovedLeavesTheRowAlone()
+    {
+        using var temp = new TempDatabase();
+        var clock = new SteppingClock(new DateTimeOffset(2026, 9, 17, 20, 0, 0, TimeSpan.Zero));
+        var history = new SqliteUsageHistoryService(temp.Open(), clock);
+
+        await SeedTwoDaysAsync(history);
+        _ = await history.RollUpDaysAsync(First, Second, Ct);
+
+        IReadOnlyList<UsageDay> after = await history.GetDaysAsync("claude", First, Second, Ct);
+        object? stamps = temp.Scalar("SELECT sum(updated_at) FROM usage_day");
+
+        // The next maintenance pass, five minutes later, with nothing new recorded.
+        clock.Advance(TimeSpan.FromMinutes(5));
+        int written = await history.RollUpDaysAsync(First, Second, Ct);
+
+        // Still two days rolled up: the count is what the range came to, not what the file
+        // happened to need.
+        Assert.Equal(2, written);
+        Assert.Equal(after, await history.GetDaysAsync("claude", First, Second, Ct));
+        Assert.Equal(stamps, temp.Scalar("SELECT sum(updated_at) FROM usage_day"));
+    }
+
+    /// <summary>
+    /// The other half of the same rule: a day that really has moved is rewritten, stamp and
+    /// all. Without this, "leave an unchanged row alone" could be satisfied by never
+    /// writing anything at all.
+    /// </summary>
+    [Fact]
+    public async Task RollingUpADayThatHasMovedRewritesItAndItsStamp()
+    {
+        using var temp = new TempDatabase();
+        var clock = new SteppingClock(new DateTimeOffset(2026, 9, 17, 20, 0, 0, TimeSpan.Zero));
+        var history = new SqliteUsageHistoryService(temp.Open(), clock);
+
+        await Record(history, Second, hour: 9, input: 100, percent: 10);
+        _ = await history.RollUpDaysAsync(Second, Second, Ct);
+
+        clock.Advance(TimeSpan.FromMinutes(5));
+        await Record(history, Second, hour: 18, input: 1_500, percent: 90);
+        _ = await history.RollUpDaysAsync(Second, Second, Ct);
+
+        UsageDay day = Assert.Single(await history.GetDaysAsync("claude", Second, Second, Ct));
+
+        Assert.Equal(1_500, day.Tokens!.Input);
+        Assert.Equal(90, day.PeakPercent);
+        Assert.Equal(clock.GetUtcNow(), day.UpdatedAt);
+    }
+
+    /// <summary>
+    /// A figure appearing where there was none is a change. The day's first reading reported
+    /// tokens and no percentage at all, which is the ordinary shape of a morning before any
+    /// window has been touched; the afternoon's reports one. Nothing else moves, so the whole
+    /// of "has this day changed" rests on comparing a null against a number — and a
+    /// comparison that is not null-safe answers neither yes nor no, which reads as no and
+    /// freezes the day's peak at unknown for good.
+    /// </summary>
+    [Fact]
+    public async Task ADayWhosePeakAppearsWhereThereWasNoneIsRewritten()
+    {
+        using var temp = new TempDatabase();
+        var history = new SqliteUsageHistoryService(temp.Open());
+
+        await Record(history, Second, hour: 9, input: 250, percent: null);
+        _ = await history.RollUpDaysAsync(Second, Second, Ct);
+
+        Assert.Null(Assert.Single(await history.GetDaysAsync("claude", Second, Second, Ct)).PeakPercent);
+
+        // Same tokens, and now a percentage. The token columns are all equal, and three of
+        // the four are null on both sides.
+        await Record(history, Second, hour: 18, input: 250, percent: 40);
+        _ = await history.RollUpDaysAsync(Second, Second, Ct);
+
+        UsageDay day = Assert.Single(await history.GetDaysAsync("claude", Second, Second, Ct));
+
+        Assert.Equal(40, day.PeakPercent);
+        Assert.Equal(250, day.Tokens!.Input);
+    }
+
+    /// <summary>
+    /// A backfilled day that guessed the figures exactly right must still be promoted to
+    /// observed, because observed is what keeps the next backfill from rewriting it.
+    /// "Nothing moved" is about the numbers, never about where they came from.
+    /// </summary>
+    [Fact]
+    public async Task ADayWhoseFiguresMatchABackfillIsStillPromotedToObserved()
+    {
+        using var temp = new TempDatabase();
+        var history = new SqliteUsageHistoryService(temp.Open());
+
+        await Record(history, Second, hour: 9, input: 250, percent: 30);
+
+        await history.UpsertDaysAsync(
+            [new UsageDay("claude", Second, new TokenTotals(250, null, null, null),
+                          PeakPercent: 30, UsageDaySource.Backfilled, DateTimeOffset.UnixEpoch)],
+            Ct);
+
+        _ = await history.RollUpDaysAsync(Second, Second, Ct);
+
+        UsageDay day = Assert.Single(await history.GetDaysAsync("claude", Second, Second, Ct));
+
+        Assert.Equal(UsageDaySource.Observed, day.Source);
+    }
+
     private static async Task SeedTwoDaysAsync(SqliteUsageHistoryService history)
     {
         await Record(history, First, hour: 9, input: 100, percent: 10);
@@ -329,5 +443,18 @@ public sealed class UsageDayRollupIntegrationTests
     private sealed class FixedZoneClock(TimeZoneInfo zone) : TimeProvider
     {
         public override TimeZoneInfo LocalTimeZone { get; } = zone;
+    }
+
+    /// <summary>
+    /// A clock a test moves by hand, so "the next maintenance pass, five minutes later" is
+    /// an exact instant rather than a sleep.
+    /// </summary>
+    private sealed class SteppingClock(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset _now = start;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan by) => _now += by;
     }
 }

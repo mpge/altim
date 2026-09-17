@@ -82,6 +82,12 @@ internal sealed class AltimRuntime : IAsyncDisposable
     private DashboardHost? _dashboard;
     private IReadOnlyList<IUsageProvider> _providers = [];
 
+    /// <summary>
+    /// The local day the last rollup of this run treated as today, or null when none has
+    /// run yet. Only ever touched from the maintenance loop, which is one task.
+    /// </summary>
+    private DateOnly? _lastRolledUpDay;
+
     private AltimSettings _current = AltimSettings.Default;
 
     /// <summary>
@@ -540,7 +546,8 @@ internal sealed class AltimRuntime : IAsyncDisposable
     }
 
     /// <summary>
-    /// The housekeeping loop: down-sampling, compaction and emptying the write-ahead log.
+    /// The housekeeping loop: down-sampling, compaction, rolling days up, backfilling them
+    /// from the providers, and emptying the write-ahead log.
     /// </summary>
     /// <param name="ct">Cancelled at shutdown.</param>
     /// <remarks>
@@ -610,6 +617,13 @@ internal sealed class AltimRuntime : IAsyncDisposable
                 }
             }
 
+            // The usage map's two writers, both folded in here rather than given a timer.
+            // Altim is a tray utility with a measured idle cost and a single wake source
+            // outside the scheduler; a second one would be a regression the README would
+            // have to document, and the map is not urgent work.
+            await RollUpDaysAsync(storage, ct).ConfigureAwait(false);
+            await BackfillDaysAsync(storage, ct).ConfigureAwait(false);
+
             if (storage.Database is { } database)
             {
                 // Last, and only when nothing has written for a while: the log is bounded
@@ -632,6 +646,238 @@ internal sealed class AltimRuntime : IAsyncDisposable
         {
             // Housekeeping. Failing it costs disk, never a reading.
             AltimLog.Write("storage", "Maintenance pass failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Turns the samples Altim has taken into one observed row per provider per local day.
+    /// </summary>
+    /// <param name="storage">The storage stack, which may have no database behind it.</param>
+    /// <param name="ct">Cancelled at shutdown.</param>
+    /// <remarks>
+    /// <para>
+    /// The range is <see cref="HistoryBackfill.RollUpFrom"/>'s: yesterday and today on an
+    /// ordinary pass, back to the last day this run covered after a machine has been asleep,
+    /// and back to the bound on the first pass of the process. Rolling a day up again is
+    /// idempotent and can only raise a figure, so re-reading yesterday all day costs a small
+    /// read and changes nothing — and a row whose figures have not moved is not rewritten at
+    /// all, which is what keeps the write-ahead log emptiable on a machine left switched on.
+    /// </para>
+    /// <para>
+    /// Called through <see cref="IUsageHistoryService"/> rather than through the SQLite
+    /// class, so the machine whose database would not open reaches a no-op that returns zero
+    /// instead of a type test at this call site that would skip the whole thing silently.
+    /// </para>
+    /// <para>
+    /// A failure leaves the last-rolled-up day alone, so the next pass covers the same range
+    /// again, and leaves the days it could not write unknown rather than zero.
+    /// </para>
+    /// </remarks>
+    private async ValueTask RollUpDaysAsync(StorageStack storage, CancellationToken ct)
+    {
+        bool first = _lastRolledUpDay is null;
+
+        // The user's local calendar day, which is what a row is filed under. Resolved once,
+        // so a pass that straddles midnight does not work from two different todays.
+        DateOnly today = DateOnly.FromDateTime(DateTime.Now);
+        DateOnly from = HistoryBackfill.RollUpFrom(today, _lastRolledUpDay);
+
+        try
+        {
+            int days = await storage.History.RollUpDaysAsync(from, today, ct).ConfigureAwait(false);
+
+            _lastRolledUpDay = today;
+
+            if (first && days > 0)
+            {
+                // Once per run, for the catch-up pass only. Logging the routine pass would
+                // write a line every five minutes for as long as the machine is switched on.
+                AltimLog.Write(
+                    "storage",
+                    "Rolled up " + days.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                    " days of usage history.");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The type and nothing else. This runs against the user's own history file, and
+            // an IOException from it names the path, which altim.log may not carry.
+            AltimLog.Write("storage", "Rolling usage days up failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Asks each provider that can reach into the past for the days Altim was not watching.
+    /// </summary>
+    /// <param name="storage">The storage stack.</param>
+    /// <param name="ct">Cancelled at shutdown.</param>
+    /// <remarks>
+    /// <para>
+    /// At most daily per provider, and the stamp that says so is per provider in the
+    /// <c>setting</c> table beside the compaction stamp: a provider whose source is
+    /// unavailable must not hold back one whose source answers. Whether it is due at all is
+    /// <see cref="HistoryBackfill.ShouldRun"/>'s decision, not this method's.
+    /// </para>
+    /// <para>
+    /// <b>Only an answer counts as a run.</b> Both sources return empty rather than throwing
+    /// when they cannot reach what they read — no permission, no CLI, a refresh gate that is
+    /// closed because the live reading has just taken it — and stamping that would record a
+    /// skip as a run. The Codex gate in particular opens once a minute and is usually spent
+    /// by the scheduler, so a pass that stamped every attempt would mark the backfill done
+    /// for the day without ever having reached the app-server once. An empty answer
+    /// therefore leaves the stamp alone and leaves those days unknown, which is the correct
+    /// square, and the next pass asks again.
+    /// </para>
+    /// <para>
+    /// A throw <em>is</em> stamped. Neither provider is meant to throw at all, so one that
+    /// does is broken rather than unavailable, and retrying a broken source every five
+    /// minutes would do nothing but fill the log.
+    /// </para>
+    /// <para>
+    /// Skipped entirely when there is no database: there would be nowhere to put the days,
+    /// and asking a provider for history in order to drop it is work a user pays for and
+    /// never sees.
+    /// </para>
+    /// </remarks>
+    private async ValueTask BackfillDaysAsync(StorageStack storage, CancellationToken ct)
+    {
+        if (storage.Scalars is not { } scalars)
+        {
+            return;
+        }
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateOnly today = DateOnly.FromDateTime(DateTime.Now);
+        DateOnly from = HistoryBackfill.EarliestDay(today);
+
+        foreach (IUsageProvider provider in _providers)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // A provider that cannot reach into the past simply does not implement the
+            // interface, and the days it cannot account for stay unknown. Its stamp is not
+            // even read: there is nothing for one to be about.
+            IUsageHistorySource? source = provider as IUsageHistorySource;
+            DateTimeOffset? lastRun = source is null
+                ? null
+                : HistoryBackfill.ParseLastRun(
+                    await ReadScalarAsync(scalars, HistoryBackfill.LastRunKey(provider.Id), ct)
+                        .ConfigureAwait(false));
+
+            if (!HistoryBackfill.ShouldRun(now, lastRun, source is not null))
+            {
+                continue;
+            }
+
+            await BackfillProviderAsync(scalars, storage.History, provider.Id, source!, from,
+                                        today, now, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Asks one provider for its history and stores whatever it hands back.</summary>
+    /// <param name="scalars">Where the last-run stamp is kept.</param>
+    /// <param name="history">Where the days are written.</param>
+    /// <param name="providerId">The provider being asked.</param>
+    /// <param name="source">That provider's history source.</param>
+    /// <param name="from">First day to ask for, inclusive.</param>
+    /// <param name="to">Last day to ask for, inclusive.</param>
+    /// <param name="now">The instant to stamp a run with.</param>
+    /// <param name="ct">Cancelled at shutdown.</param>
+    private async ValueTask BackfillProviderAsync(
+        SqliteSettingsStore scalars, IUsageHistoryService history, string providerId,
+        IUsageHistorySource source, DateOnly from, DateOnly to, DateTimeOffset now,
+        CancellationToken ct)
+    {
+        bool ran;
+
+        try
+        {
+            IReadOnlyList<UsageDay> days = await source.GetHistoryAsync(from, to, ct)
+                .ConfigureAwait(false);
+
+            // Precedence is the upsert's own single statement. Every day here is
+            // backfilled, so none of them can overwrite a day Altim watched itself.
+            await history.UpsertDaysAsync(days, ct).ConfigureAwait(false);
+
+            ran = days.Count > 0;
+
+            if (ran)
+            {
+                AltimLog.Write(
+                    "history",
+                    "Backfilled " + days.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                    " days from " + providerId + ".");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The type and nothing else, which is why this does not use the exception's
+            // message: a provider store holds project names and file paths, and every
+            // IOException the framework raises from inside one names the file it failed on.
+            // The days it would have filled stay unknown, which is the honest square.
+            AltimLog.Write("history", "Backfilling " + providerId + " failed", ex);
+            ran = true;
+        }
+
+        if (!ran)
+        {
+            return;
+        }
+
+        try
+        {
+            await scalars.SetValueAsync(HistoryBackfill.LastRunKey(providerId),
+                                        HistoryBackfill.FormatLastRun(now), ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Costs one extra ask on the next pass and nothing else.
+            AltimLog.Write("history", "Recording the backfill time for " + providerId + " failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Reads one maintenance scalar, treating an unreadable settings table as an absent key.
+    /// </summary>
+    /// <param name="scalars">The settings table.</param>
+    /// <param name="key">The key to read.</param>
+    /// <param name="ct">Cancelled at shutdown.</param>
+    /// <returns>The stored text, or null when there is none or it could not be read.</returns>
+    /// <remarks>
+    /// An absent key means "never run", so a settings table that cannot be read costs one
+    /// extra backfill rather than none at all. Not being able to remember when something
+    /// last happened is no reason to stop doing it.
+    /// </remarks>
+    private static async ValueTask<string?> ReadScalarAsync(SqliteSettingsStore scalars, string key,
+                                                            CancellationToken ct)
+    {
+        try
+        {
+            return await scalars.GetValueAsync(key, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The key is one of Altim's own constants, so naming it carries nothing of the
+            // user's.
+            AltimLog.Write("history", "Reading " + key + " failed", ex);
+            return null;
         }
     }
 
