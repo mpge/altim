@@ -337,6 +337,287 @@ public sealed class CodexHistorySourceTests
         Assert.Contains("account/usage/read", client.Requests, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task AClosedGateFallsBackToTheReadingTheLiveMeterAlreadyTook()
+    {
+        // The defect this test exists for. On the verification machine the scheduler
+        // refreshes every 60 seconds and the gate opens every 60 seconds, so the live read
+        // takes the gate within seconds of it opening; the backfill, which asks every five
+        // minutes at an arbitrary instant, essentially never found it open. Measured
+        // result: maintenance.last_backfill.claude was stamped, no
+        // maintenance.last_backfill.codex key existed at all, and the Codex row of the map
+        // would have stayed unknown for good.
+        var client = new StdioAppServerClient(InitializeReply, RateLimitsReply, UsageReply(Buckets));
+        var gate = new SwitchableRefreshGate { IsOpen = true };
+
+        using var workspace = new TempWorkspace();
+        using var provider = new CodexUsageProvider(
+            CodexOptions.Default,
+            client,
+            new FakeCliRunner { CommandExists = true },
+            new FakeProcessMonitor(),
+            workspace.Root,
+            new FixedTimeProvider(Now),
+            gate);
+
+        // The scheduler's live read, which is what spends the minute's one call.
+        await provider.RefreshAsync(Ct);
+        Assert.Equal(1, client.ExchangeCount);
+
+        gate.IsOpen = false;
+        IReadOnlyList<UsageDay> days = await ((IUsageHistorySource)provider).GetHistoryAsync(From, To, Ct);
+
+        // Non-empty is the load-bearing claim rather than a detail of it: AltimRuntime
+        // counts a backfill as having run only when the list has something in it, so a
+        // fallback that came back empty would be retried for ever exactly as the skip was.
+        Assert.Equal(
+            new DateOnly[] { new(2026, 9, 15), new(2026, 9, 16) },
+            days.Select(static day => day.Day).ToArray());
+        Assert.Equal(new long?[] { 1000L, 2000L }, days.Select(static day => day.TotalTokens).ToArray());
+        Assert.All(days, static day => Assert.Equal(UsageDaySource.Backfilled, day.Source));
+
+        // The gate was shut and stayed shut: no second call reached the network.
+        Assert.Equal(1, client.ExchangeCount);
+    }
+
+    [Fact]
+    public async Task AClosedGateWithNothingRememberedStillBackfillsNothing()
+    {
+        // The other half of the rule. A fallback with nothing to fall back to has nothing
+        // to say, and the days stay unknown rather than becoming a row of zeroes.
+        var client = new StdioAppServerClient(InitializeReply, RateLimitsReply, UsageReply(Buckets))
+        {
+            MustNotBeCalled = true,
+        };
+        var gate = new SwitchableRefreshGate { IsOpen = false };
+
+        using var workspace = new TempWorkspace();
+        using var provider = new CodexUsageProvider(
+            CodexOptions.Default,
+            client,
+            new FakeCliRunner { CommandExists = true },
+            new FakeProcessMonitor(),
+            workspace.Root,
+            new FixedTimeProvider(Now),
+            gate);
+
+        Assert.Empty(await ((IUsageHistorySource)provider).GetHistoryAsync(From, To, Ct));
+        Assert.Equal(0, client.ExchangeCount);
+    }
+
+    [Fact]
+    public async Task AFreshLiveReadingIsPreferredOverTheOneAlreadyInHand()
+    {
+        // The remembered reading is a fallback, never a cache. When the call does go
+        // through, what the server has just said wins outright — including when it
+        // accounts for fewer days than the reading already in hand, because the server
+        // restating its own history is not Altim losing days.
+        var client = new StdioAppServerClient(InitializeReply, RateLimitsReply, UsageReply(Buckets));
+        client.Then(
+            InitializeReply,
+            RateLimitsReply,
+            UsageReply("""{"dailyUsageBuckets":[{"startDate":"2026-09-17","tokens":7}]}"""));
+
+        using var workspace = new TempWorkspace();
+        using var provider = new CodexUsageProvider(
+            CodexOptions.Default,
+            client,
+            new FakeCliRunner { CommandExists = true },
+            new FakeProcessMonitor(),
+            workspace.Root,
+            new FixedTimeProvider(Now),
+            new SwitchableRefreshGate { IsOpen = true });
+
+        var source = (IUsageHistorySource)provider;
+        Assert.Equal(2, (await source.GetHistoryAsync(From, To, Ct)).Count);
+
+        UsageDay day = Assert.Single(await source.GetHistoryAsync(From, To, Ct));
+        Assert.Equal(new DateOnly(2026, 9, 17), day.Day);
+        Assert.Equal(7L, day.TotalTokens);
+        Assert.Equal(2, client.ExchangeCount);
+    }
+
+    [Fact]
+    public async Task ARememberedReadingIsStillUsedAtTheEdgeOfItsRetention()
+    {
+        // The bound is the one Choose already applies to a remembered quota snapshot, so
+        // "how long a live reading keeps answering" means one thing in this file.
+        IReadOnlyList<UsageDay> days = await FallBackAfterAsync(CodexOptions.Default.LiveSnapshotRetention);
+
+        Assert.Equal(2, days.Count);
+    }
+
+    [Fact]
+    public async Task ARememberedReadingPastItsRetentionIsNotUsed()
+    {
+        // ServerReportedUsageAt cannot outlive the process, but a machine left running for
+        // a week can. Today's bucket must never be backfilled from a reading old enough to
+        // be about a different day, so past the bound the reading stops answering and the
+        // day goes back to unknown.
+        Assert.Empty(await FallBackAfterAsync(
+            CodexOptions.Default.LiveSnapshotRetention + TimeSpan.FromSeconds(1)));
+    }
+
+    [Fact]
+    public async Task TheFallbackStartsNoProcessOfItsOwn()
+    {
+        // Not "the code path looks right": both seams that can start a process are booby
+        // trapped for the second call, so a fallback that quietly reached for the CLI
+        // fails the test rather than passing it. The first call is let through because it
+        // is the reading being fallen back to.
+        var client = new StdioAppServerClient(InitializeReply, RateLimitsReply, UsageReply(Buckets));
+        var runner = new TripwireCliRunner { Armed = false };
+        var gate = new SwitchableRefreshGate { IsOpen = true };
+
+        using var workspace = new TempWorkspace();
+        using var provider = new CodexUsageProvider(
+            CodexOptions.Default,
+            client,
+            runner,
+            new FakeProcessMonitor(),
+            workspace.Root,
+            new FixedTimeProvider(Now),
+            gate);
+
+        var source = (IUsageHistorySource)provider;
+        Assert.NotEmpty(await source.GetHistoryAsync(From, To, Ct));
+
+        gate.IsOpen = false;
+        client.MustNotBeCalled = true;
+        runner.Armed = true;
+
+        Assert.NotEmpty(await source.GetHistoryAsync(From, To, Ct));
+        Assert.Equal(1, client.ExchangeCount);
+        Assert.Equal(1, runner.RunCount);
+    }
+
+    [Fact]
+    public async Task TheFallbackReportsOnlyTheDaysItWasGivenAndInventsNoneBetweenThem()
+    {
+        // A fallback is allowed to be a few minutes old. It is not allowed to grow a
+        // bucket the provider never gave: a day between two reported ones stays absent,
+        // and a day outside the requested range is dropped the way a live answer's is.
+        var client = new StdioAppServerClient(
+            InitializeReply,
+            RateLimitsReply,
+            UsageReply("""{"dailyUsageBuckets":[{"startDate":"2026-08-31","tokens":10},{"startDate":"2026-09-01","tokens":20},{"startDate":"2026-09-16","tokens":30}]}"""));
+        var gate = new SwitchableRefreshGate { IsOpen = true };
+
+        using var workspace = new TempWorkspace();
+        using var provider = new CodexUsageProvider(
+            CodexOptions.Default,
+            client,
+            new FakeCliRunner { CommandExists = true },
+            new FakeProcessMonitor(),
+            workspace.Root,
+            new FixedTimeProvider(Now),
+            gate);
+
+        var source = (IUsageHistorySource)provider;
+        Assert.NotEmpty(await source.GetHistoryAsync(From, To, Ct));
+
+        gate.IsOpen = false;
+        client.MustNotBeCalled = true;
+
+        IReadOnlyList<UsageDay> days = await source.GetHistoryAsync(From, To, Ct);
+
+        Assert.Equal(
+            new DateOnly[] { new(2026, 9, 1), new(2026, 9, 16) },
+            days.Select(static day => day.Day).ToArray());
+        Assert.Equal(new long?[] { 20L, 30L }, days.Select(static day => day.TotalTokens).ToArray());
+    }
+
+    [Fact]
+    public async Task ARememberedReadingThatAccountsForNoDayFallsBackToNothing()
+    {
+        // A successful exchange whose usage half carried only a lifetime total is a real
+        // reading and is remembered, but it accounts for no calendar day. The backfill
+        // still has nothing to hand back, so the caller leaves the stamp alone and the
+        // next pass asks again.
+        var client = new StdioAppServerClient(
+            InitializeReply,
+            RateLimitsReply,
+            UsageReply("""{"summary":{"lifetimeTokens":987654321}}"""));
+        var gate = new SwitchableRefreshGate { IsOpen = true };
+
+        using var workspace = new TempWorkspace();
+        using var provider = new CodexUsageProvider(
+            CodexOptions.Default,
+            client,
+            new FakeCliRunner { CommandExists = true },
+            new FakeProcessMonitor(),
+            workspace.Root,
+            new FixedTimeProvider(Now),
+            gate);
+
+        var source = (IUsageHistorySource)provider;
+        Assert.Empty(await source.GetHistoryAsync(From, To, Ct));
+
+        gate.IsOpen = false;
+        client.MustNotBeCalled = true;
+
+        Assert.Empty(await source.GetHistoryAsync(From, To, Ct));
+    }
+
+    [Fact]
+    public async Task SwitchingNetworkCallsOffForgetsTheRememberedReadingRatherThanFallingBackToIt()
+    {
+        // Local-only means local-only. The remembered reading came from the vendor, and a
+        // fallback that went on serving it after the user switched the permission off
+        // would be the setting having no effect on the thing it names.
+        var client = new StdioAppServerClient(InitializeReply, RateLimitsReply, UsageReply(Buckets));
+        var policy = new MutableNetworkPolicy { AllowsNetworkCalls = true };
+
+        using var workspace = new TempWorkspace();
+        using var provider = new CodexUsageProvider(
+            CodexOptions.Default,
+            client,
+            new FakeCliRunner { CommandExists = true },
+            new FakeProcessMonitor(),
+            workspace.Root,
+            new FixedTimeProvider(Now),
+            new SwitchableRefreshGate { IsOpen = true },
+            policy);
+
+        var source = (IUsageHistorySource)provider;
+        Assert.NotEmpty(await source.GetHistoryAsync(From, To, Ct));
+
+        policy.AllowsNetworkCalls = false;
+        client.MustNotBeCalled = true;
+
+        Assert.Empty(await source.GetHistoryAsync(From, To, Ct));
+    }
+
+    /// <summary>
+    /// Takes one live reading, moves the clock on by <paramref name="elapsed"/>, shuts the
+    /// gate and asks for history again.
+    /// </summary>
+    private static async Task<IReadOnlyList<UsageDay>> FallBackAfterAsync(TimeSpan elapsed)
+    {
+        var client = new StdioAppServerClient(InitializeReply, RateLimitsReply, UsageReply(Buckets));
+        var gate = new SwitchableRefreshGate { IsOpen = true };
+        var clock = new MovableTimeProvider(Now);
+
+        using var workspace = new TempWorkspace();
+        using var provider = new CodexUsageProvider(
+            CodexOptions.Default,
+            client,
+            new FakeCliRunner { CommandExists = true },
+            new FakeProcessMonitor(),
+            workspace.Root,
+            clock,
+            gate);
+
+        var source = (IUsageHistorySource)provider;
+        Assert.NotEmpty(await source.GetHistoryAsync(From, To, Ct));
+
+        clock.Advance(elapsed);
+        gate.IsOpen = false;
+        client.MustNotBeCalled = true;
+
+        return await source.GetHistoryAsync(From, To, Ct);
+    }
+
     private const string Buckets =
         """{"dailyUsageBuckets":[{"startDate":"2026-09-15","tokens":1000},{"startDate":"2026-09-16","tokens":2000}]}""";
 
@@ -379,10 +660,17 @@ public sealed class CodexHistorySourceTests
     /// </remarks>
     private sealed class StdioAppServerClient : ICodexAppServerClient
     {
-        private readonly string _responses;
+        private readonly Queue<string> _queued = new();
+        private string _responses;
 
         public StdioAppServerClient(params string[] responses) =>
-            _responses = string.Join("\n", responses) + "\n";
+            _responses = Script(responses);
+
+        /// <summary>
+        /// Queues the replies the next exchange answers with, so a test can have the
+        /// server say something different the second time it is asked.
+        /// </summary>
+        public void Then(params string[] responses) => _queued.Enqueue(Script(responses));
 
         /// <summary>Whether the CLI is considered installed.</summary>
         public bool IsAvailable { get; set; } = true;
@@ -402,10 +690,18 @@ public sealed class CodexHistorySourceTests
 
             ExchangeCount++;
 
+            string script = _responses;
+            if (_queued.Count > 0)
+            {
+                // Answer with the current script, then move on to the one a test
+                // queued for the next exchange. The last script keeps answering.
+                _responses = _queued.Dequeue();
+            }
+
             var requests = new StringWriter();
             CodexLiveResult result = await CodexAppServerClient.ExchangeAsync(
                 requests,
-                new StringReader(_responses),
+                new StringReader(script),
                 "altim",
                 "1.0",
                 ct);
@@ -413,6 +709,8 @@ public sealed class CodexHistorySourceTests
             Requests = requests.ToString();
             return result;
         }
+
+        private static string Script(string[] responses) => string.Join("\n", responses) + "\n";
     }
 
     /// <summary>
@@ -428,6 +726,13 @@ public sealed class CodexHistorySourceTests
         /// <summary>How many processes this runner was asked to start.</summary>
         public int RunCount { get; private set; }
 
+        /// <summary>
+        /// Whether a run fails the test. A test that needs one legitimate process start
+        /// before the forbidden one arms the tripwire in between, so the run it is
+        /// really about is the only one that can trip it.
+        /// </summary>
+        public bool Armed { get; set; } = true;
+
         public bool Exists(string command) => true;
 
         public Task<CliRunResult> RunAsync(
@@ -437,7 +742,12 @@ public sealed class CodexHistorySourceTests
             CancellationToken ct)
         {
             RunCount++;
-            Assert.Fail("no process may be started for this call, and " + command + " was.");
+
+            if (Armed)
+            {
+                Assert.Fail("no process may be started for this call, and " + command + " was.");
+            }
+
             return Task.FromResult(CliRunResult.Failed);
         }
     }

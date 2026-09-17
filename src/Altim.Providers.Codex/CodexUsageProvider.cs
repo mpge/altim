@@ -51,7 +51,9 @@ namespace Altim.Providers.Codex;
 /// that answers the live quota question carries roughly three months of dated daily token
 /// totals, and <see cref="GetHistoryAsync"/> hands those back so a freshly installed Altim
 /// has a usage map on its first day rather than its ninetieth. It is the same network call,
-/// under the same permission and the same gate.
+/// under the same permission and the same gate — and because the gate is usually spent by
+/// the live meter, a backfill that found it shut answers from the reading the meter took,
+/// rather than reporting nothing and being retried for ever.
 /// </para>
 /// </remarks>
 public sealed class CodexUsageProvider : IUsageProvider, IUsageHistorySource, IDisposable
@@ -227,10 +229,20 @@ public sealed class CodexUsageProvider : IUsageProvider, IUsageHistorySource, ID
     /// is empty.
     /// </para>
     /// <para>
+    /// <b>A call that did not go through falls back to the reading already in hand.</b>
+    /// The gate opens once a minute and the live meter takes it within seconds, so a
+    /// backfill that treated a closed gate as no answer was measured never to produce one:
+    /// the caller does not stamp an empty result, so it asked again every five minutes for
+    /// ever and the Codex row stayed unknown. The remembered figures are the provider's
+    /// own, bounded by <see cref="CodexOptions.LiveSnapshotRetention"/>, and no day is
+    /// invented to fill a gap in them.
+    /// </para>
+    /// <para>
     /// An empty answer always means "nothing to backfill" and never "nothing was used". A
-    /// missing CLI, a closed gate, a refused exchange and a reply whose buckets are in a
-    /// shape this reader does not recognise all produce the same empty list, which the map
-    /// renders as unknown days rather than as zeroes.
+    /// missing CLI, a shut gate with nothing remembered, network permission switched off, a
+    /// refused exchange and a reply whose buckets are in a shape this reader does not
+    /// recognise all produce the same empty list, which the map renders as unknown days
+    /// rather than as zeroes.
     /// </para>
     /// <para>
     /// Every day returned is <see cref="UsageDaySource.Backfilled"/>, so a day Altim watched
@@ -253,11 +265,16 @@ public sealed class CodexUsageProvider : IUsageProvider, IUsageHistorySource, ID
 
             CodexLiveResult live = await TryLiveAsync(_appServer.IsAvailable, now, ct).ConfigureAwait(false);
 
+            // Decided before the reading is remembered, so that "the live answer wins" is
+            // a rule this method applies rather than a side effect of RememberLive having
+            // just overwritten the field the fallback reads back.
+            CodexAccountUsage? usage = ChooseHistory(live, now);
+
             // The exchange answers both questions at once. Keeping the quota half means a
             // backfill does not spend the minute's one call and leave the meters stale.
             RememberLive(live, now);
 
-            return ToDays(live.AccountUsage, from, to, now);
+            return ToDays(usage, from, to, now);
         }
         finally
         {
@@ -532,8 +549,65 @@ public sealed class CodexUsageProvider : IUsageProvider, IUsageHistorySource, ID
         return IsNewer(local, live) ? local : live;
     }
 
+    /// <summary>
+    /// Picks between the reading this call produced and the one already in hand.
+    /// </summary>
+    /// <param name="live">How the live attempt ended, and what it carried.</param>
+    /// <param name="now">The instant the age of a remembered reading is measured against.</param>
+    /// <returns>The account figures to build days from, or <see langword="null"/> for none.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>A skipped call is not a missing reading</b>, and it is not a missing history
+    /// either. The gate opens once a minute and the scheduler's live read takes it within
+    /// seconds of it opening, so a backfill asking every five minutes at an arbitrary
+    /// instant essentially never finds it open: on the verification machine
+    /// <c>maintenance.last_backfill.codex</c> was never written at all, because an empty
+    /// answer is not stamped as a run, and the Codex row of the map would have stayed
+    /// unknown for as long as the machine kept running.
+    /// </para>
+    /// <para>
+    /// The daily buckets are whole-day figures that barely move minute to minute, so a
+    /// reading taken a few minutes ago is a real answer rather than a guess — and it is
+    /// the provider's own answer, not an interpolation. Nothing here invents a bucket: a
+    /// day the provider did not report is absent from the remembered reading exactly as
+    /// it is absent from a fresh one, and stays unknown.
+    /// </para>
+    /// <para>
+    /// The bound is <see cref="CodexOptions.LiveSnapshotRetention"/>, the same one
+    /// <see cref="Choose"/> applies to a remembered quota snapshot, so "how long a live
+    /// reading keeps answering" means one thing in this file rather than two. It is
+    /// longer than the call floor, so one slow or failed call cannot demote a good
+    /// reading, and far shorter than a day, so a machine left running for a week never
+    /// backfills today's bucket from a reading taken while it was a different day.
+    /// </para>
+    /// </remarks>
+    private CodexAccountUsage? ChooseHistory(CodexLiveResult live, DateTimeOffset now)
+    {
+        if (live.AccountUsage is { } fresh)
+        {
+            // What the server has just said wins outright, including when it accounts
+            // for fewer days than the reading in hand. The remembered figures are a
+            // fallback, never a cache to be merged into an answer.
+            return fresh;
+        }
+
+        if (ServerReportedUsage is not { } remembered || ServerReportedUsageAt is not { } observed)
+        {
+            return null;
+        }
+
+        return Age(observed, now) <= _options.LiveSnapshotRetention ? remembered : null;
+    }
+
     private static TimeSpan Age(CodexRateLimitSnapshot snapshot, DateTimeOffset now) =>
-        snapshot.ObservedAt is { } observed && now > observed ? now - observed : TimeSpan.Zero;
+        Age(snapshot.ObservedAt, now);
+
+    /// <summary>
+    /// How old a reading is, or <see cref="TimeSpan.Zero"/> when it does not say when it
+    /// was taken or the clock has moved backwards since.
+    /// </summary>
+    private static TimeSpan Age(DateTimeOffset? observedAt, DateTimeOffset now) =>
+        observedAt is { } observed && now > observed ? now - observed : TimeSpan.Zero;
 
     private async Task<IReadOnlyList<DetectedProcess>> ScanProcessesAsync(CancellationToken ct)
     {

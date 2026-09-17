@@ -28,6 +28,7 @@ sessions.
 | Live usage %, window length, reset time, per limit family | `codex app-server` JSON-RPC → `account/rateLimits/read` | Best-effort |
 | Plan type, credit balance, reset credits | same response: `planType`, `credits`, `rateLimitResetCredits` | Best-effort |
 | Daily token history (97 buckets), lifetime tokens, streaks | `codex app-server` JSON-RPC → `account/usage/read` | Best-effort |
+| Day backfill when the once-a-minute gate is already spent | the daily buckets of the last successful `account/usage/read`, at most 5 minutes old | Best-effort |
 | Historical usage snapshots (offline fallback) | `<CODEX_HOME>/sessions/**/rollout-*.jsonl`, lines where `type == "event_msg"` and `payload.type == "token_count"` → `payload.rate_limits` | Best-effort |
 | Per-turn and per-session tokens | same lines → `payload.info.last_token_usage` (delta), `payload.info.total_token_usage` (cumulative) | Best-effort |
 | Per-turn tokens, newer schema | rollout lines where `type == "token_usage_record"` → `payload.usage`, `turn_token_usage`, `thread_token_usage` | Best-effort |
@@ -115,6 +116,26 @@ alternated between 255,886,883 and 184,586,597 **inside the same minute**. Nothi
 series of these readings — their sum, their last, or their highest — is what a day cost. The map's
 daily figures therefore come from `account/usage/read`'s ~97 daily buckets and from nowhere else;
 Altim's own samples contribute that day's peak percentage only.
+
+**The backfill reaches back ~97 days and answers from the last reading when the gate is shut.** It
+makes the same gated `account/usage/read` call as the live meter, and on a real machine it almost
+never gets to: `monitoring.refresh_seconds` is 60 and the gate opens once a minute, so the
+scheduler's live read takes it within seconds of it opening, while the backfill asks from the
+five-minute housekeeping pass at an arbitrary instant. Measured on the verification machine,
+`maintenance.last_backfill.claude` was stamped and `maintenance.last_backfill.codex` did not exist
+at all after repeated passes — an empty answer is not recorded as a run, so it was retried for ever
+and the Codex row of the map would have stayed unknown permanently. A backfill that finds the gate
+shut therefore answers from the daily buckets the last successful call returned, bounded to
+`LiveSnapshotRetention` (5 minutes), which is the same age policy the live meter already applies to
+a remembered quota snapshot. It makes no extra call and starts no process.
+
+The grade is unchanged at **best-effort**: these are the provider's own figures, dated by the day
+the provider put on them and not by when Altim read them, and whole-day totals do not move
+meaningfully over five minutes. Nothing is interpolated or carried forward — a day the reply did
+not account for is absent from a remembered reading exactly as it is from a fresh one, and stays
+unknown rather than becoming a zero. Past the bound, before any call has succeeded, and whenever
+network permission is off (which forgets the vendor's figures outright), the backfill answers with
+nothing and the days stay unknown.
 
 ### Paths
 
@@ -282,7 +303,7 @@ Wired up today:
 | Provider | Reading |
 |---|---|
 | Claude Code | status-line state file (documented), headless `/usage` summary, transcript token history including subagents, `claude agents --json` sessions |
-| Codex | app-server `account/rateLimits/read` and `account/usage/read`, rollout tail fallback, read-only state database for recent threads, `codex doctor --json` for paths and auth mode |
+| Codex | app-server `account/rateLimits/read` and `account/usage/read`, day backfill with a five-minute bounded fallback to the last reading, rollout tail fallback, read-only state database for recent threads, `codex doctor --json` for paths and auth mode |
 
 Deliberately not read yet, and why:
 
