@@ -64,6 +64,27 @@ public interface IUsageHistoryService
     ValueTask<IReadOnlyList<UsageSample>> GetLatestBeforeAsync(string providerId, DateTimeOffset at,
                                                                CancellationToken ct);
 
+    /// <summary>Reads stored days for one provider, oldest first, both bounds inclusive.</summary>
+    /// <param name="providerId">The provider to read.</param>
+    /// <param name="from">First day, inclusive.</param>
+    /// <param name="to">Last day, inclusive.</param>
+    /// <param name="ct">Cancels the read.</param>
+    /// <returns>One entry per day that has a row. A day with no row is absent: it is unknown, not zero.</returns>
+    ValueTask<IReadOnlyList<UsageDay>> GetDaysAsync(string providerId, DateOnly from, DateOnly to,
+                                                    CancellationToken ct);
+
+    /// <summary>
+    /// Writes days, inserting or updating one row per provider and day.
+    /// </summary>
+    /// <param name="days">The days to write.</param>
+    /// <param name="ct">Cancels the write.</param>
+    /// <remarks>
+    /// An observed day is authoritative: a backfilled write never replaces one, while an observed
+    /// write replaces anything. This is what keeps a later backfill from rewriting history Altim
+    /// watched itself.
+    /// </remarks>
+    ValueTask UpsertDaysAsync(IReadOnlyList<UsageDay> days, CancellationToken ct);
+
     /// <summary>
     /// Deletes all recorded history. Offered to the user as an explicit action; there
     /// is no automatic path that calls it.

@@ -294,6 +294,17 @@ public static class DesignData
             ]);
         }
 
+        // No days yet: the designer draws unknown squares until the map view model lands and
+        // this can hand it a shaped year.
+        public ValueTask<IReadOnlyList<UsageDay>> GetDaysAsync(
+            string providerId,
+            DateOnly from,
+            DateOnly to,
+            CancellationToken ct) => ValueTask.FromResult<IReadOnlyList<UsageDay>>([]);
+
+        public ValueTask UpsertDaysAsync(IReadOnlyList<UsageDay> days, CancellationToken ct) =>
+            ValueTask.CompletedTask;
+
         public ValueTask ClearAsync(CancellationToken ct) => ValueTask.CompletedTask;
     }
 

@@ -167,6 +167,27 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
 
     /// <inheritdoc />
     /// <remarks>
+    /// Not implemented yet: the <c>usage_day</c> table arrives with migration 2 in Task 2 of
+    /// <c>docs/superpowers/plans/2026-09-17-usage-map.md</c>, which replaces this body. It
+    /// stands here only so the solution builds while the contract and its first implementation
+    /// land in separate commits; nothing calls it yet.
+    /// </remarks>
+    public ValueTask<IReadOnlyList<UsageDay>> GetDaysAsync(string providerId, DateOnly from,
+                                                           DateOnly to, CancellationToken ct)
+        => throw new NotImplementedException();
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Not implemented yet: the <c>usage_day</c> table arrives with migration 2 in Task 2 of
+    /// <c>docs/superpowers/plans/2026-09-17-usage-map.md</c>, which replaces this body. It
+    /// stands here only so the solution builds while the contract and its first implementation
+    /// land in separate commits; nothing calls it yet.
+    /// </remarks>
+    public ValueTask UpsertDaysAsync(IReadOnlyList<UsageDay> days, CancellationToken ct)
+        => throw new NotImplementedException();
+
+    /// <inheritdoc />
+    /// <remarks>
     /// Runs on the calling thread: one statement, behind the write gate. Reclaiming the
     /// space it frees is <see cref="UsageRetention.VacuumAsync"/>, which does not.
     /// </remarks>

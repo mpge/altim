@@ -70,6 +70,20 @@ internal sealed class NullUsageHistoryService : IUsageHistoryService
         ValueTask.FromResult<IReadOnlyList<UsageSample>>([]);
 
     /// <inheritdoc />
+    public ValueTask<IReadOnlyList<UsageDay>> GetDaysAsync(
+        string providerId, DateOnly from, DateOnly to, CancellationToken ct) =>
+        ValueTask.FromResult<IReadOnlyList<UsageDay>>([]);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Accepted and dropped, like every other write here. Every day therefore reads back as
+    /// absent, which the map renders as unknown rather than as a row of zeroes — the truthful
+    /// answer for a machine whose database would not open.
+    /// </remarks>
+    public ValueTask UpsertDaysAsync(IReadOnlyList<UsageDay> days, CancellationToken ct) =>
+        ValueTask.CompletedTask;
+
+    /// <inheritdoc />
     public ValueTask ClearAsync(CancellationToken ct) => ValueTask.CompletedTask;
 }
 

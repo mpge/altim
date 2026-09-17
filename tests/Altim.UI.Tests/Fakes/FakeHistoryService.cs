@@ -14,6 +14,7 @@ namespace Altim.UI.Tests.Fakes;
 internal sealed class FakeHistoryService : IUsageHistoryService
 {
     private readonly List<UsageSample> _samples = [];
+    private readonly Dictionary<(string Provider, DateOnly Day), UsageDay> _days = [];
     private TaskCompletionSource _queried = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>How many times the store has been emptied.</summary>
@@ -121,10 +122,58 @@ internal sealed class FakeHistoryService : IUsageHistoryService
     }
 
     /// <inheritdoc />
+    public ValueTask<IReadOnlyList<UsageDay>> GetDaysAsync(
+        string providerId,
+        DateOnly from,
+        DateOnly to,
+        CancellationToken ct)
+    {
+        if (Failure is { } failure)
+        {
+            return ValueTask.FromException<IReadOnlyList<UsageDay>>(failure);
+        }
+
+        List<UsageDay> kept = [];
+        foreach (UsageDay day in _days.Values)
+        {
+            if (string.Equals(day.ProviderId, providerId, StringComparison.Ordinal)
+                && day.Day >= from
+                && day.Day <= to)
+            {
+                kept.Add(day);
+            }
+        }
+
+        kept.Sort((left, right) => left.Day.CompareTo(right.Day));
+        return ValueTask.FromResult<IReadOnlyList<UsageDay>>(kept);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Keeps the precedence the interface states: an observed day replaces anything, a
+    /// backfilled one only fills a gap or replaces another backfilled day.
+    /// </remarks>
+    public ValueTask UpsertDaysAsync(IReadOnlyList<UsageDay> days, CancellationToken ct)
+    {
+        foreach (UsageDay day in days)
+        {
+            if (!_days.TryGetValue((day.ProviderId, day.Day), out UsageDay? stored)
+                || day.Source == UsageDaySource.Observed
+                || stored.Source == UsageDaySource.Backfilled)
+            {
+                _days[(day.ProviderId, day.Day)] = day;
+            }
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public ValueTask ClearAsync(CancellationToken ct)
     {
         Clears++;
         _samples.Clear();
+        _days.Clear();
         return ValueTask.CompletedTask;
     }
 }

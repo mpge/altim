@@ -73,6 +73,7 @@ public sealed class UsageHistoryContractTests
     private sealed class InMemoryHistory(params UsageSample[] samples) : IUsageHistoryService
     {
         private readonly List<UsageSample> _samples = [.. samples];
+        private readonly Dictionary<(string Provider, DateOnly Day), UsageDay> _days = [];
 
         public ValueTask RecordAsync(ProviderUsage usage, CancellationToken ct)
         {
@@ -108,9 +109,34 @@ public sealed class UsageHistoryContractTests
                             .OrderBy(group => group.Key, StringComparer.Ordinal)
                             .Select(group => group.MaxBy(s => s.CapturedAt)!)]);
 
+        public ValueTask<IReadOnlyList<UsageDay>> GetDaysAsync(
+            string providerId, DateOnly from, DateOnly to, CancellationToken ct)
+            => ValueTask.FromResult<IReadOnlyList<UsageDay>>(
+                [.. _days.Values.Where(d => d.ProviderId == providerId
+                                            && d.Day >= from && d.Day <= to)
+                                .OrderBy(d => d.Day)]);
+
+        public ValueTask UpsertDaysAsync(IReadOnlyList<UsageDay> days, CancellationToken ct)
+        {
+            foreach (UsageDay day in days)
+            {
+                // Observed beats backfilled: a backfill fills gaps and never rewrites a day
+                // Altim watched for itself.
+                if (!_days.TryGetValue((day.ProviderId, day.Day), out UsageDay? stored)
+                    || day.Source == UsageDaySource.Observed
+                    || stored.Source == UsageDaySource.Backfilled)
+                {
+                    _days[(day.ProviderId, day.Day)] = day;
+                }
+            }
+
+            return ValueTask.CompletedTask;
+        }
+
         public ValueTask ClearAsync(CancellationToken ct)
         {
             _samples.Clear();
+            _days.Clear();
             return ValueTask.CompletedTask;
         }
     }
