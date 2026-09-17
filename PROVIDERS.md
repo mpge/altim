@@ -107,6 +107,15 @@ The local session store here is **28.3 GB across 2,518 files**. Altim never full
   former double-counts badly.
 - Rollouts may be `.zst` compressed (unverified in practice); unreadable files are skipped, not guessed at.
 
+**The live token figure is not a per-day amount, and cannot be made into one.** It is a sum over a
+bounded window of the most recently active sessions, each contributing that session's own cumulative
+total. Which sessions count as "most recent" changes between one read and the next, so the number
+moves in both directions for reasons that have nothing to do with usage: against the live store it
+alternated between 255,886,883 and 184,586,597 **inside the same minute**. Nothing derived from a
+series of these readings — their sum, their last, or their highest — is what a day cost. The map's
+daily figures therefore come from `account/usage/read`'s ~97 daily buckets and from nowhere else;
+Altim's own samples contribute that day's peak percentage only.
+
 ### Paths
 
 | Item | Windows | macOS / Linux |
@@ -215,6 +224,12 @@ versions; Altim treats every field as optional and degrades to unavailable rathe
 
 A full cold scan of 1.30 GB across 2,080 files took 6.7 seconds in plain Python; Altim scans
 incrementally by modification time, so steady-state cost is negligible.
+
+**The live token figure is a running total, so it is not a day either.** The provider merges every
+transcript the incremental scanner has read into one cumulative bucket and publishes that, with no
+boundary at midnight and no way to subtract the part belonging to an earlier day. Per-day figures
+come instead from the same pass bucketed by each message's own timestamp, bounded by the ~30-day
+transcript retention; Altim's own samples contribute that day's peak percentage only.
 
 `stats-cache.json` looks authoritative and is not: on the test machine it was seven months stale
 with every cost at zero, and its units have changed across versions. Altim reads it only behind a

@@ -5,10 +5,15 @@ namespace Altim.Storage.Tests;
 
 /// <summary>
 /// The rollup against a real file: Altim's own samples become one observed row per
-/// provider per <em>local</em> day, recomputing a day rewrites it rather than duplicating
-/// it, a day that reported nothing stays unknown, and a range with nothing to write takes
-/// no writer at all.
+/// provider per <em>local</em> day carrying that day's <em>peak</em> and no token figure,
+/// recomputing a day rewrites it rather than duplicating it, a day that reported nothing
+/// stays unknown, and a range with nothing to write takes no writer at all.
 /// </summary>
+/// <remarks>
+/// A sample's token totals are a running total and never a per-day amount, so no row the
+/// rollup writes carries one and no row it writes may disturb the per-day figures a backfill
+/// put there. See <see cref="Altim.Core.Usage.UsageDayRollup"/> for why.
+/// </remarks>
 public sealed class UsageDayRollupIntegrationTests
 {
     private static readonly DateOnly First = new(2026, 9, 16);
@@ -17,7 +22,7 @@ public sealed class UsageDayRollupIntegrationTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task SamplesAcrossTwoDaysBecomeOneRowEachTakingTheDaysHighestReading()
+    public async Task SamplesAcrossTwoDaysBecomeOneRowEachCarryingThePeakAndNoTokens()
     {
         using var temp = new TempDatabase();
         var history = new SqliteUsageHistoryService(temp.Open());
@@ -25,8 +30,9 @@ public sealed class UsageDayRollupIntegrationTests
         await Record(history, First, hour: 9, input: 100, percent: 10);
         await Record(history, First, hour: 18, input: 250, percent: 30);
 
-        // The second day's counter falls back within the day, which the Codex reader can
-        // legitimately do: the day is still worth its highest reading, not its last.
+        // The second day's counter falls back within the day, which the Codex reader does
+        // routinely: its figure is summed over whichever sessions were most recent at the
+        // time. Neither reading is this day's spend, and neither reaches the row.
         await Record(history, Second, hour: 9, input: 900, percent: 80);
         await Record(history, Second, hour: 18, input: 400, percent: 20);
 
@@ -38,11 +44,10 @@ public sealed class UsageDayRollupIntegrationTests
 
         Assert.Equal(2, days.Count);
         Assert.Equal(First, days[0].Day);
-        Assert.Equal(250, days[0].Tokens!.Input);
         Assert.Equal(30, days[0].PeakPercent);
         Assert.Equal(Second, days[1].Day);
-        Assert.Equal(900, days[1].Tokens!.Input);
         Assert.Equal(80, days[1].PeakPercent);
+        Assert.All(days, day => Assert.Null(day.Tokens));
         Assert.All(days, day => Assert.Equal(UsageDaySource.Observed, day.Source));
     }
 
@@ -89,7 +94,7 @@ public sealed class UsageDayRollupIntegrationTests
         Assert.Equal(1L, temp.CountRows("usage_day"));
 
         UsageDay day = Assert.Single(await history.GetDaysAsync("claude", Second, Second, Ct));
-        Assert.Equal(400, day.Tokens!.Input);
+        Assert.Null(day.Tokens);
         Assert.Equal(55, day.PeakPercent);
         Assert.Equal(UsageDaySource.Observed, day.Source);
     }
@@ -164,10 +169,10 @@ public sealed class UsageDayRollupIntegrationTests
         UsageDay claude = Assert.Single(await history.GetDaysAsync("claude", Second, Second, Ct));
         UsageDay codex = Assert.Single(await history.GetDaysAsync("codex", Second, Second, Ct));
 
-        Assert.Equal(250, claude.Tokens!.Input);
         Assert.Equal(30, claude.PeakPercent);
-        Assert.Equal(9_000, codex.Tokens!.Input);
         Assert.Equal(95, codex.PeakPercent);
+        Assert.Null(claude.Tokens);
+        Assert.Null(codex.Tokens);
     }
 
     /// <summary>
@@ -247,14 +252,14 @@ public sealed class UsageDayRollupIntegrationTests
         var history = new SqliteUsageHistoryService(temp.Open(), new FixedZoneClock(zone));
 
         // 16th in UTC, 17th at 06:00 where the user is.
-        await RecordAt(history, new DateTimeOffset(2026, 9, 16, 20, 0, 0, TimeSpan.Zero), input: 100);
+        await RecordAt(history, new DateTimeOffset(2026, 9, 16, 20, 0, 0, TimeSpan.Zero), percent: 10);
 
         // 17th in UTC, and the last minute of the 17th where the user is.
-        await RecordAt(history, new DateTimeOffset(2026, 9, 17, 13, 59, 0, TimeSpan.Zero), input: 250);
+        await RecordAt(history, new DateTimeOffset(2026, 9, 17, 13, 59, 0, TimeSpan.Zero), percent: 25);
 
         // Still the 17th in UTC, but already the 18th where the user is, so outside the
         // range being rolled up and in nobody's row.
-        await RecordAt(history, new DateTimeOffset(2026, 9, 17, 14, 0, 0, TimeSpan.Zero), input: 9_999);
+        await RecordAt(history, new DateTimeOffset(2026, 9, 17, 14, 0, 0, TimeSpan.Zero), percent: 99);
 
         int written = await history.RollUpDaysAsync(First, Second, Ct);
 
@@ -262,15 +267,20 @@ public sealed class UsageDayRollupIntegrationTests
 
         UsageDay day = Assert.Single(await history.GetDaysAsync("claude", First, Second, Ct));
         Assert.Equal(Second, day.Day);
-        Assert.Equal(250, day.Tokens!.Input);
+
+        // The first two readings are in the row and the third is not: grouping on the UTC
+        // date would split the first off into the 16th and pull the third in as the 17th.
+        Assert.Equal(25, day.PeakPercent);
     }
 
     /// <summary>
-    /// The rollup is observed, and observed outranks backfilled, so a day a backfill guessed
-    /// at is put right the moment Altim's own samples can speak for it.
+    /// The live defect, end to end. The maintenance pass rolls the day up minutes after the
+    /// backfill wrote it, and the rollup has no token figure to offer — so the backfill's
+    /// per-day figure, its source and its row all stay exactly where they are, and the peak
+    /// the samples measured is added beside them.
     /// </summary>
     [Fact]
-    public async Task TheRollupReplacesABackfilledDay()
+    public async Task TheRollupAddsAPeakToABackfilledDayWithoutTouchingItsTokens()
     {
         using var temp = new TempDatabase();
         var history = new SqliteUsageHistoryService(temp.Open());
@@ -289,8 +299,9 @@ public sealed class UsageDayRollupIntegrationTests
         Assert.Equal(1L, temp.CountRows("usage_day"));
 
         UsageDay day = Assert.Single(await history.GetDaysAsync("claude", Second, Second, Ct));
-        Assert.Equal(250, day.Tokens!.Input);
-        Assert.Equal(UsageDaySource.Observed, day.Source);
+        Assert.Equal(999_999, day.Tokens!.Input);
+        Assert.Equal(30, day.PeakPercent);
+        Assert.Equal(UsageDaySource.Backfilled, day.Source);
     }
 
     /// <summary>
@@ -347,18 +358,17 @@ public sealed class UsageDayRollupIntegrationTests
 
         UsageDay day = Assert.Single(await history.GetDaysAsync("claude", Second, Second, Ct));
 
-        Assert.Equal(1_500, day.Tokens!.Input);
         Assert.Equal(90, day.PeakPercent);
         Assert.Equal(clock.GetUtcNow(), day.UpdatedAt);
     }
 
     /// <summary>
-    /// A figure appearing where there was none is a change. The day's first reading reported
-    /// tokens and no percentage at all, which is the ordinary shape of a morning before any
-    /// window has been touched; the afternoon's reports one. Nothing else moves, so the whole
-    /// of "has this day changed" rests on comparing a null against a number — and a
-    /// comparison that is not null-safe answers neither yes nor no, which reads as no and
-    /// freezes the day's peak at unknown for good.
+    /// A figure appearing where there was none is a change. The stored row came from a
+    /// backfill that knew the day's tokens and nothing about its windows, which is the
+    /// ordinary shape of a backfilled day; the rollup then measures a peak. The tokens do not
+    /// move and the rollup offers none, so the whole of "has this day changed" rests on
+    /// comparing a null against a number — and a comparison that is not null-safe answers
+    /// neither yes nor no, which reads as no and freezes the day's peak at unknown for good.
     /// </summary>
     [Fact]
     public async Task ADayWhosePeakAppearsWhereThereWasNoneIsRewritten()
@@ -366,13 +376,13 @@ public sealed class UsageDayRollupIntegrationTests
         using var temp = new TempDatabase();
         var history = new SqliteUsageHistoryService(temp.Open());
 
-        await Record(history, Second, hour: 9, input: 250, percent: null);
-        _ = await history.RollUpDaysAsync(Second, Second, Ct);
+        await history.UpsertDaysAsync(
+            [new UsageDay("claude", Second, new TokenTotals(250, null, null, null),
+                          PeakPercent: null, UsageDaySource.Backfilled, DateTimeOffset.UnixEpoch)],
+            Ct);
 
         Assert.Null(Assert.Single(await history.GetDaysAsync("claude", Second, Second, Ct)).PeakPercent);
 
-        // Same tokens, and now a percentage. The token columns are all equal, and three of
-        // the four are null on both sides.
         await Record(history, Second, hour: 18, input: 250, percent: 40);
         _ = await history.RollUpDaysAsync(Second, Second, Ct);
 
@@ -383,12 +393,12 @@ public sealed class UsageDayRollupIntegrationTests
     }
 
     /// <summary>
-    /// A backfilled day that guessed the figures exactly right must still be promoted to
-    /// observed, because observed is what keeps the next backfill from rewriting it.
-    /// "Nothing moved" is about the numbers, never about where they came from.
+    /// <c>source</c> says where the day's <em>token figure</em> came from, and the rollup
+    /// brings none, so it never relabels a row. Saying "observed" over a backfilled figure
+    /// would tell the tooltip Altim watched a day it only read about.
     /// </summary>
     [Fact]
-    public async Task ADayWhoseFiguresMatchABackfillIsStillPromotedToObserved()
+    public async Task ARollupNeverRelabelsABackfilledDayAsObserved()
     {
         using var temp = new TempDatabase();
         var history = new SqliteUsageHistoryService(temp.Open());
@@ -404,7 +414,8 @@ public sealed class UsageDayRollupIntegrationTests
 
         UsageDay day = Assert.Single(await history.GetDaysAsync("claude", Second, Second, Ct));
 
-        Assert.Equal(UsageDaySource.Observed, day.Source);
+        Assert.Equal(UsageDaySource.Backfilled, day.Source);
+        Assert.Equal(250, day.Tokens!.Input);
     }
 
     private static async Task SeedTwoDaysAsync(SqliteUsageHistoryService history)
@@ -422,10 +433,9 @@ public sealed class UsageDayRollupIntegrationTests
                               new TokenTotals(input, null, null, null), LocalAt(day, hour), null),
             Ct);
 
-    private static ValueTask RecordAt(SqliteUsageHistoryService history, DateTimeOffset at, long input)
+    private static ValueTask RecordAt(SqliteUsageHistoryService history, DateTimeOffset at, double percent)
         => history.RecordAsync(
-            new ProviderUsage("claude", ProviderStatus.Idle, [Metric(percent: null)],
-                              new TokenTotals(input, null, null, null), at, null),
+            new ProviderUsage("claude", ProviderStatus.Idle, [Metric(percent)], null, at, null),
             Ct);
 
     private static UsageMetric Metric(double? percent)

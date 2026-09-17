@@ -48,6 +48,21 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
     private const string BackfilledSource = "backfilled";
 
     /// <summary>
+    /// Whether the day being written raises the stored peak. Written once and used twice —
+    /// in the conflict clause's assignment and in its <c>WHERE</c> — because the two have to
+    /// agree exactly: a condition that writes and a condition that decides the row changed
+    /// must be the same condition, or the stamp moves for a write that moved nothing.
+    /// </summary>
+    /// <remarks>
+    /// A peak arriving where there was none is a rise. <c>NULL &gt; anything</c> and
+    /// <c>anything &gt; NULL</c> are both NULL, which a <c>WHERE</c> reads as false, so the
+    /// null case is spelled out rather than left to the comparison.
+    /// </remarks>
+    private const string PeakRises =
+        "(excluded.peak_percent IS NOT NULL "
+        + "AND (usage_day.peak_percent IS NULL OR excluded.peak_percent > usage_day.peak_percent))";
+
+    /// <summary>
     /// A day, for widening a read window past the furthest any timezone can be from UTC.
     /// Not a unit of local time: a local day that crosses a DST boundary is not this long,
     /// which is exactly why the day a sample falls on is decided by a calendar and not by
@@ -485,60 +500,87 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
         => new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).ToUnixTimeSeconds();
 
     /// <summary>
-    /// Inserts a day, or replaces the stored one when precedence allows it and it would
-    /// actually change something.
+    /// Inserts a day, or merges into the stored one field by field where the incoming row
+    /// has something to say and it would actually change something.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The precedence rule is the first half of the <c>WHERE</c> on the conflict clause,
-    /// and it is one statement on purpose: read-then-write would leave a window in which a
-    /// backfill could still land on top of a day Altim had just observed. Observed beats
-    /// backfilled, observed replaces observed, and backfilled replaces only backfilled, so
-    /// a later backfill can fill a gap but can never rewrite history Altim watched.
+    /// <b>The row has two writers that never overlap, and neither owns the whole of it.</b>
+    /// The backfill owns the four token columns and <c>source</c>, because only a per-day
+    /// source can say what a day spent; the sample rollup owns <c>peak_percent</c>, because
+    /// only Altim's own readings measured the live windows. So a write that carries no
+    /// tokens leaves the tokens and the source exactly as they were, and a write that
+    /// carries no peak leaves the peak alone.
     /// </para>
     /// <para>
-    /// The second half is what keeps a quiet machine quiet. The maintenance pass rolls
-    /// yesterday and today up on every tick, so a computer left on overnight offers the
-    /// same unchanged day over and over. Accepting each one would move SQLite's change
-    /// counter, and that counter is exactly what
+    /// The rule this replaced compared whole rows — observed beat backfilled — and it is
+    /// retired because it was the mechanism of a real defect. The rollup, which carries no
+    /// tokens at all, ranked above the backfill, so it wrote emptiness over per-day figures
+    /// the provider had just supplied. Merging per field removes the ranking entirely:
+    /// there is nothing for the two writers to compete over.
+    /// </para>
+    /// <para>
+    /// <b>A peak may only ever rise.</b> It is the highest the day reached, so a later pass
+    /// that measures the window quieter is describing a moment, not the day, and must not
+    /// lower it. A peak arriving where there was none counts as a rise, which is why the
+    /// test is not a bare <c>&gt;</c>: comparing anything with NULL answers neither yes nor
+    /// no, and that reads as no.
+    /// </para>
+    /// <para>
+    /// The last clause of the <c>WHERE</c> is what keeps a quiet machine quiet. The
+    /// maintenance pass rolls yesterday and today up on every tick, so a computer left on
+    /// overnight offers the same unchanged day over and over. Accepting each one would move
+    /// SQLite's change counter, and that counter is exactly what
     /// <see cref="AltimDatabase.CheckpointIfIdleAsync"/> reads to decide the database has
     /// been written to: the write-ahead log would then never be emptied again, by
-    /// construction, which is the trap <c>ReleaseWriter</c> documents from the other end.
-    /// A row whose figures and source are all unchanged is left alone, stamp included, so
+    /// construction, which is the trap <c>ReleaseWriter</c> documents from the other end. A
+    /// row nothing in this write would move is left alone, stamp included, so
     /// <c>updated_at</c> means "when this day last moved" rather than "when something last
     /// asked about it".
     /// </para>
     /// <para>
-    /// <c>IS NOT</c> rather than <c>&lt;&gt;</c> throughout, because every one of these
-    /// columns is nullable and an unreported component must compare equal to an unreported
-    /// component rather than to nothing at all. The source is compared too: a backfill that
-    /// guessed a day exactly right must still be promoted to observed, or the next backfill
-    /// would be free to rewrite it.
+    /// <c>IS NOT</c> rather than <c>&lt;&gt;</c> on the token columns and the source,
+    /// because every one of them is nullable and an unreported component must compare equal
+    /// to an unreported component rather than to nothing at all. A figure appearing where
+    /// there was none is a change, and <c>&lt;&gt;</c> would report it as no change at all.
     /// </para>
     /// </remarks>
     private static async ValueTask UpsertDayAsync(SqliteConnection connection, UsageDay day,
                                                   CancellationToken ct)
     {
+        // Whether this write has any standing over the token columns at all. Asked once here
+        // rather than four times in SQL, and it is "any component reported", not "all four":
+        // a source that reports input and nothing else still knows the day.
+        bool carriesTokens = day.Tokens is { } totals
+            && (totals.Input is not null || totals.Output is not null
+                || totals.CacheRead is not null || totals.CacheWrite is not null);
+
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"""
             INSERT INTO usage_day ({DayColumns})
             VALUES ($provider, $day, $input, $output, $cacheRead, $cacheWrite, $peak,
                     $source, $updatedAt)
             ON CONFLICT (provider_id, day) DO UPDATE SET
-              input_tokens = excluded.input_tokens,
-              output_tokens = excluded.output_tokens,
-              cache_read_tokens = excluded.cache_read_tokens,
-              cache_write_tokens = excluded.cache_write_tokens,
-              peak_percent = excluded.peak_percent,
-              source = excluded.source,
-              updated_at = excluded.updated_at
-            WHERE (excluded.source = '{ObservedSource}' OR usage_day.source = '{BackfilledSource}')
-              AND (usage_day.input_tokens       IS NOT excluded.input_tokens
-                OR usage_day.output_tokens      IS NOT excluded.output_tokens
-                OR usage_day.cache_read_tokens  IS NOT excluded.cache_read_tokens
-                OR usage_day.cache_write_tokens IS NOT excluded.cache_write_tokens
-                OR usage_day.peak_percent       IS NOT excluded.peak_percent
-                OR usage_day.source             IS NOT excluded.source)
+              input_tokens       = CASE WHEN $carriesTokens THEN excluded.input_tokens
+                                        ELSE usage_day.input_tokens END,
+              output_tokens      = CASE WHEN $carriesTokens THEN excluded.output_tokens
+                                        ELSE usage_day.output_tokens END,
+              cache_read_tokens  = CASE WHEN $carriesTokens THEN excluded.cache_read_tokens
+                                        ELSE usage_day.cache_read_tokens END,
+              cache_write_tokens = CASE WHEN $carriesTokens THEN excluded.cache_write_tokens
+                                        ELSE usage_day.cache_write_tokens END,
+              source             = CASE WHEN $carriesTokens THEN excluded.source
+                                        ELSE usage_day.source END,
+              peak_percent       = CASE WHEN {PeakRises} THEN excluded.peak_percent
+                                        ELSE usage_day.peak_percent END,
+              updated_at         = excluded.updated_at
+            WHERE ($carriesTokens
+                   AND (usage_day.input_tokens       IS NOT excluded.input_tokens
+                     OR usage_day.output_tokens      IS NOT excluded.output_tokens
+                     OR usage_day.cache_read_tokens  IS NOT excluded.cache_read_tokens
+                     OR usage_day.cache_write_tokens IS NOT excluded.cache_write_tokens
+                     OR usage_day.source             IS NOT excluded.source))
+               OR {PeakRises}
             """;
         command.Parameters.AddWithValue("$provider", day.ProviderId);
         command.Parameters.AddWithValue("$day", FormatDay(day.Day));
@@ -549,6 +591,7 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
         AddNullable(command, "$peak", day.PeakPercent);
         command.Parameters.AddWithValue("$source", SourceName(day.Source));
         command.Parameters.AddWithValue("$updatedAt", day.UpdatedAt.ToUnixTimeSeconds());
+        command.Parameters.AddWithValue("$carriesTokens", carriesTokens ? 1 : 0);
 
         _ = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }

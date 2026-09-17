@@ -79,15 +79,26 @@ public interface IUsageHistoryService
     /// <param name="days">The days to write.</param>
     /// <param name="ct">Cancels the write.</param>
     /// <remarks>
-    /// An observed day is authoritative: a backfilled write never replaces one, while an observed
-    /// write replaces anything. This is what keeps a later backfill from rewriting history Altim
-    /// watched itself.
+    /// <para>
+    /// <b>A write merges into the stored row field by field; it does not replace it.</b> Two
+    /// writers share a row and neither owns the whole of it. The four token components and
+    /// <see cref="UsageDay.Source"/> belong to whichever write actually carries tokens —
+    /// only a per-day source knows what a day spent — so a write carrying none leaves both
+    /// alone. <see cref="UsageDay.PeakPercent"/> belongs to the write that measured the day
+    /// highest: a peak may rise, may appear where there was none, and may never fall.
+    /// </para>
+    /// <para>
+    /// There is deliberately no ranking between observed and backfilled rows. The rule that
+    /// ranked them let a rollup, which has no token figure to offer, overwrite a correct
+    /// per-day figure with nothing.
+    /// </para>
     /// </remarks>
     ValueTask UpsertDaysAsync(IReadOnlyList<UsageDay> days, CancellationToken ct);
 
     /// <summary>
     /// Rolls the samples this service already holds up into one observed day row per
-    /// provider per local calendar day, across a range with both bounds inclusive.
+    /// provider per local calendar day, across a range with both bounds inclusive. Each row
+    /// carries that day's <b>peak percentage and no token figure</b>.
     /// </summary>
     /// <param name="from">First local day to roll up, inclusive.</param>
     /// <param name="to">
@@ -97,18 +108,23 @@ public interface IUsageHistoryService
     /// </param>
     /// <param name="ct">Cancels the read and the write.</param>
     /// <returns>
-    /// How many day rows were written. A day whose samples reported nothing at all rolls
-    /// up to nothing, is not written, and is not counted: it stays unknown rather than
-    /// becoming an empty observed row, which would render exactly like unknown while
-    /// outranking a backfill that did know what happened.
+    /// How many day rows were written. A day whose samples reported no usable percentage
+    /// rolls up to nothing, is not written, and is not counted: it stays unknown rather than
+    /// becoming a row that says only that Altim was running.
     /// </returns>
     /// <remarks>
     /// <para>
-    /// Every row it writes is <see cref="UsageDaySource.Observed"/> and each figure is the
-    /// highest any of that day's readings reported, so rolling a day up again produces the
-    /// same row or a higher one, never a lower one and never a second row. That is what
-    /// makes it safe to include <em>today</em>, a day still being lived, and to run the
-    /// whole thing over and over from a housekeeping pass.
+    /// <b>No row it writes carries a token figure.</b> A reading's token totals are a running
+    /// total and never a per-day amount, so there is no arithmetic over them that yields a
+    /// day; the day's tokens come only from a per-day source, through the backfill. See
+    /// <see cref="Usage.UsageDayRollup"/> for the two provider mechanisms behind that.
+    /// </para>
+    /// <para>
+    /// Every row it writes is <see cref="UsageDaySource.Observed"/> and its peak is the
+    /// highest percentage any of that day's readings reported, so rolling a day up again
+    /// produces the same row or a higher peak, never a lower one and never a second row.
+    /// That is what makes it safe to include <em>today</em>, a day still being lived, and to
+    /// run the whole thing over and over from a housekeeping pass.
     /// </para>
     /// <para>
     /// This is on the interface rather than on the one implementation that does the work,

@@ -24,10 +24,11 @@ namespace Altim.UI.Controls;
 /// volume and nothing else.
 /// </param>
 /// <param name="IsKnown">
-/// Whether anything at all is known about the day. This, and not <paramref name="Tokens"/>,
-/// decides whether the map draws an outline or a fill. A day Altim was not watching is
-/// unknown; a day it was watching that reported no volume is known, and the two are
-/// different squares.
+/// Whether the day's volume is known. This, and not <paramref name="Tokens"/>, decides
+/// whether the map draws an outline or a fill: the two are separate so that a day known to
+/// have used nothing is a fill at the foot of the ramp while a day whose volume nobody can
+/// name is an outline, and a zero and an unknown are never the same square. Whoever builds
+/// the row decides which a day is; the control does as it is told.
 /// </param>
 /// <param name="Detail">
 /// The words that go with the square: the tooltip a pointer brings up, and the help text an
@@ -70,18 +71,20 @@ public readonly record struct UsageMapHit(int RowIndex, UsageMapCell Cell, Rect 
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Unknown and zero are different squares, and that is not negotiable.</b> A day nothing
-/// is known about is a hairline outline with no fill: before install, outside a provider's
-/// backfill reach, or a provider that was never installed. A day that is known to have used
-/// nothing is the faintest fill in the ramp. Painting the first as the second is the
-/// application claiming it watched a day it did not, and it is the one rendering detail the
+/// <b>Unknown and zero are different squares, and that is not negotiable.</b> A day whose
+/// volume nobody can name is a hairline outline with no fill: before install, outside a
+/// provider's backfill reach, a provider that was never installed, or a day Altim watched
+/// without ever learning what it cost. A day that is known to have used nothing is the
+/// faintest fill in the ramp. Painting the first as the second is the application claiming
+/// it knows a day cost nothing when it does not, and it is the one rendering detail the
 /// design says may not be traded for a tidier grid. <see cref="UsageMapCell.IsKnown"/> is
 /// the only authority on which of the two a square is.
 /// </para>
 /// <para>
-/// A known day that reported no token figure is therefore still a fill, at level zero. The
-/// outline means "we were not watching"; a day we were watching that has no volume to
-/// report is the faintest square, which is exactly what level zero says.
+/// A cell marked known is therefore a fill even when its token figure is null — that is the
+/// level-zero square, and the control never second-guesses the flag. Deciding which days
+/// qualify belongs to whoever builds the row, because only they know whether a null means
+/// "nothing was used" or "nobody could say".
 /// </para>
 /// <para>
 /// The ramp is five steps of <c>TextPrimary</c> opacity, monochrome in both variants. A

@@ -83,6 +83,55 @@ public sealed class MigrationTests
         Assert.Equal(1L, temp.CountRows("schema_version"));
     }
 
+    /// <summary>
+    /// The rows written before the rollup stopped inventing token figures hold running
+    /// totals — a provider's cumulative counter as it stood at some moment of the day — and
+    /// the map would go on drawing them as that day's volume forever. Rung 3 empties the
+    /// token columns of every observed row, leaving the peak, which was always a real fact
+    /// about the day.
+    /// </summary>
+    [Fact]
+    public void UpgradingClearsTheTokenFiguresTheRollupShouldNeverHaveWritten()
+    {
+        using var temp = new TempDatabase();
+
+        using (SqliteConnection second = OpenRaw(temp.FilePath))
+        {
+            Assert.Equal(2, Migrations.Apply(second, [Migrations.Ladder[0], Migrations.Ladder[1]]));
+        }
+
+        temp.Execute("""
+            INSERT INTO usage_day (provider_id, day, input_tokens, output_tokens,
+                                   cache_read_tokens, cache_write_tokens, peak_percent,
+                                   source, updated_at)
+            VALUES ('claude', '2026-09-16', 11, 22, 33, 44, 62.5, 'observed', 1763000000),
+                   ('codex',  '2026-09-16', 55, 66, 77, 88, 41.0, 'backfilled', 1763000000);
+            """);
+
+        AltimDatabase upgraded = temp.Open();
+
+        Assert.Equal(SqliteSchema.CurrentVersion, upgraded.SchemaVersion);
+
+        // The observed row keeps its day, its peak and its source, and loses only the four
+        // figures that were never per-day amounts.
+        Assert.Equal(0L, temp.ScalarInt64("""
+            SELECT count(*) FROM usage_day
+            WHERE source = 'observed'
+              AND (input_tokens IS NOT NULL OR output_tokens IS NOT NULL
+                OR cache_read_tokens IS NOT NULL OR cache_write_tokens IS NOT NULL)
+            """));
+        Assert.Equal(62.5, temp.ScalarDouble(
+            "SELECT peak_percent FROM usage_day WHERE provider_id = 'claude'"));
+
+        // A backfilled row's figures came from a per-day source and are untouched.
+        Assert.Equal(55L, temp.ScalarInt64(
+            "SELECT input_tokens FROM usage_day WHERE provider_id = 'codex'"));
+        Assert.Equal(88L, temp.ScalarInt64(
+            "SELECT cache_write_tokens FROM usage_day WHERE provider_id = 'codex'"));
+
+        Assert.Equal(2L, temp.CountRows("usage_day"));
+    }
+
     [Fact]
     public void TheLatestMigrationMatchesTheDeclaredSchemaVersion()
         => Assert.Equal(SqliteSchema.CurrentVersion, Migrations.LatestVersion);

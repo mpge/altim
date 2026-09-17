@@ -5,10 +5,10 @@ using Xunit;
 namespace Altim.Core.Tests;
 
 /// <summary>
-/// Rolling a day up out of the readings Altim took. The rule that costs money when it is got
-/// wrong: a reading's token totals are cumulative, so the day is the highest reading of the
-/// day, never the sum of them — and never the last one either, because the counter can fall
-/// within a day when an old session drops out of a provider's bounded window.
+/// Rolling a day up out of the readings Altim took. The rule that cost a database full of
+/// wrong rows when it was got wrong: a reading's token totals are a running total, never a
+/// per-day amount, so the rollup keeps no token figure at all and speaks only for the day's
+/// peak percentage.
 /// </summary>
 public sealed class UsageDayRollupTests
 {
@@ -18,70 +18,33 @@ public sealed class UsageDayRollupTests
         new("claude", key, new DateTimeOffset(2026, 9, 17, hour, 0, 0, TimeSpan.Zero),
             percent, null, null, tokens is { } t ? new TokenTotals(t, null, null, null) : null);
 
-    private static UsageSample Totals(int hour, TokenTotals? totals, string key = "five_hour") =>
+    private static UsageSample Totals(int hour, TokenTotals? totals, double? percent = 10d,
+                                      string key = "five_hour") =>
         new("claude", key, new DateTimeOffset(2026, 9, 17, hour, 0, 0, TimeSpan.Zero),
-            null, null, null, totals);
+            percent, null, null, totals);
 
     [Fact]
-    public void TokensComeFromTheHighestReadingBecauseTheyAreCumulative()
+    public void ADayCarriesNoTokenFigureHoweverMuchItsReadingsReported()
     {
+        // Every reading here reports tokens, and the day still has none: the readings are
+        // running totals that happened to be seen today, and no arithmetic over them
+        // produces the tokens spent today. Only a per-day source can say that.
         UsageDay day = UsageDayRollup.FromSamples("claude", Day,
             [Sample(9, 100, 10), Sample(12, 250, 20), Sample(18, 400, 30)],
             DateTimeOffset.UnixEpoch)!;
 
-        Assert.Equal(400, day.Tokens!.Input);
+        Assert.Null(day.Tokens);
+        Assert.Null(day.TotalTokens);
     }
 
     [Fact]
-    public void ACounterThatFallsWithinTheDayStillReportsTheDaysHighest()
-    {
-        // A later reading can legitimately report less: the provider's figure is summed over
-        // a bounded window of its most recent sessions, so an old session dropping out of
-        // that window makes the number go backwards. Taking the last reading would report
-        // 100 and silently understate a day Altim watched reach 400.
-        UsageDay day = UsageDayRollup.FromSamples("claude", Day,
-            [Sample(9, 400, 10), Sample(12, 250, 20), Sample(18, 100, 30)],
-            DateTimeOffset.UnixEpoch)!;
-
-        Assert.Equal(400, day.Tokens!.Input);
-    }
-
-    [Fact]
-    public void TheDayIsTheHighestReadingAndNeverTheSumOfThem()
-    {
-        // Three readings of a cumulative counter. The day used 30 tokens; summing the
-        // readings would report 60 and would grow again with every extra poll.
-        UsageDay day = UsageDayRollup.FromSamples("claude", Day,
-            [Sample(9, 10, null), Sample(12, 20, null), Sample(18, 30, null)],
-            DateTimeOffset.UnixEpoch)!;
-
-        Assert.Equal(30, day.Tokens!.Input);
-        Assert.Equal(30, day.TotalTokens);
-    }
-
-    [Fact]
-    public void AReadingThatReportedNoFiguresCannotLowerTheDay()
+    public void EveryComponentIsDroppedAndNotJustTheOnesThatMoved()
     {
         UsageDay day = UsageDayRollup.FromSamples("claude", Day,
-            [Sample(9, 400, 10), Totals(18, new TokenTotals(null, null, null, null))],
+            [Totals(9, new TokenTotals(400, 10, 7, 3)), Totals(18, new TokenTotals(100, 50, 9, 1))],
             DateTimeOffset.UnixEpoch)!;
 
-        Assert.Equal(400, day.Tokens!.Input);
-    }
-
-    [Fact]
-    public void EachComponentTakesItsOwnHighestReading()
-    {
-        // The components are separate counters and are kept separately: the row is a
-        // composite of the most of each that Altim saw, not a snapshot of one instant.
-        UsageDay day = UsageDayRollup.FromSamples("claude", Day,
-            [Totals(9, new TokenTotals(400, 10, null, null)),
-             Totals(18, new TokenTotals(100, 50, null, null))],
-            DateTimeOffset.UnixEpoch)!;
-
-        Assert.Equal(400, day.Tokens!.Input);
-        Assert.Equal(50, day.Tokens.Output);
-        Assert.Null(day.Tokens.CacheRead);
+        Assert.Null(day.Tokens);
     }
 
     [Fact]
@@ -95,12 +58,26 @@ public sealed class UsageDayRollupTests
     }
 
     [Fact]
-    public void ADayWithNoPercentagesHasNoPeakRatherThanZero()
+    public void ThePeakIsNormalisedRatherThanTakenAsReported()
     {
+        // The known defect where a Unix timestamp lands in the percentage field. A reading
+        // Altim would refuse to show is not a reading it may take a peak from, so the day
+        // is worth the 30 it really saw and not the nonsense.
         UsageDay day = UsageDayRollup.FromSamples("claude", Day,
-            [Sample(9, 100, null)], DateTimeOffset.UnixEpoch)!;
+            [Sample(9, null, 30), Sample(18, null, 1_763_000_000d)],
+            DateTimeOffset.UnixEpoch)!;
 
-        Assert.Null(day.PeakPercent);
+        Assert.Equal(30, day.PeakPercent);
+    }
+
+    [Fact]
+    public void ADayThatReportedNoPercentageAtAllRollsUpToNothing()
+    {
+        // Tokens in every reading, and still nothing to say: the tokens are not this day's,
+        // and with no percentage there is no fact about the day left to write down. A row
+        // here would claim Altim knew something about the day that it does not.
+        Assert.Null(UsageDayRollup.FromSamples("claude", Day,
+            [Sample(9, 100, null), Sample(18, 400, null)], DateTimeOffset.UnixEpoch));
     }
 
     [Fact]
@@ -119,5 +96,19 @@ public sealed class UsageDayRollupTests
 
         Assert.Equal(UsageDaySource.Observed, first.Source);
         Assert.Equal(first, again);
+    }
+
+    [Fact]
+    public void TheOrderTheReadingsArriveInCannotChangeTheDay()
+    {
+        UsageDay forwards = UsageDayRollup.FromSamples("claude", Day,
+            [Sample(9, 100, 10), Sample(12, 250, 80), Sample(18, 400, 30)],
+            DateTimeOffset.UnixEpoch)!;
+
+        UsageDay backwards = UsageDayRollup.FromSamples("claude", Day,
+            [Sample(18, 400, 30), Sample(12, 250, 80), Sample(9, 100, 10)],
+            DateTimeOffset.UnixEpoch)!;
+
+        Assert.Equal(forwards, backwards);
     }
 }

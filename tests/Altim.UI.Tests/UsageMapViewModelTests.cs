@@ -27,9 +27,10 @@ namespace Altim.UI.Tests;
 /// <remarks>
 /// <para>
 /// Two rules are load bearing here and both are asserted rather than assumed. The first is
-/// that <see cref="UsageMapCell.IsKnown"/> and a null token figure are different things: a
-/// day Altim has a row for that reported no volume is a day it was watching, and it must not
-/// come out of the view model as an unknown square.
+/// that <see cref="UsageMapCell.IsKnown"/> follows the token figure and not the row: a day
+/// with a row carrying a peak and no tokens must come out of the view model as an unknown
+/// square, because the square draws what the day cost and nobody can say what that was, while
+/// a day a per-day source reported as nothing at all is known and fills at the ramp's foot.
 /// </para>
 /// <para>
 /// The second is that percentages are never combined. Forty per cent of one vendor's window
@@ -148,12 +149,18 @@ public sealed class UsageMapViewModelTests
     }
 
     /// <summary>
-    /// A day with a stored row that reported no token figure is a day Altim was watching. It
-    /// comes out known, so the map fills it at the foot of the ramp rather than outlining it
-    /// as a day nothing is known about.
+    /// A day with a peak and no token figure is a day Altim knows how close to the limit the
+    /// user came on, and nothing about what they spent. The square is what the spend looks
+    /// like, so it is drawn as unknown — an outline, not the faintest fill, which would claim
+    /// the day cost nothing. The peak is not lost: it is still in the words beside it.
     /// </summary>
+    /// <remarks>
+    /// This is the ordinary shape of a day outside a provider's backfill reach. The rollup
+    /// writes exactly this row for every day it sees, because a reading's token totals are
+    /// running totals and never that day's spend.
+    /// </remarks>
     [Fact]
-    public async Task AStoredDayThatReportedNoTokensIsKnownRatherThanUnknown()
+    public async Task AStoredDayWithAPeakAndNoTokensDrawsAsUnknownAndStillNamesItsPeak()
     {
         var history = new FakeHistoryService();
         history.AddDays(new UsageDay(
@@ -166,14 +173,45 @@ public sealed class UsageMapViewModelTests
         await map.LoadAsync(Ct);
 
         UsageMapCell cell = CellFor(map.Rows![0], Today);
-        Assert.True(cell.IsKnown);
+        Assert.False(cell.IsKnown);
         Assert.Null(cell.Tokens);
-        Assert.Contains("No token figures reported", Lines(cell));
 
-        // And it reaches the combined row the same way round.
+        string[] lines = Lines(cell);
+        Assert.Contains("No token figures reported", lines);
+        Assert.Contains("Peak 40%", lines);
+
+        // And it reaches the combined row the same way round: nothing was spent that anyone
+        // can name, so there is nothing to add up.
         UsageMapCell combined = CellFor(map.CombinedRow!, Today);
-        Assert.True(combined.IsKnown);
+        Assert.False(combined.IsKnown);
         Assert.Null(combined.Tokens);
+    }
+
+    /// <summary>
+    /// The distinction the previous test rests on: a square is unknown because no token
+    /// figure is known, never because the row is missing. A day with a peak and no tokens and
+    /// a day with no row at all are both outlines, and only the words tell them apart.
+    /// </summary>
+    [Fact]
+    public async Task AZeroTokenDayIsStillKnownAndIsNotTheSameAsAPeakWithNoTokens()
+    {
+        var history = new FakeHistoryService();
+        history.AddDays(
+            new UsageDay(ClaudeId, Today, new TokenTotals(0, 0, 0, 0), PeakPercent: 40d,
+                         UsageDaySource.Backfilled, DateTimeOffset.UnixEpoch),
+            new UsageDay(ClaudeId, Today.AddDays(-1), Tokens: null, PeakPercent: 40d,
+                         UsageDaySource.Observed, DateTimeOffset.UnixEpoch));
+
+        using ProviderViewModel claude = Provider(ClaudeId, ClaudeName);
+        UsageMapViewModel map = Map(history, claude);
+
+        await map.LoadAsync(Ct);
+
+        UsageMapCell zero = CellFor(map.Rows![0], Today);
+        Assert.True(zero.IsKnown);
+        Assert.Equal(0L, zero.Tokens);
+
+        Assert.False(CellFor(map.Rows[0], Today.AddDays(-1)).IsKnown);
     }
 
     /// <summary>

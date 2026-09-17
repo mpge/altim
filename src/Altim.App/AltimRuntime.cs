@@ -650,7 +650,8 @@ internal sealed class AltimRuntime : IAsyncDisposable
     }
 
     /// <summary>
-    /// Turns the samples Altim has taken into one observed row per provider per local day.
+    /// Turns the samples Altim has taken into one observed row per provider per local day,
+    /// each carrying that day's peak percentage and no token figure.
     /// </summary>
     /// <param name="storage">The storage stack, which may have no database behind it.</param>
     /// <param name="ct">Cancelled at shutdown.</param>
@@ -659,9 +660,15 @@ internal sealed class AltimRuntime : IAsyncDisposable
     /// The range is <see cref="HistoryBackfill.RollUpFrom"/>'s: yesterday and today on an
     /// ordinary pass, back to the last day this run covered after a machine has been asleep,
     /// and back to the bound on the first pass of the process. Rolling a day up again is
-    /// idempotent and can only raise a figure, so re-reading yesterday all day costs a small
-    /// read and changes nothing — and a row whose figures have not moved is not rewritten at
-    /// all, which is what keeps the write-ahead log emptiable on a machine left switched on.
+    /// idempotent and can only raise a peak, so re-reading yesterday all day costs a small
+    /// read and changes nothing — and a row nothing in the write would move is not rewritten
+    /// at all, which is what keeps the write-ahead log emptiable on a machine left switched
+    /// on.
+    /// </para>
+    /// <para>
+    /// It cannot disturb a backfilled day's tokens, because it never carries any: a sample's
+    /// token totals are a running total rather than a per-day amount. The order this and the
+    /// backfill run in therefore does not matter, and neither can undo the other.
     /// </para>
     /// <para>
     /// Called through <see cref="IUsageHistoryService"/> rather than through the SQLite
@@ -799,8 +806,10 @@ internal sealed class AltimRuntime : IAsyncDisposable
             IReadOnlyList<UsageDay> days = await source.GetHistoryAsync(from, to, ct)
                 .ConfigureAwait(false);
 
-            // Precedence is the upsert's own single statement. Every day here is
-            // backfilled, so none of them can overwrite a day Altim watched itself.
+            // Merging is the upsert's own single statement, never a decision repeated here.
+            // These days carry the token figures — a backfill is the only source of one —
+            // and a day's peak, which they know nothing about, is left exactly as the
+            // rollup measured it.
             await history.UpsertDaysAsync(days, ct).ConfigureAwait(false);
 
             ran = days.Count > 0;

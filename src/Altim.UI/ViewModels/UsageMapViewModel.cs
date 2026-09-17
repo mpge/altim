@@ -21,10 +21,20 @@ namespace Altim.UI.ViewModels;
 /// on its own line.
 /// </para>
 /// <para>
-/// <b>A day one provider knows and another does not is known.</b> The combined figure is then
-/// a total over the providers that knew the day rather than over all of them, which is a
-/// different claim, so the tooltip names who the figure covers and who had nothing. Without
-/// that, a day Codex was not installed for would read as a day Codex used nothing.
+/// <b>A day one provider has a figure for and another does not is known.</b> The combined
+/// figure is then a total over the providers that knew the day rather than over all of them,
+/// which is a different claim, so the tooltip names who the figure covers and who had
+/// nothing. Without that, a day Codex was not installed for would read as a day Codex used
+/// nothing.
+/// </para>
+/// <para>
+/// <b>A square is known when its token figure is, and not when its row is.</b> A day may have
+/// a row carrying a peak and no tokens — the ordinary shape of a day outside a provider's
+/// backfill reach, because Altim's own readings are running totals and can never say what a
+/// day spent. The square draws volume, so that day is an outline: we know how close to the
+/// limit the user came and not how much they spent, and filling it at the foot of the ramp
+/// would say the day cost nothing. The peak stays in the words beside the square, where it is
+/// a fact rather than a fill.
 /// </para>
 /// <para>
 /// <b>Silence and emptiness are different answers.</b> Nothing is read until
@@ -181,8 +191,14 @@ public sealed partial class UsageMapViewModel : ObservableObject
             for (int offset = 0; offset < DaysShown; offset++)
             {
                 DateOnly day = first.AddDays(offset);
+
+                // A row with a peak and no tokens is known about and is still an unknown
+                // square: the square is the day's volume, and a peak says how close to the
+                // limit the user came rather than what they spent. Filling it would claim the
+                // day cost nothing. The words keep the peak, so nothing is lost by it.
                 cells[offset] = read.Days.TryGetValue(day, out UsageDay? stored)
-                    ? new UsageMapCell(day, stored.TotalTokens, stored.PeakPercent, IsKnown: true,
+                    ? new UsageMapCell(day, stored.TotalTokens, stored.PeakPercent,
+                                       IsKnown: stored.TotalTokens is not null,
                                        ProviderDetail(read.Name, stored))
                     : new UsageMapCell(day, null, null, IsKnown: false, UnknownDetail(day));
 
@@ -225,7 +241,6 @@ public sealed partial class UsageMapViewModel : ObservableObject
             List<Contribution> contributions = new(reads.Count);
             TokenTotals? summed = null;
             long? total = null;
-            bool known = false;
 
             foreach (Read read in reads)
             {
@@ -233,10 +248,6 @@ public sealed partial class UsageMapViewModel : ObservableObject
                 if (read.Days.TryGetValue(day, out UsageDay? found))
                 {
                     stored = found;
-
-                    // Known if any provider knew it. A day one of them was not installed for
-                    // is still a day the other one has an answer about.
-                    known = true;
                     summed = Add(summed, found.Tokens);
                     total = Add(total, found.TotalTokens);
                 }
@@ -244,8 +255,13 @@ public sealed partial class UsageMapViewModel : ObservableObject
                 contributions.Add(new Contribution(read.Name, stored));
             }
 
-            // No percentage, ever. The tooltip lists each provider's own on its own line.
-            cells[offset] = new UsageMapCell(day, total, PeakPercent: null, known,
+            // Known if any provider named a figure for it, which is what the square draws. A
+            // day one of them was not installed for is still known from the other; a day
+            // every row has a peak for and none has tokens for is not, because there is no
+            // volume to show. The tooltip still says who had what.
+            // No percentage, ever: the tooltip lists each provider's own on its own line.
+            cells[offset] = new UsageMapCell(day, total, PeakPercent: null,
+                                             IsKnown: total is not null,
                                              CombinedDetail(day, contributions, total, summed));
 
             if (total is { } value)

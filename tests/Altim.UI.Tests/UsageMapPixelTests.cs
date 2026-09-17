@@ -177,16 +177,16 @@ public sealed class UsageMapPixelTests
     }
 
     /// <summary>
-    /// A day Altim has a row for that carries no token figure is still a day it was
-    /// watching, so it is a fill and not an outline.
+    /// A cell marked known is a fill even when it carries no token figure: the flag decides,
+    /// not the number.
     /// </summary>
     /// <remarks>
-    /// The day exists: a provider reported a quota percentage for it and no volume, or a
-    /// reading landed with nothing in it. Drawing it as an outline would be the same lie as
-    /// drawing an unknown day as a zero, told the other way round, so the outline stays
-    /// reserved for days nothing at all is known about and this one takes the ramp's foot.
-    /// The scale itself answers unknown for a null, so the control has to decide this rather
-    /// than pass the null through.
+    /// The two are separate so that a day known to have used nothing — a per-day source that
+    /// reported it and found nothing there — is the ramp's foot rather than an outline.
+    /// Drawing that as an outline would be the same lie as drawing an unknown day as a zero,
+    /// told the other way round. The scale itself answers unknown for a null, so the control
+    /// has to honour the flag rather than pass the null through. Which days are marked known
+    /// is the view model's decision, not this control's.
     /// </remarks>
     [AvaloniaFact]
     public void AKnownDayWithNoFigureIsAFillRatherThanAnOutline()
@@ -197,7 +197,7 @@ public sealed class UsageMapPixelTests
             [
                 Row(
                     "Claude",
-                    new UsageMapCell(Day, Tokens: null, PeakPercent: 40d, IsKnown: true),
+                    new UsageMapCell(Day, Tokens: null, PeakPercent: null, IsKnown: true),
                     Known(Day.AddDays(1), 5_000)),
             ],
         };

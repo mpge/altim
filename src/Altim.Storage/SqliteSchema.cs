@@ -16,7 +16,7 @@ public static class SqliteSchema
     /// The schema version this build expects. Compared against the single row of
     /// <c>schema_version</c> on open.
     /// </summary>
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     /// <summary>
     /// The statements that create version 1 of the schema, which is the first rung of
@@ -81,5 +81,39 @@ public static class SqliteSchema
           updated_at         INTEGER NOT NULL,
           PRIMARY KEY (provider_id, day)
         );
+        """;
+
+    /// <summary>
+    /// The statements that take the schema from version 2 to version 3: the token figures on
+    /// every observed day are emptied, because they were never per-day amounts.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rollup used to derive a day's tokens from Altim's own readings, and a reading's
+    /// token totals are a running total: the Claude provider publishes the cumulative sum of
+    /// every transcript its scanner has read, and the Codex provider publishes a sum over
+    /// whichever sessions were most recently active, which moves in both directions between
+    /// one read and the next. The rows written that way hold a counter's value as it stood at
+    /// some moment of the day, and the map draws a row's tokens as that day's volume.
+    /// </para>
+    /// <para>
+    /// A wrong figure is worse than no figure, and unknown is a square the map already draws
+    /// honestly, so the columns are emptied rather than adjusted — there is no arithmetic
+    /// that turns a running total back into a day. The peak is kept: it was always a real
+    /// measurement of how close to the limit that day came. Backfilled rows came from the
+    /// providers' own per-day history and are not touched.
+    /// </para>
+    /// <para>
+    /// Forward-only and idempotent in effect: after it runs no observed row has a token
+    /// figure, and the rollup no longer writes one, so nothing puts them back.
+    /// </para>
+    /// </remarks>
+    public const string ClearObservedDayTokensScript = """
+        UPDATE usage_day
+        SET input_tokens = NULL,
+            output_tokens = NULL,
+            cache_read_tokens = NULL,
+            cache_write_tokens = NULL
+        WHERE source = 'observed';
         """;
 }

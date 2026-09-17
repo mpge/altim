@@ -120,17 +120,37 @@ public sealed class UsageHistoryContractTests
         {
             foreach (UsageDay day in days)
             {
-                // Observed beats backfilled: a backfill fills gaps and never rewrites a day
-                // Altim watched for itself.
-                if (!_days.TryGetValue((day.ProviderId, day.Day), out UsageDay? stored)
-                    || day.Source == UsageDaySource.Observed
-                    || stored.Source == UsageDaySource.Backfilled)
-                {
-                    _days[(day.ProviderId, day.Day)] = day;
-                }
+                _days[(day.ProviderId, day.Day)] =
+                    _days.TryGetValue((day.ProviderId, day.Day), out UsageDay? stored)
+                        ? Merge(stored, day)
+                        : day;
             }
 
             return ValueTask.CompletedTask;
+        }
+
+        /// <summary>
+        /// The per-field merge the interface states: the tokens and the source belong to
+        /// whichever write actually carries tokens, the peak may only rise, and the stamp
+        /// moves only if something else did.
+        /// </summary>
+        private static UsageDay Merge(UsageDay stored, UsageDay incoming)
+        {
+            bool carriesTokens = incoming.Tokens is { } totals
+                && (totals.Input is not null || totals.Output is not null
+                    || totals.CacheRead is not null || totals.CacheWrite is not null);
+
+            UsageDay merged = stored with
+            {
+                Tokens = carriesTokens ? incoming.Tokens : stored.Tokens,
+                Source = carriesTokens ? incoming.Source : stored.Source,
+                PeakPercent = incoming.PeakPercent is { } offered
+                              && (stored.PeakPercent is not { } held || offered > held)
+                    ? offered
+                    : stored.PeakPercent,
+            };
+
+            return merged == stored ? stored : merged with { UpdatedAt = incoming.UpdatedAt };
         }
 
         // Bucketing a sample into a local calendar day is the storage layer's work and is

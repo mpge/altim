@@ -198,7 +198,8 @@ line stating that daily totals are kept indefinitely while samples are not.
 - Rollup: a rolled-up day carries a peak and no tokens, whatever its samples reported; peak is the
   day's maximum; a rollup never erases or lowers a backfilled token figure, and a backfill never
   erases a peak;
-  recomputation is idempotent; an observed day is never demoted by a later backfill.
+  recomputation is idempotent; a backfill that supplies a token figure relabels the row, because
+  `source` travels with the tokens.
 - Quantiles: all-zero history, one day, identical values, fewer days than buckets, one extreme
   outlier not flattening the rest.
 - Rendering: unknown and zero are visually distinct (a pixel assertion, as with the other

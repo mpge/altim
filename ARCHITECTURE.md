@@ -192,6 +192,18 @@ CREATE TABLE notification_state (
   fired_at INTEGER NOT NULL, window_resets_at INTEGER,
   PRIMARY KEY (provider_id, metric_key, threshold)
 );
+CREATE TABLE usage_day (
+  provider_id        TEXT    NOT NULL,
+  day                TEXT    NOT NULL,   -- local calendar day, ISO yyyy-mm-dd
+  input_tokens       INTEGER,
+  output_tokens      INTEGER,
+  cache_read_tokens  INTEGER,
+  cache_write_tokens INTEGER,
+  peak_percent       REAL,               -- nullable: unknown stays unknown
+  source             TEXT    NOT NULL,   -- 'observed' | 'backfilled'
+  updated_at         INTEGER NOT NULL,
+  PRIMARY KEY (provider_id, day)
+);
 ```
 
 The write-ahead log is bounded, which it is not by default. SQLite checkpoints automatically at
@@ -222,6 +234,41 @@ total by however many times it was observed. A reading whose provider is in `Err
 all. Migrations are sequential, forward-only, each in its own transaction, and each re-checks the
 recorded version inside that transaction, so two instances starting at once — autostart plus a
 manual launch — cannot apply the same rung twice.
+
+### The day table, and why its writers do not compete
+
+`usage_day` holds one row per provider per **local** calendar day — the day resolved when the row
+is written and stored as text, so a timezone move cannot re-bucket settled history. It is what the
+usage map draws, it is kept indefinitely rather than down-sampled, and a day with no row is the
+map's unknown square.
+
+**Two writers share a row and neither owns the whole of it, so an upsert merges per field rather
+than replacing.**
+
+| Field | Written by | Rule |
+|---|---|---|
+| the four token columns, and `source` | the backfill only | a later backfill replaces an earlier one; a write carrying no tokens leaves them alone |
+| `peak_percent` | the sample rollup only | the day's maximum, and a later write may raise it but never lower it |
+
+`updated_at` moves only when one of those actually changed. That is not tidiness: the guard is what
+keeps the write-ahead log truncatable. The maintenance pass re-offers yesterday and today every few
+minutes, an unconditional rewrite would move SQLite's `total_changes()`, and that counter is exactly
+what stamps the write clock `CheckpointIfIdleAsync` reads — so without it the log would never be
+emptied again on a machine left switched on. The comparisons are `IS NOT`, never `<>`: the columns
+are nullable, and a figure appearing where there was none has to count as a change.
+
+**The rollup contributes the peak and never a token figure**, because a live reading's token totals
+are a running total rather than a per-day amount: Claude Code publishes the cumulative sum of every
+transcript its scanner has read, and Codex publishes a sum over whichever sessions were most
+recently active, which moves in both directions between two reads a minute apart. A day's tokens
+therefore come only from the providers' own per-day history, and `source` names where that figure
+came from. A day with a peak and no tokens is drawn as unknown: how close to the limit the user came
+is known, what they spent is not.
+
+An earlier rule ranked whole rows — observed beat backfilled — and it is retired. It let the rollup,
+which has no token figure to offer, overwrite correct per-day figures with running totals; migration
+3 empties the token columns of every row that rule produced, since there is no arithmetic that turns
+a running total back into a day.
 
 ## Notifications
 
