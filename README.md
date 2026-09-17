@@ -1,5 +1,8 @@
 <div align="center">
-  <img src="assets/brand/altim-logo-source.png" alt="Altim" width="160">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/altim-logo-white.png">
+    <img src="assets/brand/altim-logo-ink.png" alt="Altim" width="200">
+  </picture>
 
   **AI usage, at a glance.**
 
