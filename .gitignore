@@ -53,3 +53,8 @@ local/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Agent skill tooling, installed per machine (see AGENTS.md)
+.agents/
+.claude/
+skills-lock.json
