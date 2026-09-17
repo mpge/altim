@@ -86,9 +86,18 @@ public sealed class FakeUsageProvider : IUsageProvider
         try
         {
             _ = Interlocked.Increment(ref _refreshCount);
+
+            // Read before entry is announced, not after. A test that awaits RefreshEntered
+            // and then clears the gate would otherwise race this turn for it: the waiter
+            // resumes on another thread the moment entry is signalled, and if it wins, this
+            // turn sees no gate, runs straight through, and a test written to hold one
+            // refresh open silently holds none. That failed on Linux and passed on Windows,
+            // which is the signature of scheduling deciding the outcome.
+            Task? gate = RefreshGate;
+
             _ = RefreshEntered.TrySetResult();
 
-            if (RefreshGate is { } gate)
+            if (gate is not null)
             {
                 if (HonoursCancellation)
                 {
