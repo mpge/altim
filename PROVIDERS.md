@@ -27,7 +27,7 @@ sessions.
 |---|---|---|
 | Live usage %, window length, reset time, per limit family | `codex app-server` JSON-RPC → `account/rateLimits/read` | Best-effort |
 | Plan type, credit balance, reset credits | same response: `planType`, `credits`, `rateLimitResetCredits` | Best-effort |
-| Daily token history (97 buckets), lifetime tokens, streaks | `codex app-server` JSON-RPC → `account/usage/read` | Best-effort |
+| Daily token history (one bucket per day that had usage), lifetime tokens, streaks | `codex app-server` JSON-RPC → `account/usage/read` | Best-effort |
 | Day backfill when the once-a-minute gate is already spent | the daily buckets of the last successful `account/usage/read`, at most 5 minutes old | Best-effort |
 | Historical usage snapshots (offline fallback) | `<CODEX_HOME>/sessions/**/rollout-*.jsonl`, lines where `type == "event_msg"` and `payload.type == "token_count"` → `payload.rate_limits` | Best-effort |
 | Per-turn and per-session tokens | same lines → `payload.info.last_token_usage` (delta), `payload.info.total_token_usage` (cumulative) | Best-effort |
@@ -114,11 +114,18 @@ total. Which sessions count as "most recent" changes between one read and the ne
 moves in both directions for reasons that have nothing to do with usage: against the live store it
 alternated between 255,886,883 and 184,586,597 **inside the same minute**. Nothing derived from a
 series of these readings — their sum, their last, or their highest — is what a day cost. The map's
-daily figures therefore come from `account/usage/read`'s ~97 daily buckets and from nowhere else;
-Altim's own samples contribute that day's peak percentage only.
+daily figures therefore come from `account/usage/read`'s daily buckets and from nowhere else;
+Altim's own samples contribute that day's peak percentage only. A bucket is one undifferentiated
+figure with no breakdown, so a backfilled Codex day fills the **input** component and leaves output,
+cache read and cache write unreported: the map's tooltip breaks a day down only where the provider
+broke it down.
 
-**The backfill reaches back ~97 days and answers from the last reading when the gate is shut.** It
-makes the same gated `account/usage/read` call as the live meter, and on a real machine it almost
+**The backfill reaches as far back as the reply's own buckets, and answers from the last reading
+when the gate is shut.** The buckets are the days that had usage, not a window, so the count is not
+the span and neither of them is fixed: read on 2026-09-17 the reply carried **100 buckets, the
+oldest dated 2025-12-22**, which is 100 used days spread across about nine months. A quieter account
+answers with fewer buckets over a different stretch, so nothing here depends on the number. It makes
+the same gated `account/usage/read` call as the live meter, and on a real machine it almost
 never gets to: `monitoring.refresh_seconds` is 60 and the gate opens once a minute, so the
 scheduler's live read takes it within seconds of it opening, while the backfill asks from the
 five-minute housekeeping pass at an arbitrary instant. Measured on the verification machine,
@@ -176,6 +183,7 @@ against 2,069 local transcript files.
 | Usage summary without an open session | `claude -p --output-format json "/usage"` → human-readable text in `.result` | Best-effort |
 | Per-request tokens, per model, historical | `<config>/projects/**/*.jsonl`, `assistant` lines → `message.usage.*`, `message.model` | Best-effort |
 | Subagent tokens | `<config>/projects/<slug>/<session>/subagents/agent-*.jsonl` (`isSidechain: true`) | Best-effort |
+| Per-day token totals, for the usage map | the same transcripts, bucketed by each message's own timestamp | Best-effort |
 | Per-session totals with precomputed cost | `cost-state` entries in transcripts | Best-effort, rare (7 of 2,069 files) |
 | Rate-limit rejection events | `quotaLimits` on an `assistant` line → `{status, resetsAt, rateLimitType, …}` | Best-effort, event-only (4 of 2,069 files) |
 | Live token/cost stream per model and query source | OpenTelemetry: `CLAUDE_CODE_ENABLE_TELEMETRY=1` with the `console` or `prometheus` exporter | Documented |
@@ -249,8 +257,16 @@ incrementally by modification time, so steady-state cost is negligible.
 **The live token figure is a running total, so it is not a day either.** The provider merges every
 transcript the incremental scanner has read into one cumulative bucket and publishes that, with no
 boundary at midnight and no way to subtract the part belonging to an earlier day. Per-day figures
-come instead from the same pass bucketed by each message's own timestamp, bounded by the ~30-day
-transcript retention; Altim's own samples contribute that day's peak percentage only.
+come instead from the same pass bucketed by each message's own timestamp; Altim's own samples
+contribute that day's peak percentage only.
+
+**Their reach is the scan's, not the account's, and it is short.** The pass reads the newest 96
+transcripts written inside the last 7 days, of whatever the vendor's own pruning has left on disk,
+so the days it can account for are the days those files happen to cover. On the verification machine
+that was **four days**, not the thirty the pruning default would suggest, and a quieter or busier
+week would give a different number again. What it is not is a fixed window Altim can quote. A day
+already written keeps its row, so the map's Claude line fills forward from the first backfill rather
+than reaching further back on a later one, and everything to the left of it stays unknown.
 
 `stats-cache.json` looks authoritative and is not: on the test machine it was seven months stale
 with every cost at zero, and its units have changed across versions. Altim reads it only behind a
@@ -296,13 +312,40 @@ would ingest other people's secrets. Altim records an executable name and a bool
 
 ---
 
+## Day backfill: what fills the usage map
+
+The map draws one square per provider per local calendar day, and a day's token figure comes only
+from a source that reports whole days. Altim's own readings are running totals rather than daily
+amounts, for the reasons given under each provider above, so they supply that day's peak percentage
+and never its volume. Measured **2026-09-17**, on the machine the rest of this document was verified
+against.
+
+| Source | Reach | Grade | Notes |
+|---|---|---|---|
+| Codex daily buckets, `account/usage/read` | the buckets the reply carries: 100 used days spread over about nine months here | Best-effort | one gated network call, at most daily, with the five-minute fallback above; one undifferentiated figure per day, recorded as input with the other three components unreported |
+| Claude Code transcripts, bucketed by each message's timestamp | what the scan covers: the newest 96 transcripts written in the last 7 days, four days of usage here | Best-effort | local only, starts no process and makes no network call; reuses the incremental scanner and its cursors; reports all four components |
+| Altim's own samples | from install | Best-effort | supplies the day's **peak percentage only**, never its tokens |
+
+**Neither reach is a number Altim can promise.** The Codex figure counts days that had usage rather
+than days in a window, so the span is far wider than the count; the Claude figure is whatever the
+newest transcripts still on disk happen to cover, which is days rather than months. Both move with
+how the account was used. A backfill runs at most once a day per provider, is skipped entirely when
+its source is unavailable, and leaves the days it cannot account for unknown rather than zero.
+
+**A day row is merged field by field**: its token figure comes from a per-day source above, its peak
+from Altim's samples, and neither writer can erase the other's field. The first run here wrote **104
+day rows**, 100 from Codex and 4 from the transcripts. `codex 2026-09-17` carried 211,532,486
+backfilled tokens beside a 74% peak Altim had watched itself, while `codex 2026-09-15` carried
+tokens and no peak at all, because Altim was not running that day. The tooltip names the source, so
+a backfilled figure is never read as something Altim watched happen.
+
 ## Implementation status
 
 Wired up today:
 
 | Provider | Reading |
 |---|---|
-| Claude Code | status-line state file (documented), headless `/usage` summary, transcript token history including subagents, `claude agents --json` sessions |
+| Claude Code | status-line state file (documented), headless `/usage` summary, transcript token history including subagents, per-day totals from that same pass, `claude agents --json` sessions |
 | Codex | app-server `account/rateLimits/read` and `account/usage/read`, day backfill with a five-minute bounded fallback to the last reading, rollout tail fallback, read-only state database for recent threads, `codex doctor --json` for paths and auth mode |
 
 Deliberately not read yet, and why:

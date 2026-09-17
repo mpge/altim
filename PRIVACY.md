@@ -34,6 +34,17 @@ A single SQLite database in your user profile, containing usage snapshots over t
 percentages, token counts, limit windows and reset times. That is what powers the 24-hour, 7-day
 and 30-day history.
 
+The same database also keeps one row per provider per day, which is what the usage map draws. That
+row holds a provider identifier, the date, four token counts, a peak percentage and one word saying
+whether the figure was observed or backfilled. There is nowhere in it for a project, a path, a
+prompt, a command or anything said in a conversation, and the readers that fill it carry none of
+those out of a provider's files in the first place.
+
+Daily totals are kept indefinitely; the samples behind them are not. Samples older than 30 days are
+collapsed to one row per metric per hour and the originals are deleted, so what survives in the long
+run is the coarser record. Reducing a day of samples to one total is strictly less revealing than
+the samples themselves, which Altim was already storing.
+
 Altim does not store project names, prompts, commands or file paths in that database. Agent
 activity is shown live in the interface and is not written to history.
 

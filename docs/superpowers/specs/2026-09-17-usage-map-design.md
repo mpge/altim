@@ -10,11 +10,17 @@ The map answers *how much did I use, and when*; the tooltip answers *did I run o
 Altim has kept usage history only since it was installed, which would make a year-long map empty
 for a year. Both providers can hand us the past:
 
-- **Codex** returns roughly 97 daily buckets from `account/usage/read`, each a date and a token
-  count. The client already calls this and currently only *counts* the array.
+- **Codex** returns one daily bucket per day that had usage from `account/usage/read`, each a date
+  and a token count. The client already calls this and currently only *counts* the array. Measured
+  once it was built: **100 buckets, the oldest dated 2025-12-22**, so those hundred used days spanned
+  about nine months. This document first said "roughly 97 daily buckets" and read that count as a
+  window of days; it is a count of the days that had usage, and the span is much wider than the
+  count.
 - **Claude Code** transcripts carry per-message usage with timestamps, and Altim already scans them
-  incrementally with de-duplication on message id. Daily totals fall out of one pass, bounded by
-  the provider's own ~30-day retention.
+  incrementally with de-duplication on message id. Daily totals fall out of one pass, and their
+  reach is that pass's: the newest 96 transcripts written inside the last 7 days, of whatever the
+  vendor's own pruning has left on disk. Measured once it was built: **four days**, not the "~30
+  days" this document took from the pruning default.
 
 So the map is useful the day it ships rather than three months later.
 
@@ -63,8 +69,8 @@ one non-empty bucket rather than producing empty ranges.
 
 | Source | Reach | Grade | Notes |
 |---|---|---|---|
-| Codex daily buckets | ~97 days | best-effort | one network call, subject to the existing permission setting and rate gate |
-| Claude transcript scan | ~30 days | best-effort | local only; reuses the incremental scanner |
+| Codex daily buckets | the days the reply carries: 100 used days over about nine months, measured | best-effort | one network call, subject to the existing permission setting and rate gate |
+| Claude transcript scan | the days the scan's own window covers: four, measured | best-effort | local only; reuses the incremental scanner |
 | Altim's own samples | from install | best-effort | supplies the day's **peak percentage only**, never its tokens |
 
 **Token figures come from the per-day sources only.** Altim's own samples contribute the day's peak
@@ -139,7 +145,8 @@ A row is written by two different writers that never overlap:
 So an upsert merges rather than replacing. A write that carries no tokens must leave the tokens
 already there untouched, and a write that carries no peak must leave the peak alone. The earlier
 rule — "observed beats backfilled", whole row — is what allowed a rollup to erase a correct
-per-day figure with a running total, and it is retired.
+per-day figure with a running total, and it is retired. Migration 3 empties the token columns of
+every row that rule wrote, since no arithmetic turns a running total back into a day.
 
 `source` describes where the **token figure** came from, because that is the number the square
 draws. A day that has a peak and no tokens draws as unknown: we know how close to the limit the user

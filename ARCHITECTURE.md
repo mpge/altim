@@ -268,7 +268,28 @@ is known, what they spent is not.
 An earlier rule ranked whole rows — observed beat backfilled — and it is retired. It let the rollup,
 which has no token figure to offer, overwrite correct per-day figures with running totals; migration
 3 empties the token columns of every row that rule produced, since there is no arithmetic that turns
-a running total back into a day.
+a running total back into a day. An install carrying version 1 was upgraded through 2 to 3 against a
+live store to check that, and the rung is forward-only like the others.
+
+**Both writers ride the maintenance pass, and neither has a timer of its own**, because the idle
+cost is a measured budget and a second wake source would spend against it. The rollup covers
+yesterday and today on every pass, reaches back to the last day this process rolled up so a machine
+waking from a long sleep finishes the days it slept through, and is floored at 35 days so the first
+pass after an upgrade cannot become an unbounded read. The backfill asks each provider that
+implements `IUsageHistorySource` for a year of its own history, at most once a day, stamping the
+last run per provider in the `setting` table so a source that cannot answer never holds back one
+that can. A provider with no history source, an unreadable store or a failed call leaves its days
+unknown, and the failure is logged as an exception type with no message, because a message from
+inside a provider's store names the file it failed on.
+
+**How far back a row reaches is the provider's answer, not Altim's request.** Each is asked for a
+year and answers with what it still has: on the machine the feature was verified against, Codex
+accounted for 100 days spread over about nine months while the transcript scan covered four, so one
+row's left edge is far older than the other's and the difference is drawn as unknown rather than
+levelled off. [PROVIDERS.md](PROVIDERS.md) has both figures and what each depends on.
+
+Day rows are two a day here against thousands of samples, which is why they are kept whole while
+samples are collapsed to an hour. The map is the long memory; the samples are the short one.
 
 ## Notifications
 
@@ -285,7 +306,7 @@ spam, no notifications during the first refresh after start.
 - `Themes/Tokens.axaml` — colours per theme variant, consumed with `DynamicResource`
 - `Themes/Primitives.axaml` — radii, spacing, durations, type scale (variant-invariant)
 - `Themes/Controls/*.axaml` — one `ControlTheme` per control we restyle
-- `Controls/Meter.cs`, `Controls/UsageTape.cs` — custom render controls, no dependency
+- `Controls/Meter.cs`, `Controls/UsageTape.cs`, `Controls/UsageMap.cs` — custom render controls, no dependency
 
 Two windows:
 
