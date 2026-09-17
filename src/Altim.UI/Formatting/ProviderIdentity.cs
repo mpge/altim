@@ -64,10 +64,9 @@ public static class ProviderIdentity
     /// <remarks>
     /// Nine is what the box holds. A spoke narrower than about a pixel and a half is grey
     /// smear rather than a spoke at 16px, and nine of them at that weight still leave a gap
-    /// between neighbours out at the rim. The name is the placeholder diamond's; it stays
-    /// because <c>Views/Shared.axaml</c> and the platform-free tests reach the member by it.
+    /// between neighbours out at the rim.
     /// </remarks>
-    public const string DiamondPath =
+    public const string AnthropicMarkPath =
         "F1 "
         + "M 7.73,8.08 L 9.06,5 L 8.82,0.55 L 8.31,0.5 L 7.11,4.81 Z "
         + "M 7.73,8.08 L 10.53,6.8 L 12.96,3.61 L 12.61,3.26 L 9.17,5.46 Z "
@@ -86,10 +85,9 @@ public static class ProviderIdentity
     /// </summary>
     /// <remarks>
     /// Hollow where the burst is solid, which is what keeps the two apart at 16px, and what
-    /// balances an OpenAI accent that is very nearly the ink colour itself. The name is the
-    /// placeholder hexagon's, kept for the same reason <see cref="DiamondPath"/>'s is.
+    /// balances an OpenAI accent that is very nearly the ink colour itself.
     /// </remarks>
-    public const string HexagonPath =
+    public const string OpenAIMarkPath =
         "F1 "
         + "M 6.79,1.83 L 13.91,6.65 L 15.11,5.32 L 7.98,0.5 Z "
         + "M 13.56,4 L 12.3,11.76 L 14.23,12 L 15.48,4.24 Z "
@@ -101,15 +99,15 @@ public static class ProviderIdentity
     /// <summary>The mark any other provider wears, as path data on the 16px box.</summary>
     public const string CirclePath = "M 8,0.5 A 7.5,7.5 0 1 0 8,15.5 A 7.5,7.5 0 1 0 8,0.5 Z";
 
-    private static readonly Lazy<Geometry> LazyDiamond = Lazily(DiamondPath);
-    private static readonly Lazy<Geometry> LazyHexagon = Lazily(HexagonPath);
+    private static readonly Lazy<Geometry> LazyAnthropicMark = Lazily(AnthropicMarkPath);
+    private static readonly Lazy<Geometry> LazyOpenAIMark = Lazily(OpenAIMarkPath);
     private static readonly Lazy<Geometry> LazyCircle = Lazily(CirclePath);
 
-    /// <inheritdoc cref="DiamondPath" />
-    public static Geometry Diamond => LazyDiamond.Value;
+    /// <inheritdoc cref="AnthropicMarkPath" />
+    public static Geometry AnthropicMark => LazyAnthropicMark.Value;
 
-    /// <inheritdoc cref="HexagonPath" />
-    public static Geometry Hexagon => LazyHexagon.Value;
+    /// <inheritdoc cref="OpenAIMarkPath" />
+    public static Geometry OpenAIMark => LazyOpenAIMark.Value;
 
     /// <summary>The default mark. Parsed on first read, never at type initialisation.</summary>
     public static Geometry Circle => LazyCircle.Value;
@@ -121,15 +119,15 @@ public static class ProviderIdentity
     /// the result would be a view model that cannot be constructed without a render platform.
     /// </remarks>
     public static Geometry Glyph(string? providerId) =>
-        IsAnthropic(providerId) ? Diamond
-        : IsOpenAI(providerId) ? Hexagon
+        IsAnthropic(providerId) ? AnthropicMark
+        : IsOpenAI(providerId) ? OpenAIMark
         : Circle;
 
     /// <summary>The path data for a provider identifier, which needs no platform at all.</summary>
     /// <param name="providerId">The identifier the provider reports.</param>
     public static string GlyphPath(string? providerId) =>
-        IsAnthropic(providerId) ? DiamondPath
-        : IsOpenAI(providerId) ? HexagonPath
+        IsAnthropic(providerId) ? AnthropicMarkPath
+        : IsOpenAI(providerId) ? OpenAIMarkPath
         : CirclePath;
 
     /// <summary>Whether this provider wears the Anthropic accent.</summary>

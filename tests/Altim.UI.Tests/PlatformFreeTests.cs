@@ -86,8 +86,8 @@ public sealed class PlatformFreeTests
     [Fact]
     public void ThePathsAreReadableWithoutTheRenderingPlatform()
     {
-        Assert.Equal(ProviderIdentity.DiamondPath, ProviderIdentity.GlyphPath("claude"));
-        Assert.Equal(ProviderIdentity.HexagonPath, ProviderIdentity.GlyphPath("codex"));
+        Assert.Equal(ProviderIdentity.AnthropicMarkPath, ProviderIdentity.GlyphPath("claude"));
+        Assert.Equal(ProviderIdentity.OpenAIMarkPath, ProviderIdentity.GlyphPath("codex"));
         Assert.Equal(ProviderIdentity.CirclePath, ProviderIdentity.GlyphPath("gemini"));
         Assert.StartsWith("M", AltimIcons.HomePath, StringComparison.Ordinal);
         Assert.StartsWith("M", AltimIcons.SettingsPath, StringComparison.Ordinal);

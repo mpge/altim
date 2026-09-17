@@ -45,12 +45,12 @@
 
   <Style Selector="Path.glyph.anthropic">
     <Setter Property="Fill" Value="{DynamicResource AltimAccentAnthropicBrush}" />
-    <Setter Property="Data" Value="{x:Static fmt:ProviderIdentity.Diamond}" />
+    <Setter Property="Data" Value="{x:Static fmt:ProviderIdentity.AnthropicMark}" />
   </Style>
 
   <Style Selector="Path.glyph.openai">
     <Setter Property="Fill" Value="{DynamicResource AltimAccentOpenAIBrush}" />
-    <Setter Property="Data" Value="{x:Static fmt:ProviderIdentity.Hexagon}" />
+    <Setter Property="Data" Value="{x:Static fmt:ProviderIdentity.OpenAIMark}" />
   </Style>
 
   <!-- A line icon: the same 16px box, stroked rather than filled, in the ink of the
