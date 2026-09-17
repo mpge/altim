@@ -1,6 +1,7 @@
 using System.Globalization;
 using Altim.UI.Formatting;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Automation.Peers;
 
 namespace Altim.UI.Controls;
@@ -26,11 +27,21 @@ namespace Altim.UI.Controls;
 /// They are built on demand and thrown away whenever <see cref="UsageMap.Rows"/> is replaced.
 /// A screen reader that never visits the map never pays for them.
 /// </para>
+/// <para>
+/// <b>The keyboard's square is reported as this peer's name, and a change of square raises a
+/// name-changed event.</b> The map is one focusable element, so the only thing the automation
+/// root can ever answer "what has the focus" with is the map itself: there is no element
+/// behind a square for it to name instead. Telling the client the children changed would make
+/// a screen reader re-read a year of squares on every arrow key. Re-reading one string is the
+/// notification that says "the selection moved", and it is the one a client acts on.
+/// </para>
 /// </remarks>
 public sealed class UsageMapAutomationPeer : ControlAutomationPeer
 {
     /// <summary>What the map is called when nothing else names it.</summary>
     public const string MapName = "Daily usage";
+
+    private string? _announced;
 
     /// <summary>Initializes a peer over one map.</summary>
     /// <param name="owner">The map the peer speaks for.</param>
@@ -39,6 +50,8 @@ public sealed class UsageMapAutomationPeer : ControlAutomationPeer
     {
         ArgumentNullException.ThrowIfNull(owner);
         owner.PropertyChanged += OnOwnerPropertyChanged;
+        owner.FocusedCellChanged += OnOwnerFocusedCellChanged;
+        _announced = MapName;
     }
 
     private UsageMap Map => (UsageMap)Owner;
@@ -81,7 +94,13 @@ public sealed class UsageMapAutomationPeer : ControlAutomationPeer
     protected override string GetClassNameCore() => nameof(UsageMap);
 
     /// <inheritdoc />
-    protected override string? GetNameCore() => base.GetNameCore() is { Length: > 0 } named ? named : MapName;
+    /// <remarks>
+    /// While the keyboard is on a square, the map is called that square. Anything else would
+    /// leave a client that asked the focused element what it is with the name of the whole
+    /// grid, which is where it already was.
+    /// </remarks>
+    protected override string? GetNameCore() =>
+        FocusedName() ?? (base.GetNameCore() is { Length: > 0 } named ? named : MapName);
 
     /// <inheritdoc />
     protected override IReadOnlyList<AutomationPeer> GetChildrenCore()
@@ -120,6 +139,30 @@ public sealed class UsageMapAutomationPeer : ControlAutomationPeer
             InvalidateChildren();
         }
     }
+
+    /// <summary>
+    /// Tells the client the selection moved, by the one route the platform offers: the name
+    /// of the element that actually holds the focus has changed.
+    /// </summary>
+    private void OnOwnerFocusedCellChanged(object? sender, EventArgs e)
+    {
+        string? previous = _announced;
+        _announced = GetName();
+
+        if (!string.Equals(previous, _announced, StringComparison.Ordinal))
+        {
+            RaisePropertyChangedEvent(AutomationElementIdentifiers.NameProperty, previous, _announced);
+        }
+    }
+
+    /// <summary>The focused square's words, or nothing when no square is focused.</summary>
+    private string? FocusedName() =>
+        Map is { FocusedCell: { } focused, Rows: { } rows }
+        && focused.RowIndex >= 0
+        && focused.RowIndex < rows.Count
+        && rows[focused.RowIndex] is { } row
+            ? NameFor(row.Name, focused.Cell)
+            : null;
 }
 
 /// <summary>
@@ -128,8 +171,9 @@ public sealed class UsageMapAutomationPeer : ControlAutomationPeer
 /// <remarks>
 /// There is no control behind this and there is deliberately no attempt to invent one. The
 /// peer exists to carry a name, a description and a rectangle for something that was drawn,
-/// and it answers everything else the way a label answers it: not focusable, not interactive,
-/// and with no children of its own.
+/// and it answers everything else the way a label answers it: not interactive, and with no
+/// children of its own. It is keyboard focusable, though, because the map is: every square in
+/// a focusable map can be reached with the arrow keys, and the one the keyboard is on says so.
 /// </remarks>
 internal sealed class UsageMapCellAutomationPeer : AutomationPeer
 {
@@ -152,6 +196,8 @@ internal sealed class UsageMapCellAutomationPeer : AutomationPeer
         _cell = cell;
         _parent = map;
     }
+
+    private UsageMap Map => (UsageMap)_map.Owner;
 
     /// <inheritdoc />
     protected override void BringIntoViewCore()
@@ -178,7 +224,7 @@ internal sealed class UsageMapCellAutomationPeer : AutomationPeer
     /// answers in its own coordinates and the map's peer turns those into screen ones.
     /// </remarks>
     protected override Rect GetBoundingRectangleCore() =>
-        ((UsageMap)_map.Owner).CellBounds(_rowIndex, _cell.Day) is { } bounds
+        Map.CellBounds(_rowIndex, _cell.Day) is { } bounds
             ? _map.ToScreen(bounds) ?? default
             : default;
 
@@ -201,7 +247,10 @@ internal sealed class UsageMapCellAutomationPeer : AutomationPeer
     protected override AutomationPeer? GetParentCore() => _parent;
 
     /// <inheritdoc />
-    protected override bool HasKeyboardFocusCore() => false;
+    protected override bool HasKeyboardFocusCore() =>
+        Map is { IsFocused: true, FocusedCell: { } focused }
+        && focused.RowIndex == _rowIndex
+        && focused.Cell.Day == _cell.Day;
 
     /// <inheritdoc />
     protected override bool IsContentElementCore() => true;
@@ -213,13 +262,14 @@ internal sealed class UsageMapCellAutomationPeer : AutomationPeer
     protected override bool IsEnabledCore() => true;
 
     /// <inheritdoc />
-    protected override bool IsKeyboardFocusableCore() => false;
+    protected override bool IsKeyboardFocusableCore() => Map.Focusable;
 
     /// <inheritdoc />
-    protected override void SetFocusCore()
-    {
-        // Nothing to focus: the square is paint, and the map is the focusable element.
-    }
+    /// <remarks>
+    /// The square is paint and the map is the focusable element, so this focuses the map and
+    /// puts its keyboard selection on this day.
+    /// </remarks>
+    protected override void SetFocusCore() => Map.TryFocusCell(_rowIndex, _cell.Day);
 
     /// <inheritdoc />
     protected override bool ShowContextMenuCore() => false;

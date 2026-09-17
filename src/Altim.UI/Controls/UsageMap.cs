@@ -201,6 +201,21 @@ public sealed class UsageMap : Control, ICustomHitTest
     public static readonly StyledProperty<double> CaptionFontSizeProperty =
         AvaloniaProperty.Register<UsageMap, double>(nameof(CaptionFontSize), 11d);
 
+    /// <summary>
+    /// The ring round the square the keyboard is on. The design system's focus colour and
+    /// nothing else: a platform default would be a second mechanism drawn beside this one.
+    /// </summary>
+    public static readonly StyledProperty<IBrush?> FocusRingBrushProperty =
+        AvaloniaProperty.Register<UsageMap, IBrush?>(nameof(FocusRingBrush));
+
+    /// <summary>
+    /// How thick that ring is, in device independent pixels. It is also the room the map
+    /// reserves round its own grid, so the ring on an edge square is not cut in half by the
+    /// control's own boundary.
+    /// </summary>
+    public static readonly StyledProperty<double> FocusRingWidthProperty =
+        AvaloniaProperty.Register<UsageMap, double>(nameof(FocusRingWidth), 2d);
+
     /// <summary>Days in a week, which is the height of every block in squares.</summary>
     private const int DaysInWeek = 7;
 
@@ -212,6 +227,8 @@ public sealed class UsageMap : Control, ICustomHitTest
 
     private MapLayout? _layout;
     private UsageMapCell? _hovered;
+    private UsageMapCell? _captioned;
+    private Selection? _focused;
 
     static UsageMap()
     {
@@ -226,7 +243,9 @@ public sealed class UsageMap : Control, ICustomHitTest
             Level4BrushProperty,
             LabelBrushProperty,
             SeparatorBrushProperty,
-            EmptyTextProperty);
+            EmptyTextProperty,
+            FocusRingBrushProperty,
+            FocusRingWidthProperty);
 
         AffectsMeasure<UsageMap>(
             RowsProperty,
@@ -234,7 +253,8 @@ public sealed class UsageMap : Control, ICustomHitTest
             CellSizeProperty,
             CellGapProperty,
             RowGapProperty,
-            CaptionFontSizeProperty);
+            CaptionFontSizeProperty,
+            FocusRingWidthProperty);
 
         AffectsRender<UsageMap>(TextElement.FontFamilyProperty);
         AffectsMeasure<UsageMap>(TextElement.FontFamilyProperty);
@@ -345,6 +365,41 @@ public sealed class UsageMap : Control, ICustomHitTest
         set => SetValue(CaptionFontSizeProperty, value);
     }
 
+    /// <inheritdoc cref="FocusRingBrushProperty" />
+    public IBrush? FocusRingBrush
+    {
+        get => GetValue(FocusRingBrushProperty);
+        set => SetValue(FocusRingBrushProperty, value);
+    }
+
+    /// <inheritdoc cref="FocusRingWidthProperty" />
+    public double FocusRingWidth
+    {
+        get => GetValue(FocusRingWidthProperty);
+        set => SetValue(FocusRingWidthProperty, value);
+    }
+
+    /// <summary>Raised when the square the keyboard is on changes, including when it is lost.</summary>
+    /// <remarks>
+    /// The map is one element, so the square the keyboard is on is not a focus change any
+    /// framework can see. <see cref="UsageMapAutomationPeer"/> listens here to tell an
+    /// assistive technology which day is being read.
+    /// </remarks>
+    public event EventHandler? FocusedCellChanged;
+
+    /// <summary>
+    /// The square the keyboard is on, or <see langword="null"/> when none is.
+    /// </summary>
+    /// <remarks>
+    /// The rectangle is read back from <see cref="CellBounds"/> on every access rather than
+    /// remembered, so a square that has moved - a different square size, a different display
+    /// scaling - reports where it actually is.
+    /// </remarks>
+    public UsageMapHit? FocusedCell =>
+        _focused is { } focus && CellBounds(focus.RowIndex, focus.Cell.Day) is { } bounds
+            ? new UsageMapHit(focus.RowIndex, focus.Cell, bounds)
+            : null;
+
     /// <summary>
     /// Where one day's square is, in the map's own coordinates.
     /// </summary>
@@ -396,13 +451,19 @@ public sealed class UsageMap : Control, ICustomHitTest
     public UsageMapHit? HitTest(Point point)
     {
         MapLayout? layout = EnsureLayout();
-        if (layout is null || point.X < 0d)
+        if (layout is null)
         {
             return null;
         }
 
-        int column = (int)Math.Floor(point.X / layout.Pitch);
-        if (column < 0 || column >= layout.Weeks || point.X - (column * layout.Pitch) >= CellSize)
+        double x = point.X - layout.Inset;
+        if (x < 0d)
+        {
+            return null;
+        }
+
+        int column = (int)Math.Floor(x / layout.Pitch);
+        if (column < 0 || column >= layout.Weeks || x - (column * layout.Pitch) >= CellSize)
         {
             return null;
         }
@@ -484,7 +545,9 @@ public sealed class UsageMap : Control, ICustomHitTest
                     new Rect(0d, Hairline.SnapCentre(block.SeparatorY, weight, scale), layout.Size.Width, weight));
             }
 
-            context.DrawText(Text(block.Name, typeface, captionSize, LabelBrush), new Point(0d, block.LabelTop));
+            context.DrawText(
+                Text(block.Name, typeface, captionSize, LabelBrush),
+                new Point(layout.Inset, block.LabelTop));
 
             for (int offset = 0; offset < block.Cells.Length; offset++)
             {
@@ -495,6 +558,15 @@ public sealed class UsageMap : Control, ICustomHitTest
 
                 RenderCell(context, RectFor(layout, block, offset), cell, ramp, weight);
             }
+        }
+
+        // Last, so the ring stands on top of the squares it runs between rather than under
+        // whichever of them happened to be drawn after it.
+        if (_focused is { } focus
+            && FocusRingBrush is { } ring
+            && CellBounds(focus.RowIndex, focus.Cell.Day) is { } square)
+        {
+            RenderFocusRing(context, square, ring, scale);
         }
     }
 
@@ -544,6 +616,111 @@ public sealed class UsageMap : Control, ICustomHitTest
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Focus arrives on the first square the map <em>knows</em> something about, not on the
+    /// first square it draws. A row usually opens with days from before the provider's
+    /// backfill could reach, and landing on one of those would read out a day Altim was never
+    /// watching as though it were a reading.
+    /// </remarks>
+    protected override void OnGotFocus(FocusChangedEventArgs e)
+    {
+        base.OnGotFocus(e);
+
+        if (_focused is null && FirstKnown() is { } first)
+        {
+            Select(first);
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The selection goes with the focus. A ring left standing on a control nobody is on, and
+    /// a tip left open beside it, would caption whatever the reader moved to next.
+    /// </remarks>
+    protected override void OnLostFocus(FocusChangedEventArgs e)
+    {
+        base.OnLostFocus(e);
+        Select(null);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Up and down move a day, left and right move a week, because weeks are the columns and
+    /// the days of a week read down one. Home and End go to the ends of what the row knows
+    /// rather than to the ends of the grid it was drawn on.
+    /// </para>
+    /// <para>
+    /// <b>None of them leave the row, and every one of them is marked handled even when
+    /// nothing moved.</b> An arrow that fell off the end of a block would carry the reader
+    /// into the next provider's year without saying so. An arrow that moved nothing and was
+    /// then left unhandled does the damage from the other end: it goes on up the tree, and on
+    /// the History page the map sits inside a horizontally scrolling <c>ScrollViewer</c>, so
+    /// the whole year would slide sideways under a reader who asked for the next day. Ctrl and
+    /// an arrow is the way between providers, and it is a different key because it is a
+    /// different question.
+    /// </para>
+    /// </remarks>
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+
+        base.OnKeyDown(e);
+
+        if (e.Handled
+            || e.Key is not (Key.Up or Key.Down or Key.Left or Key.Right or Key.Home or Key.End)
+            || _focused is not { } focus
+            || EnsureLayout() is not { } layout)
+        {
+            return;
+        }
+
+        bool between = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        Selection? next = e.Key switch
+        {
+            Key.Up when between => Sibling(layout, focus, -1),
+            Key.Down when between => Sibling(layout, focus, 1),
+            Key.Up => Step(layout, focus, -1),
+            Key.Down => Step(layout, focus, 1),
+            Key.Left => Step(layout, focus, -DaysInWeek),
+            Key.Right => Step(layout, focus, DaysInWeek),
+            Key.Home => Edge(layout, focus, oldest: true),
+            _ => Edge(layout, focus, oldest: false),
+        };
+
+        if (next is not null)
+        {
+            Select(next);
+        }
+
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Puts the keyboard on one square, focusing the map if it is not focused already.
+    /// </summary>
+    /// <param name="rowIndex">The index into <see cref="Rows"/>.</param>
+    /// <param name="day">The day to land on.</param>
+    /// <returns>Whether that square exists and could be focused.</returns>
+    /// <remarks>
+    /// The grid is drawn rather than built out of controls, so an assistive technology asking
+    /// to focus a square has nothing to call <c>Focus</c> on. This is what it calls instead.
+    /// </remarks>
+    public bool TryFocusCell(int rowIndex, DateOnly day)
+    {
+        if (EnsureLayout() is not { } layout
+            || BlockFor(layout, rowIndex) is not { } block
+            || CellAt(block, day.DayNumber - layout.Start.DayNumber) is not { } cell
+            || !Focus(NavigationMethod.Unspecified))
+        {
+            return false;
+        }
+
+        Select(new Selection(rowIndex, cell));
+        return true;
+    }
+
+    /// <inheritdoc />
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -553,14 +730,187 @@ public sealed class UsageMap : Control, ICustomHitTest
             || change.Property == CellGapProperty
             || change.Property == RowGapProperty
             || change.Property == CaptionFontSizeProperty
+            || change.Property == FocusRingWidthProperty
             || change.Property == TextElement.FontFamilyProperty)
         {
             _layout = null;
 
-            // Whatever the pointer was on belonged to the picture that has just been
-            // replaced. Leaving the tip up would caption a new square with an old day.
+            // Whatever the pointer or the keyboard was on belonged to the picture that has
+            // just been replaced. Leaving either up would caption a new square with an old
+            // day, and leaving the ring up would point at a square that has moved.
+            Select(null);
             Hover(null);
         }
+
+        if (change.Property == RowsProperty)
+        {
+            // A map with no day to land on must not offer itself for focus. A hosted window
+            // can hand focus to the only focusable control in it, and an empty map that took
+            // it would paint a ring over the sentence it is there to show.
+            Focusable = AnyKnown(Rows);
+        }
+    }
+
+    /// <summary>Whether any row carries a day the map knows something about.</summary>
+    /// <param name="rows">The rows to look through, which may be null.</param>
+    /// <remarks>
+    /// Deliberately cheap and deliberately not the layout. Focusability is decided the moment
+    /// the rows are assigned, and the layout measures text, which needs a font manager that
+    /// does not exist until the control is in a tree.
+    /// </remarks>
+    private static bool AnyKnown(IReadOnlyList<UsageMapRow>? rows)
+    {
+        if (rows is null)
+        {
+            return false;
+        }
+
+        foreach (UsageMapRow row in rows)
+        {
+            if (row is null)
+            {
+                continue;
+            }
+
+            foreach (UsageMapCell cell in row.Cells)
+            {
+                if (cell is { IsKnown: true })
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>One block's square at an offset from the grid's first day, if there is one.</summary>
+    private static UsageMapCell? CellAt(MapBlock block, int offset) =>
+        offset >= 0 && offset < block.Cells.Length ? block.Cells[offset] : null;
+
+    /// <summary>The block one row was drawn as, if that row drew one.</summary>
+    private static MapBlock? BlockFor(MapLayout layout, int rowIndex)
+    {
+        foreach (MapBlock block in layout.Blocks)
+        {
+            if (block.RowIndex == rowIndex)
+            {
+                return block;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The square a number of days away in the same row, or nothing when that is off the end
+    /// of it. Nothing, rather than the next row's square: the rows are separate years.
+    /// </summary>
+    private static Selection? Step(MapLayout layout, Selection from, int days) =>
+        BlockFor(layout, from.RowIndex) is { } block
+        && CellAt(block, from.Cell.Day.DayNumber - layout.Start.DayNumber + days) is { } cell
+            ? new Selection(block.RowIndex, cell)
+            : null;
+
+    /// <summary>The oldest or newest day the row knows something about.</summary>
+    private static Selection? Edge(MapLayout layout, Selection from, bool oldest)
+    {
+        if (BlockFor(layout, from.RowIndex) is not { } block)
+        {
+            return null;
+        }
+
+        for (int step = 0; step < block.Cells.Length; step++)
+        {
+            int offset = oldest ? step : block.Cells.Length - 1 - step;
+            if (block.Cells[offset] is { IsKnown: true } cell)
+            {
+                return new Selection(block.RowIndex, cell);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The same day in the row above or below, so a keyboard reader can reach a provider
+    /// other than the first. A row that does not carry that day at all answers with its
+    /// oldest square rather than with nothing.
+    /// </summary>
+    private static Selection? Sibling(MapLayout layout, Selection from, int direction)
+    {
+        int at = -1;
+        for (int index = 0; index < layout.Blocks.Count; index++)
+        {
+            if (layout.Blocks[index].RowIndex == from.RowIndex)
+            {
+                at = index;
+                break;
+            }
+        }
+
+        int target = at + direction;
+        if (at < 0 || target < 0 || target >= layout.Blocks.Count)
+        {
+            return null;
+        }
+
+        MapBlock block = layout.Blocks[target];
+        if (CellAt(block, from.Cell.Day.DayNumber - layout.Start.DayNumber) is { } same)
+        {
+            return new Selection(block.RowIndex, same);
+        }
+
+        foreach (UsageMapCell? cell in block.Cells)
+        {
+            if (cell is not null)
+            {
+                return new Selection(block.RowIndex, cell);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The first square, in reading order, that the map knows something about.</summary>
+    private Selection? FirstKnown()
+    {
+        if (EnsureLayout() is not { } layout)
+        {
+            return null;
+        }
+
+        foreach (MapBlock block in layout.Blocks)
+        {
+            foreach (UsageMapCell? cell in block.Cells)
+            {
+                if (cell is { IsKnown: true })
+                {
+                    return new Selection(block.RowIndex, cell);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Moves the keyboard to one square, or off the grid entirely.</summary>
+    /// <param name="next">The square to land on, or <see langword="null"/> for none.</param>
+    private void Select(Selection? next)
+    {
+        bool same = _focused is { } was
+            ? next is { } now && was.RowIndex == now.RowIndex && ReferenceEquals(was.Cell, now.Cell)
+            : next is null;
+
+        if (same)
+        {
+            return;
+        }
+
+        _focused = next;
+        InvalidateVisual();
+        Caption();
+        FocusedCellChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -581,6 +931,27 @@ public sealed class UsageMap : Control, ICustomHitTest
         }
 
         _hovered = cell;
+        Caption();
+    }
+
+    /// <summary>
+    /// Shows the words belonging to whichever square is being read, or takes them away.
+    /// </summary>
+    /// <remarks>
+    /// The pointer wins while it is on a square, and the keyboard's square is what is left
+    /// when it is not. Both arrive here rather than each setting a tip of its own, and both
+    /// show <see cref="UsageMapCell.Detail"/> itself rather than a second rendering of the
+    /// same day, so hover and focus cannot drift into two descriptions of one square.
+    /// </remarks>
+    private void Caption()
+    {
+        UsageMapCell? cell = _hovered ?? _focused?.Cell;
+        if (ReferenceEquals(cell, _captioned))
+        {
+            return;
+        }
+
+        _captioned = cell;
         ToolTip.SetTip(this, cell?.Detail);
         ToolTip.SetIsOpen(this, cell?.Detail is { Length: > 0 });
     }
@@ -592,7 +963,7 @@ public sealed class UsageMap : Control, ICustomHitTest
     private Rect RectFor(MapLayout layout, MapBlock block, int offset)
     {
         double scale = Hairline.ScaleOf(this);
-        double rawX = (offset / DaysInWeek) * layout.Pitch;
+        double rawX = layout.Inset + ((offset / DaysInWeek) * layout.Pitch);
         double rawY = block.GridTop + ((offset % DaysInWeek) * layout.Pitch);
 
         double left = Hairline.SnapEdge(rawX, scale);
@@ -639,6 +1010,42 @@ public sealed class UsageMap : Control, ICustomHitTest
         }
     }
 
+    /// <summary>
+    /// The ring round the focused square, drawn as four bands in the gaps beside it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The design system's ring is 2px offset 2px outside the control. A day is 8px with 2px
+    /// between it and the next one, so a ring held 2px clear would be painted on top of the
+    /// neighbouring days and the focused square would read as a three by three block. The
+    /// ring therefore hugs the square and fills the gap that is already there, which is the
+    /// same weight of line in the same colour, sitting where there is room for it.
+    /// </para>
+    /// <para>
+    /// Both edges are snapped through <see cref="Hairline"/> against the square's own snapped
+    /// rectangle, so the band is a whole number of device pixels at 125% and 150% instead of
+    /// a grey smear on two of its four sides.
+    /// </para>
+    /// </remarks>
+    private void RenderFocusRing(DrawingContext context, Rect cell, IBrush brush, double scale)
+    {
+        double wanted = Math.Max(0d, FocusRingWidth);
+        if (wanted <= 0d)
+        {
+            return;
+        }
+
+        double left = Hairline.SnapEdge(cell.X - wanted, scale);
+        double top = Hairline.SnapEdge(cell.Y - wanted, scale);
+        double right = Hairline.SnapEdge(cell.Right + wanted, scale);
+        double bottom = Hairline.SnapEdge(cell.Bottom + wanted, scale);
+
+        context.FillRectangle(brush, new Rect(left, top, right - left, cell.Y - top));
+        context.FillRectangle(brush, new Rect(left, cell.Bottom, right - left, bottom - cell.Bottom));
+        context.FillRectangle(brush, new Rect(left, cell.Y, cell.X - left, cell.Height));
+        context.FillRectangle(brush, new Rect(cell.Right, cell.Y, right - cell.Right, cell.Height));
+    }
+
     private IBrush? BrushFor(int level) => level switch
     {
         <= 0 => Level0Brush,
@@ -673,7 +1080,7 @@ public sealed class UsageMap : Control, ICustomHitTest
 
             previous = top.Month;
 
-            double x = column * layout.Pitch;
+            double x = layout.Inset + (column * layout.Pitch);
             if (x < drawnTo)
             {
                 continue;
@@ -751,6 +1158,13 @@ public sealed class UsageMap : Control, ICustomHitTest
         double cellSize = Math.Max(1d, CellSize);
         double pitch = cellSize + Math.Max(0d, CellGap);
         double gap = Math.Max(0d, RowGap);
+
+        // Room for the focus ring on the squares at the edges of the grid. The grid otherwise
+        // begins and ends exactly on a square, so a ring round the first column, the last
+        // column or the bottom row would be drawn outside the control's own rectangle - where
+        // a parent is free to clip it away, which is a ring that exists everywhere except at
+        // the four places a reader arrives first.
+        double inset = Math.Max(0d, FocusRingWidth);
 
         var typeface = new Typeface(TextElement.GetFontFamily(this));
         double captionSize = Math.Max(1d, CaptionFontSize);
@@ -831,10 +1245,11 @@ public sealed class UsageMap : Control, ICustomHitTest
                 Start = start,
                 Weeks = weeks,
                 Pitch = pitch,
+                Inset = inset,
                 MonthBandHeight = monthBand,
                 Blocks = blocks,
                 OwnScale = UsageMapScale.From(values, LevelCount),
-                Size = new Size(widest, y),
+                Size = new Size(inset + widest + inset, y + inset),
             };
     }
 
@@ -850,6 +1265,12 @@ public sealed class UsageMap : Control, ICustomHitTest
         /// <summary>One square plus one gap.</summary>
         public required double Pitch { get; init; }
 
+        /// <summary>
+        /// The room kept clear round the grid so a focus ring on an edge square is drawn
+        /// inside the control rather than over whatever is next to it.
+        /// </summary>
+        public required double Inset { get; init; }
+
         /// <summary>The height of the month names and the room under them.</summary>
         public required double MonthBandHeight { get; init; }
 
@@ -864,6 +1285,17 @@ public sealed class UsageMap : Control, ICustomHitTest
         /// <summary>The map's natural size.</summary>
         public required Size Size { get; init; }
     }
+
+    /// <summary>
+    /// The square the keyboard is on: which row it came from, and the square itself.
+    /// </summary>
+    /// <param name="RowIndex">The index into <see cref="Rows"/>.</param>
+    /// <param name="Cell">The day.</param>
+    /// <remarks>
+    /// The rectangle is not kept here. A square moves whenever the theme, the scaling or the
+    /// rows change, and a remembered rectangle would go on pointing at where it used to be.
+    /// </remarks>
+    private readonly record struct Selection(int RowIndex, UsageMapCell Cell);
 
     /// <summary>One row's grid.</summary>
     private sealed class MapBlock

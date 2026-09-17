@@ -16,6 +16,12 @@
   Squares and gaps come off the spacing scale rather than being chosen for the map: 8 for a
   day, 2 between days, 12 between one provider's block and the next. The map draws its own
   labels, so it is handed the family the same way a TextBlock inherits it.
+
+  The focus ring is handed over as a brush and a width rather than hosted as a template part,
+  because there is no template: the map draws itself, and it draws the ring round one square
+  out of a thousand rather than round the control. FocusAdorner is nulled all the same, for the
+  reason every other focusable theme nulls it - the framework's dashed rectangle would be a
+  second focus indicator drawn beside this one, on the wrong element.
 -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -30,6 +36,9 @@
     <Setter Property="Level4Brush" Value="{DynamicResource AltimMapLevel4Brush}" />
     <Setter Property="LabelBrush" Value="{DynamicResource AltimChartLabelBrush}" />
     <Setter Property="SeparatorBrush" Value="{DynamicResource AltimSeparatorBrush}" />
+    <Setter Property="FocusRingBrush" Value="{DynamicResource AltimFocusRingBrush}" />
+    <Setter Property="FocusRingWidth" Value="{DynamicResource AltimFocusRingWidth}" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
     <Setter Property="CellSize" Value="{DynamicResource AltimSpace8}" />
     <Setter Property="CellGap" Value="{DynamicResource AltimSpace2}" />
     <Setter Property="RowGap" Value="{DynamicResource AltimSpace12}" />
