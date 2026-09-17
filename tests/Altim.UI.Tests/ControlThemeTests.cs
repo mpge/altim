@@ -41,6 +41,7 @@ public sealed class ControlThemeTests
         "ToolTip",
         "Meter",
         "UsageTape",
+        "UsageMap",
         "Panel",
         "ProviderCard",
         "Chip",
@@ -351,6 +352,20 @@ public sealed class ControlThemeTests
         "UsageTape" => new UsageTape
         {
             Series = [new UsageTapeSeries("Claude", [10d, 30d, 25d, 60d, 80d])],
+        },
+        "UsageMap" => new UsageMap
+        {
+            // One known day, one zero day and one unknown, so the render covers all three
+            // square states rather than only the fill.
+            Rows =
+            [
+                new UsageMapRow("Claude",
+                [
+                    new UsageMapCell(new DateOnly(2026, 9, 15), 120_000L, 62d, IsKnown: true),
+                    new UsageMapCell(new DateOnly(2026, 9, 16), 0L, null, IsKnown: true),
+                    new UsageMapCell(new DateOnly(2026, 9, 17), null, null, IsKnown: false),
+                ]),
+            ],
         },
         "Panel" => Themed(
             new Border { Child = new TextBlock { Text = "Usage history" } },

@@ -67,6 +67,19 @@
       <SolidColorBrush x:Key="AltimChartLineSecondaryBrush" Color="#666666" />
       <SolidColorBrush x:Key="AltimChartLabelBrush" Color="#666666" />
 
+      <!-- The usage map's ramp: five steps of TextPrimary opacity and nothing else.
+           Monochrome in both variants, because the map carries a quantity and a provider's
+           accent carries identity - a square tinted by whose row it is in would be reading
+           colour as data. Level 0 is the faintest FILL, which is the square for a day we
+           have data for that used nothing; a day nothing is known about is drawn as a
+           hairline outline in AltimBorderBrush with no fill at all, and the two must never
+           become the same square. -->
+      <SolidColorBrush x:Key="AltimMapLevel0Brush" Color="#0A0A0A" Opacity="0.16" />
+      <SolidColorBrush x:Key="AltimMapLevel1Brush" Color="#0A0A0A" Opacity="0.32" />
+      <SolidColorBrush x:Key="AltimMapLevel2Brush" Color="#0A0A0A" Opacity="0.52" />
+      <SolidColorBrush x:Key="AltimMapLevel3Brush" Color="#0A0A0A" Opacity="0.74" />
+      <SolidColorBrush x:Key="AltimMapLevel4Brush" Color="#0A0A0A" Opacity="1.0" />
+
       <!-- The one shadow in the system. It belongs to the popup and nothing else. -->
       <BoxShadows x:Key="AltimPopupShadow">0 8 24 #1F000000</BoxShadows>
     </ResourceDictionary>
@@ -113,6 +126,20 @@
       <SolidColorBrush x:Key="AltimChartLineSecondaryBrush" Color="#666666" />
       <SolidColorBrush x:Key="AltimChartLabelBrush" Color="#666666" />
 
+
+      <!-- The usage map's ramp: five steps of TextPrimary opacity and nothing else.
+           Monochrome in both variants, because the map carries a quantity and a provider's
+           accent carries identity - a square tinted by whose row it is in would be reading
+           colour as data. Level 0 is the faintest FILL, which is the square for a day we
+           have data for that used nothing; a day nothing is known about is drawn as a
+           hairline outline in AltimBorderBrush with no fill at all, and the two must never
+           become the same square. -->
+      <SolidColorBrush x:Key="AltimMapLevel0Brush" Color="#0A0A0A" Opacity="0.16" />
+      <SolidColorBrush x:Key="AltimMapLevel1Brush" Color="#0A0A0A" Opacity="0.32" />
+      <SolidColorBrush x:Key="AltimMapLevel2Brush" Color="#0A0A0A" Opacity="0.52" />
+      <SolidColorBrush x:Key="AltimMapLevel3Brush" Color="#0A0A0A" Opacity="0.74" />
+      <SolidColorBrush x:Key="AltimMapLevel4Brush" Color="#0A0A0A" Opacity="1.0" />
+
       <BoxShadows x:Key="AltimPopupShadow">0 8 24 #1F000000</BoxShadows>
     </ResourceDictionary>
 
@@ -157,6 +184,20 @@
       <SolidColorBrush x:Key="AltimChartLinePrimaryBrush" Color="#F2F2F3" />
       <SolidColorBrush x:Key="AltimChartLineSecondaryBrush" Color="#8A8A90" />
       <SolidColorBrush x:Key="AltimChartLabelBrush" Color="#8A8A90" />
+
+
+      <!-- The usage map's ramp: five steps of TextPrimary opacity and nothing else.
+           Monochrome in both variants, because the map carries a quantity and a provider's
+           accent carries identity - a square tinted by whose row it is in would be reading
+           colour as data. Level 0 is the faintest FILL, which is the square for a day we
+           have data for that used nothing; a day nothing is known about is drawn as a
+           hairline outline in AltimBorderBrush with no fill at all, and the two must never
+           become the same square. -->
+      <SolidColorBrush x:Key="AltimMapLevel0Brush" Color="#F2F2F3" Opacity="0.16" />
+      <SolidColorBrush x:Key="AltimMapLevel1Brush" Color="#F2F2F3" Opacity="0.32" />
+      <SolidColorBrush x:Key="AltimMapLevel2Brush" Color="#F2F2F3" Opacity="0.52" />
+      <SolidColorBrush x:Key="AltimMapLevel3Brush" Color="#F2F2F3" Opacity="0.74" />
+      <SolidColorBrush x:Key="AltimMapLevel4Brush" Color="#F2F2F3" Opacity="1.0" />
 
       <BoxShadows x:Key="AltimPopupShadow">0 8 24 #80000000</BoxShadows>
     </ResourceDictionary>

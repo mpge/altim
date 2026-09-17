@@ -60,6 +60,16 @@ public sealed class TokenTests
         "AltimChartLinePrimaryBrush",
         "AltimChartLineSecondaryBrush",
         "AltimChartLabelBrush",
+
+        // The usage map's ramp. Five steps of TextPrimary opacity, monochrome in both
+        // variants: the map carries a quantity, and a provider's accent carries identity.
+        // Level 0 is the faintest FILL and is not the outline a day nothing is known about
+        // gets, which is AltimBorderBrush. See UsageMapPixelTests.
+        "AltimMapLevel0Brush",
+        "AltimMapLevel1Brush",
+        "AltimMapLevel2Brush",
+        "AltimMapLevel3Brush",
+        "AltimMapLevel4Brush",
     ];
 
     /// <summary>Variant invariant keys: spacing, radii, line, sizes, type scale, motion.</summary>

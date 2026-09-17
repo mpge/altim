@@ -1,0 +1,42 @@
+<!--
+  UsageMap.
+
+  The control draws itself; the theme only hands it brushes and measurements.
+
+  Two of those brushes carry the map's whole position on honesty and are deliberately from
+  different families. AltimBorderBrush outlines a day nothing is known about, and it is the
+  same hairline the rest of the system rules with. AltimMapLevel0Brush fills a day we have
+  data for that used nothing, and it is the faintest step of the TextPrimary ramp. They are
+  never the same value in either variant, because unknown and zero are never the same square.
+
+  The ramp is monochrome by design. A provider's accent colour is identity, and identity is
+  not data: no square is ever tinted by whose row it is in, so neither accent brush appears
+  here.
+
+  Squares and gaps come off the spacing scale rather than being chosen for the map: 8 for a
+  day, 2 between days, 12 between one provider's block and the next. The map draws its own
+  labels, so it is handed the family the same way a TextBlock inherits it.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:controls="using:Altim.UI.Controls">
+
+  <ControlTheme x:Key="{x:Type controls:UsageMap}" TargetType="controls:UsageMap">
+    <Setter Property="UnknownBrush" Value="{DynamicResource AltimBorderBrush}" />
+    <Setter Property="Level0Brush" Value="{DynamicResource AltimMapLevel0Brush}" />
+    <Setter Property="Level1Brush" Value="{DynamicResource AltimMapLevel1Brush}" />
+    <Setter Property="Level2Brush" Value="{DynamicResource AltimMapLevel2Brush}" />
+    <Setter Property="Level3Brush" Value="{DynamicResource AltimMapLevel3Brush}" />
+    <Setter Property="Level4Brush" Value="{DynamicResource AltimMapLevel4Brush}" />
+    <Setter Property="LabelBrush" Value="{DynamicResource AltimChartLabelBrush}" />
+    <Setter Property="SeparatorBrush" Value="{DynamicResource AltimSeparatorBrush}" />
+    <Setter Property="CellSize" Value="{DynamicResource AltimSpace8}" />
+    <Setter Property="CellGap" Value="{DynamicResource AltimSpace2}" />
+    <Setter Property="RowGap" Value="{DynamicResource AltimSpace12}" />
+    <Setter Property="CaptionFontSize" Value="{DynamicResource AltimFontSizeCaption}" />
+    <Setter Property="TextElement.FontFamily" Value="{DynamicResource AltimFontFamily}" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+  </ControlTheme>
+
+</ResourceDictionary>

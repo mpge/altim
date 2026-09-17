@@ -25,6 +25,7 @@
     <ResourceInclude Source="avares://Altim.UI/Themes/Controls/TextBox.axaml" />
     <ResourceInclude Source="avares://Altim.UI/Themes/Controls/ToggleSwitch.axaml" />
     <ResourceInclude Source="avares://Altim.UI/Themes/Controls/ToolTip.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/UsageMap.axaml" />
     <ResourceInclude Source="avares://Altim.UI/Themes/Controls/UsageTape.axaml" />
     <ResourceInclude Source="avares://Altim.UI/Themes/Controls/Window.axaml" />
   </ResourceDictionary.MergedDictionaries>
