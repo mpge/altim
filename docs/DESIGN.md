@@ -226,7 +226,8 @@ in a 15 tall box did. One mark is solid and the other hollow, which is what tell
 **Trademarks.** The provider marks are the vendors' own and identify the vendors' own products,
 which is nominative use. Altim claims no endorsement by, or affiliation with, Anthropic or
 OpenAI. Neither mark is restyled or recoloured beyond the single ink it is drawn in, neither is
-combined with Altim's own mark, and neither ever stands for Altim.
+combined with Altim's own mark, and neither ever stands for Altim. The full notice, including
+what the MIT licence does not grant a fork, is in [TRADEMARKS.md](../TRADEMARKS.md).
 
 **Geometry is never held by a view model.** A `Geometry` cannot be built before Avalonia's
 rendering platform exists, and the failure lands inside a type initialiser, which the CLR caches

@@ -280,6 +280,15 @@ cleanly and fails to start.
 
 MIT — see [LICENSE](LICENSE).
 
+## Trademarks
+
+Altim is an independent open-source project, not affiliated with or endorsed by Anthropic or
+OpenAI. Claude and Claude Code are trademarks of Anthropic; OpenAI and Codex are trademarks of
+OpenAI. Their marks appear here only to identify which of your own tools a figure belongs to.
+
+The MIT licence covers Altim's code and grants no rights in anyone's trademarks. See
+[TRADEMARKS](TRADEMARKS.md) before reusing the provider marks in a fork.
+
 ## Support
 
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=000)](https://buymeacoffee.com/mpge)

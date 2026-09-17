@@ -17,7 +17,8 @@ namespace Altim.UI.Formatting;
 /// <para>
 /// These marks identify the vendors' own products, which is nominative use. Altim claims no
 /// endorsement by, or affiliation with, Anthropic or OpenAI. Neither mark is restyled or
-/// combined with Altim's own, and neither stands for Altim. DESIGN.md records the same.
+/// combined with Altim's own, and neither stands for Altim. TRADEMARKS.md is the full notice,
+/// and says what the MIT licence does not grant a fork that keeps these paths.
 /// </para>
 /// <para>
 /// <strong>Every path fills the 16x16 box exactly, on all four sides.</strong> A shape with
