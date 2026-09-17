@@ -11,10 +11,11 @@ namespace Altim.Storage;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Adding a migration is one line: append <c>new Migration(2, "...")</c> to
+/// Adding a migration is one line: append <c>new Migration(3, "...")</c> to
 /// <see cref="Ladder"/> and raise <see cref="SqliteSchema.CurrentVersion"/> to match.
 /// Nothing else changes, and <see cref="SqliteSchema.CreateScript"/> is never edited,
-/// because an existing database only ever sees the new rung.
+/// because an existing database only ever sees the new rung and an empty file climbs
+/// every rung in turn.
 /// </para>
 /// <para>
 /// Two instances starting at once is the normal case, not an exotic one: autostart
@@ -50,6 +51,7 @@ public static class Migrations
     private static readonly Migration[] Ordered =
     [
         new Migration(1, SqliteSchema.CreateScript),
+        new Migration(2, SqliteSchema.CreateUsageDayScript),
     ];
 
     /// <summary>

@@ -45,7 +45,42 @@ public sealed class MigrationTests
         Assert.Equal(1L, temp.ScalarInt64(
             "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'notification_state'"));
         Assert.Equal(1L, temp.ScalarInt64(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'usage_day'"));
+        Assert.Equal(1L, temp.ScalarInt64(
             "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_usage_sample_lookup'"));
+    }
+
+    /// <summary>
+    /// The upgrade every installed copy of Altim takes: a file written by the build that
+    /// only knew rung 1 is opened by this one, gains the day table, and keeps the history
+    /// it already had.
+    /// </summary>
+    [Fact]
+    public void AnOlderDatabaseGainsTheNewTableAndKeepsItsHistory()
+    {
+        using var temp = new TempDatabase();
+
+        using (SqliteConnection first = OpenRaw(temp.FilePath))
+        {
+            Assert.Equal(1, Migrations.Apply(first, [Migrations.Ladder[0]]));
+        }
+
+        temp.Execute("""
+            INSERT INTO usage_sample (provider_id, metric_key, captured_at, used_percent)
+            VALUES ('claude', 'five_hour', 1763000000, 42.5);
+            """);
+
+        AltimDatabase upgraded = temp.Open();
+
+        Assert.Equal(SqliteSchema.CurrentVersion, upgraded.SchemaVersion);
+        Assert.Equal(1L, temp.ScalarInt64(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'usage_day'"));
+
+        // Forward only, and not a rebuild: the row written by the older build is still
+        // there, with the value it was written with.
+        Assert.Equal(1L, temp.CountRows("usage_sample"));
+        Assert.Equal(42.5, temp.ScalarDouble("SELECT used_percent FROM usage_sample"));
+        Assert.Equal(1L, temp.CountRows("schema_version"));
     }
 
     [Fact]

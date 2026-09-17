@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Globalization;
 using Altim.Core.Abstractions;
 using Altim.Core.Models;
 using Microsoft.Data.Sqlite;
@@ -34,6 +35,16 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
     private const string SampleColumns =
         "provider_id, metric_key, captured_at, used_percent, window_minutes, resets_at, "
         + "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens";
+
+    private const string DayColumns =
+        "provider_id, day, input_tokens, output_tokens, cache_read_tokens, "
+        + "cache_write_tokens, peak_percent, source, updated_at";
+
+    /// <summary>The value of <c>usage_day.source</c> for a day Altim watched itself.</summary>
+    private const string ObservedSource = "observed";
+
+    /// <summary>The value of <c>usage_day.source</c> for a day read from a provider's history.</summary>
+    private const string BackfilledSource = "backfilled";
 
     private readonly AltimDatabase _database;
     private readonly TimeProvider _timeProvider;
@@ -167,39 +178,84 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
 
     /// <inheritdoc />
     /// <remarks>
-    /// Not implemented yet: the <c>usage_day</c> table arrives with migration 2 in Task 2 of
-    /// <c>docs/superpowers/plans/2026-09-17-usage-map.md</c>, which replaces this body. It
-    /// stands here only so the solution builds while the contract and its first implementation
-    /// land in separate commits; nothing calls it yet.
+    /// Runs on a worker: the map asks for a year at a time, from the UI thread, and
+    /// Microsoft.Data.Sqlite would read all 730 rows on whatever thread asked.
     /// </remarks>
-    public ValueTask<IReadOnlyList<UsageDay>> GetDaysAsync(string providerId, DateOnly from,
-                                                           DateOnly to, CancellationToken ct)
-        => throw new NotImplementedException();
+    public async ValueTask<IReadOnlyList<UsageDay>> GetDaysAsync(string providerId, DateOnly from,
+                                                                  DateOnly to, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(providerId);
+
+        // ISO text sorts and compares chronologically, so the range is the same
+        // comparison in SQLite that it is in C#.
+        string fromDay = FormatDay(from);
+        string toDay = FormatDay(to);
+
+        return await Task.Run(() => ReadDays(providerId, fromDay, toDay, ct), ct)
+            .ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     /// <remarks>
-    /// Not implemented yet: the <c>usage_day</c> table arrives with migration 2 in Task 2 of
-    /// <c>docs/superpowers/plans/2026-09-17-usage-map.md</c>, which replaces this body. It
-    /// stands here only so the solution builds while the contract and its first implementation
-    /// land in separate commits; nothing calls it yet.
+    /// <para>
+    /// Runs on the calling thread, behind the write gate, with every day in one
+    /// transaction: a backfill hands over a month at a time and either all of it lands
+    /// or none of it does.
+    /// </para>
+    /// <para>
+    /// Nothing to write takes no writer at all. Holding the lease stamps the write clock,
+    /// which is what <see cref="AltimDatabase.CheckpointIfIdleAsync"/> watches, so a
+    /// caller that turns out to have no days would otherwise keep the WAL from ever being
+    /// truncated by asking a question.
+    /// </para>
     /// </remarks>
-    public ValueTask UpsertDaysAsync(IReadOnlyList<UsageDay> days, CancellationToken ct)
-        => throw new NotImplementedException();
+    public async ValueTask UpsertDaysAsync(IReadOnlyList<UsageDay> days, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(days);
+
+        if (days.Count == 0)
+        {
+            return;
+        }
+
+        using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
+        SqliteConnection connection = lease.Connection;
+
+        using SqliteTransaction transaction = connection.BeginTransaction();
+
+        foreach (UsageDay day in days)
+        {
+            await UpsertDayAsync(connection, day, ct).ConfigureAwait(false);
+        }
+
+        transaction.Commit();
+    }
 
     /// <inheritdoc />
     /// <remarks>
-    /// Runs on the calling thread: one statement, behind the write gate. Reclaiming the
-    /// space it frees is <see cref="UsageRetention.VacuumAsync"/>, which does not.
+    /// Runs on the calling thread: two statements in one transaction, behind the write
+    /// gate. Both tables are history, so clearing one without the other would leave a map
+    /// drawn from days whose samples are gone. Reclaiming the space it frees is
+    /// <see cref="UsageRetention.VacuumAsync"/>, which does not run here.
     /// </remarks>
     public async ValueTask ClearAsync(CancellationToken ct)
     {
         using WriteLease lease = await _database.LeaseWriterAsync(ct).ConfigureAwait(false);
+        SqliteConnection connection = lease.Connection;
 
-        using SqliteCommand command = lease.Connection.CreateCommand();
+        using SqliteTransaction transaction = connection.BeginTransaction();
 
-        // History only. Settings and notification state are not history and survive this.
-        command.CommandText = "DELETE FROM usage_sample";
-        _ = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            // History only. Settings and notification state are not history and survive this.
+            command.CommandText = """
+                DELETE FROM usage_sample;
+                DELETE FROM usage_day;
+                """;
+            _ = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        transaction.Commit();
     }
 
     private IReadOnlyList<UsageSample> ReadRange(string providerId, long from, long to,
@@ -249,6 +305,127 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
 
         return ReadSamples(command, ct);
     }
+
+    private IReadOnlyList<UsageDay> ReadDays(string providerId, string from, string to,
+                                             CancellationToken ct)
+    {
+        using SqliteConnection connection = _database.OpenRead();
+        using SqliteCommand command = connection.CreateCommand();
+
+        // Both bounds inclusive, unlike GetRangeAsync: a day is a whole unit and the
+        // caller names the last one it wants rather than the first one it does not.
+        command.CommandText = $"""
+            SELECT {DayColumns}
+            FROM usage_day
+            WHERE provider_id = $provider AND day >= $from AND day <= $to
+            ORDER BY day
+            """;
+        command.Parameters.AddWithValue("$provider", providerId);
+        command.Parameters.AddWithValue("$from", from);
+        command.Parameters.AddWithValue("$to", to);
+
+        List<UsageDay> days = [];
+
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            ct.ThrowIfCancellationRequested();
+            days.Add(ReadDay(reader));
+        }
+
+        return days;
+    }
+
+    /// <summary>
+    /// Inserts a day, or replaces the stored one when precedence allows it.
+    /// </summary>
+    /// <remarks>
+    /// The precedence rule is the <c>WHERE</c> on the conflict clause, and it is one
+    /// statement on purpose: read-then-write would leave a window in which a backfill
+    /// could still land on top of a day Altim had just observed. Observed beats
+    /// backfilled, observed replaces observed, and backfilled replaces only backfilled,
+    /// so a later backfill can fill a gap but can never rewrite history Altim watched.
+    /// </remarks>
+    private static async ValueTask UpsertDayAsync(SqliteConnection connection, UsageDay day,
+                                                  CancellationToken ct)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = $"""
+            INSERT INTO usage_day ({DayColumns})
+            VALUES ($provider, $day, $input, $output, $cacheRead, $cacheWrite, $peak,
+                    $source, $updatedAt)
+            ON CONFLICT (provider_id, day) DO UPDATE SET
+              input_tokens = excluded.input_tokens,
+              output_tokens = excluded.output_tokens,
+              cache_read_tokens = excluded.cache_read_tokens,
+              cache_write_tokens = excluded.cache_write_tokens,
+              peak_percent = excluded.peak_percent,
+              source = excluded.source,
+              updated_at = excluded.updated_at
+            WHERE excluded.source = '{ObservedSource}' OR usage_day.source = '{BackfilledSource}'
+            """;
+        command.Parameters.AddWithValue("$provider", day.ProviderId);
+        command.Parameters.AddWithValue("$day", FormatDay(day.Day));
+        AddNullable(command, "$input", day.Tokens?.Input);
+        AddNullable(command, "$output", day.Tokens?.Output);
+        AddNullable(command, "$cacheRead", day.Tokens?.CacheRead);
+        AddNullable(command, "$cacheWrite", day.Tokens?.CacheWrite);
+        AddNullable(command, "$peak", day.PeakPercent);
+        command.Parameters.AddWithValue("$source", SourceName(day.Source));
+        command.Parameters.AddWithValue("$updatedAt", day.UpdatedAt.ToUnixTimeSeconds());
+
+        _ = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private static UsageDay ReadDay(DbDataReader reader)
+    {
+        long? input = NullableInt64(reader, 2);
+        long? output = NullableInt64(reader, 3);
+        long? cacheRead = NullableInt64(reader, 4);
+        long? cacheWrite = NullableInt64(reader, 5);
+
+        // All four unreported is a day that reported no tokens at all, which is not a day
+        // that reported four zeroes.
+        TokenTotals? tokens = input is null && output is null && cacheRead is null && cacheWrite is null
+            ? null
+            : new TokenTotals(input, output, cacheRead, cacheWrite);
+
+        return new UsageDay(
+            reader.GetString(0),
+            ParseDay(reader.GetString(1)),
+            tokens,
+            NullableDouble(reader, 6),
+            ParseSource(reader.GetString(7)),
+            DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(8)));
+    }
+
+    private static string FormatDay(DateOnly day)
+        => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    private static DateOnly ParseDay(string day)
+        => DateOnly.ParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    private static string SourceName(UsageDaySource source) => source switch
+    {
+        UsageDaySource.Observed => ObservedSource,
+        UsageDaySource.Backfilled => BackfilledSource,
+        _ => throw new ArgumentOutOfRangeException(nameof(source), source,
+                                                   "Unknown usage day source."),
+    };
+
+    /// <summary>
+    /// Reads the stored source, treating anything unrecognised as backfilled.
+    /// </summary>
+    /// <remarks>
+    /// Only this class writes the column, so an unrecognised value means the file was
+    /// edited by hand. Backfilled is the honest answer to that: claiming a day was
+    /// observed would assert that Altim watched it, and would also make the row
+    /// unreplaceable by the rollup that could put it right.
+    /// </remarks>
+    private static UsageDaySource ParseSource(string source)
+        => string.Equals(source, ObservedSource, StringComparison.Ordinal)
+            ? UsageDaySource.Observed
+            : UsageDaySource.Backfilled;
 
     private static List<UsageSample> ReadSamples(SqliteCommand command, CancellationToken ct)
     {

@@ -75,7 +75,8 @@ public sealed class SchemaPrivacyTests
         using var temp = new TempDatabase();
         _ = temp.Open();
 
-        string[] expected = ["notification_state", "schema_version", "setting", "usage_sample"];
+        string[] expected =
+            ["notification_state", "schema_version", "setting", "usage_day", "usage_sample"];
 
         Assert.Equal(expected, temp.QueryStrings(AllTables).Order(StringComparer.Ordinal).ToArray());
     }
@@ -95,6 +96,29 @@ public sealed class SchemaPrivacyTests
 
         string[] actual = temp.QueryPairs(AllColumns)
             .Where(c => c.First == "usage_sample")
+            .Select(c => c.Second)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void EveryDayColumnIsANumberADateOrAnIdentifier()
+    {
+        using var temp = new TempDatabase();
+        _ = temp.Open();
+
+        // "source" is the one word in the table, and it holds 'observed' or 'backfilled'
+        // — where the figures came from, never what they were about.
+        string[] expected =
+        [
+            "cache_read_tokens", "cache_write_tokens", "day", "input_tokens", "output_tokens",
+            "peak_percent", "provider_id", "source", "updated_at",
+        ];
+
+        string[] actual = temp.QueryPairs(AllColumns)
+            .Where(c => c.First == "usage_day")
             .Select(c => c.Second)
             .Order(StringComparer.Ordinal)
             .ToArray();
