@@ -2,6 +2,7 @@ using System.Data.Common;
 using System.Globalization;
 using Altim.Core.Abstractions;
 using Altim.Core.Models;
+using Altim.Core.Usage;
 using Microsoft.Data.Sqlite;
 
 namespace Altim.Storage;
@@ -45,6 +46,14 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
 
     /// <summary>The value of <c>usage_day.source</c> for a day read from a provider's history.</summary>
     private const string BackfilledSource = "backfilled";
+
+    /// <summary>
+    /// A day, for widening a read window past the furthest any timezone can be from UTC.
+    /// Not a unit of local time: a local day that crosses a DST boundary is not this long,
+    /// which is exactly why the day a sample falls on is decided by a calendar and not by
+    /// arithmetic.
+    /// </summary>
+    private const long SecondsPerDay = 24 * 60 * 60;
 
     private readonly AltimDatabase _database;
     private readonly TimeProvider _timeProvider;
@@ -231,6 +240,64 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
         transaction.Commit();
     }
 
+    /// <summary>
+    /// Rolls Altim's own samples up into one observed day row per provider per local
+    /// calendar day, across a range of days with both bounds inclusive.
+    /// </summary>
+    /// <param name="from">First local day to roll up, inclusive.</param>
+    /// <param name="to">
+    /// Last local day to roll up, inclusive. A <paramref name="to"/> before
+    /// <paramref name="from"/> names no days at all, which is nothing to do rather than
+    /// something to complain about: it reads and writes nothing and returns zero, the same
+    /// answer <see cref="GetDaysAsync"/> gives for the same bounds.
+    /// </param>
+    /// <param name="ct">Cancels the read and the write.</param>
+    /// <returns>
+    /// How many day rows were written. A day whose samples reported nothing at all rolls up
+    /// to nothing, is not written, and is not counted: it stays an unknown square rather
+    /// than becoming an empty observed row that would both read as unknown and outrank a
+    /// later backfill that did know what happened.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Every row it writes is <see cref="UsageDaySource.Observed"/> and each of its figures
+    /// is the highest any of that day's readings reported, so rolling a day up again can
+    /// only produce the same row or a higher one, never a lower one and never a second row.
+    /// That is what makes it safe to include <em>today</em> — a day still being lived, which
+    /// the maintenance pass rolls up over and over as it goes.
+    /// </para>
+    /// <para>
+    /// The read runs on a worker and the write behind the writer lease, taken once for the
+    /// whole range. Nothing holds the writer across the read: a sample landing in between is
+    /// simply picked up by the next pass, and because the figures only ever rise it cannot
+    /// make a row wrong, only briefly out of date.
+    /// </para>
+    /// </remarks>
+    public async ValueTask<int> RollUpDaysAsync(DateOnly from, DateOnly to, CancellationToken ct)
+    {
+        if (from > to)
+        {
+            return 0;
+        }
+
+        // Read once, here, rather than per sample: the zone is a property the host may
+        // change under us, and half a range bucketed by one zone and half by another would
+        // be worse than either.
+        TimeZoneInfo zone = _timeProvider.LocalTimeZone;
+        DateTimeOffset updatedAt = _timeProvider.GetUtcNow();
+
+        IReadOnlyList<UsageDay> days = await Task
+            .Run(() => RollUp(from, to, zone, updatedAt, ct), ct)
+            .ConfigureAwait(false);
+
+        // Precedence is UpsertDaysAsync's single statement, not a decision repeated here;
+        // and an empty range reaches its early return, so a rollup that found nothing never
+        // takes the writer and never stamps the write clock the WAL checkpoint watches.
+        await UpsertDaysAsync(days, ct).ConfigureAwait(false);
+
+        return days.Count;
+    }
+
     /// <inheritdoc />
     /// <remarks>
     /// Runs on the calling thread: two statements in one transaction, behind the write
@@ -335,6 +402,106 @@ public sealed class SqliteUsageHistoryService : IUsageHistoryService
 
         return days;
     }
+
+    /// <summary>
+    /// Reads every provider's samples around a range of local days and collapses each
+    /// provider's day into its row.
+    /// </summary>
+    /// <param name="from">First local day wanted, inclusive.</param>
+    /// <param name="to">Last local day wanted, inclusive.</param>
+    /// <param name="zone">The zone whose calendar decides which day a sample fell on.</param>
+    /// <param name="updatedAt">The stamp to put on every row produced.</param>
+    /// <param name="ct">Cancels the read.</param>
+    /// <returns>
+    /// One entry per provider and day that reported anything. A day that reported nothing
+    /// is absent rather than present and empty.
+    /// </returns>
+    private List<UsageDay> RollUp(DateOnly from, DateOnly to, TimeZoneInfo zone,
+                                  DateTimeOffset updatedAt, CancellationToken ct)
+    {
+        // Read a day wide at each end, then decide the day in C#. No zone is a whole day
+        // from UTC, so this cannot miss a sample; and asking SQLite instead is not an
+        // option, because it has no timezone database and the spec fixes the day as the
+        // user's local one. Widening also sidesteps converting a local midnight, which in
+        // some zones is an hour a DST jump skipped and which has no UTC instant at all.
+        long fromSeconds = StartOfUtcDay(from) - SecondsPerDay;
+        long toSeconds = StartOfUtcDay(to) + (2 * SecondsPerDay);
+
+        // Ordered for a stable, repeatable read. Nothing here depends on it: every figure
+        // the rollup keeps is a maximum, so no order can change the answer.
+        IReadOnlyList<UsageSample> samples = ReadAllProviders(fromSeconds, toSeconds, ct);
+
+        Dictionary<(string ProviderId, DateOnly Day), List<UsageSample>> grouped = [];
+
+        foreach (UsageSample sample in samples)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            DateOnly day = DateOnly.FromDateTime(
+                TimeZoneInfo.ConvertTime(sample.CapturedAt, zone).DateTime);
+
+            // The day either side that was read to be safe, and nothing else.
+            if (day < from || day > to)
+            {
+                continue;
+            }
+
+            // By provider and day, never by day alone: two providers' figures are two
+            // different quantities, and their percentages are measured against two
+            // different limits.
+            (string ProviderId, DateOnly Day) key = (sample.ProviderId, day);
+            if (!grouped.TryGetValue(key, out List<UsageSample>? forDay))
+            {
+                forDay = [];
+                grouped[key] = forDay;
+            }
+
+            forDay.Add(sample);
+        }
+
+        List<UsageDay> days = [];
+
+        foreach (KeyValuePair<(string ProviderId, DateOnly Day), List<UsageSample>> group in grouped)
+        {
+            if (UsageDayRollup.FromSamples(group.Key.ProviderId, group.Key.Day, group.Value,
+                                           updatedAt) is { } day)
+            {
+                days.Add(day);
+            }
+        }
+
+        return days;
+    }
+
+    /// <summary>
+    /// Every provider's samples in an instant range, oldest first. The rollup is the one
+    /// read that wants all of them at once, because it writes a row per provider it finds
+    /// rather than per provider it was asked about.
+    /// </summary>
+    private IReadOnlyList<UsageSample> ReadAllProviders(long from, long to, CancellationToken ct)
+    {
+        using SqliteConnection connection = _database.OpenRead();
+        using SqliteCommand command = connection.CreateCommand();
+
+        // Half open, as GetRangeAsync is: the bounds are instants here, not days.
+        command.CommandText = $"""
+            SELECT {SampleColumns}
+            FROM usage_sample
+            WHERE captured_at >= $from AND captured_at < $to
+            ORDER BY captured_at, id
+            """;
+        command.Parameters.AddWithValue("$from", from);
+        command.Parameters.AddWithValue("$to", to);
+
+        return ReadSamples(command, ct);
+    }
+
+    /// <summary>
+    /// Midnight UTC on a day, in Unix seconds. Only ever a reference point for widening a
+    /// read window, never the day a sample is filed under.
+    /// </summary>
+    private static long StartOfUtcDay(DateOnly day)
+        => new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).ToUnixTimeSeconds();
 
     /// <summary>
     /// Inserts a day, or replaces the stored one when precedence allows it.
