@@ -35,7 +35,7 @@ namespace Altim.Providers.Claude;
 /// discarded, rather than averaged into something neither source said.
 /// </para>
 /// </remarks>
-public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
+public sealed class ClaudeUsageProvider : IUsageProvider, IUsageHistorySource, IDisposable
 {
     private const string FiveHourKey = "five_hour";
     private const string SevenDayKey = "seven_day";
@@ -71,6 +71,14 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
     /// </summary>
     private readonly Dictionary<string, ClaudeTokenBucket> _sessionTotals = new(StringComparer.Ordinal);
     private readonly Queue<string> _sessionOrder = new();
+
+    /// <summary>
+    /// Running per-day totals, for the same reason the per-session ones are kept: a scan
+    /// reports only the bytes it has just read, so a day has to be accumulated across every
+    /// pass that touched it rather than taken from the last one. One entry per calendar day
+    /// the store reaches back to, which transcript pruning keeps to a few dozen.
+    /// </summary>
+    private readonly Dictionary<DateOnly, ClaudeTokenBucket> _dayTotals = [];
 
     private ProviderUsage _usage;
     private IReadOnlyList<AgentSession> _sessions = [];
@@ -224,6 +232,57 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
             {
                 UsageChanged?.Invoke(this, usage);
             }
+        }
+        finally
+        {
+            _ = _gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Transcripts are the only Claude source that reaches back before Altim was installed,
+    /// and they carry token counts and nothing else. No transcript line reports a quota, so
+    /// every day here has a null <see cref="UsageDay.PeakPercent"/> — not a zero, which
+    /// would claim the user touched none of their allowance that day.
+    /// </para>
+    /// <para>
+    /// A day the scan cannot account for is absent from the result rather than present with
+    /// zeroes. Absent is unknown; zero is a day that used nothing, and the map draws them
+    /// differently. What reaches the days is six running counts and a date: nothing built
+    /// from a path, a project, a prompt or a model id can get this far, because a
+    /// <see cref="ClaudeTokenBucket"/> has nowhere to put one.
+    /// </para>
+    /// <para>
+    /// Figures are locally observed and are a floor. Local sums were measured about 16 per
+    /// cent below server accounting, and transcripts are pruned after about 30 days, so the
+    /// reach of this is the store's rather than the account's.
+    /// </para>
+    /// <para>
+    /// It costs a transcript scan and nothing else: no process is started and no network
+    /// call is made, which also means it is unaffected by strict local-only mode. The
+    /// incremental scanner is shared with the ordinary refresh, so whichever of the two runs
+    /// first pays for the new bytes and the other reads them for free. Backfilling a large
+    /// store therefore costs a user nothing that the first refresh was not already spending.
+    /// </para>
+    /// </remarks>
+    public async ValueTask<IReadOnlyList<UsageDay>> GetHistoryAsync(DateOnly from, DateOnly to, CancellationToken ct)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (to < from)
+        {
+            return [];
+        }
+
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // The same gate the refresh takes, because the scanner is not thread-safe and
+            // both callers advance the same file cursors.
+            Accumulate(_transcripts.Scan(_configRoots, _time.GetUtcNow()));
+            return BuildDays(from, to);
         }
         finally
         {
@@ -463,6 +522,13 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
             RememberSession(sessionId, delta);
         }
 
+        foreach ((DateOnly day, ClaudeTokenBucket delta) in history.ByDay)
+        {
+            _dayTotals[day] = _dayTotals.TryGetValue(day, out ClaudeTokenBucket running)
+                ? Merge(running, delta)
+                : delta;
+        }
+
         if (history.Totals.MessageCount == 0)
         {
             return;
@@ -497,6 +563,42 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         {
             _ = _sessionTotals.Remove(_sessionOrder.Dequeue());
         }
+    }
+
+    /// <summary>
+    /// Turns the accumulated day buckets that fall inside a range into rows, oldest first.
+    /// </summary>
+    /// <param name="from">First day, inclusive.</param>
+    /// <param name="to">Last day, inclusive.</param>
+    /// <remarks>
+    /// A day with no bucket produces no row. The gap is the answer: the scan has nothing to
+    /// say about that day, and a row of zeroes would say it had a quiet one.
+    /// </remarks>
+    private IReadOnlyList<UsageDay> BuildDays(DateOnly from, DateOnly to)
+    {
+        DateTimeOffset now = _time.GetUtcNow();
+        var days = new List<UsageDay>();
+
+        foreach ((DateOnly day, ClaudeTokenBucket bucket) in _dayTotals)
+        {
+            if (day < from || day > to)
+            {
+                continue;
+            }
+
+            days.Add(new UsageDay(
+                ClaudeProviderInfo.Id,
+                day,
+                // Both cache-creation tiers plus any unsplit remainder, summed only at this
+                // boundary where the contract is one cache-write figure.
+                new TokenTotals(bucket.Input, bucket.Output, bucket.CacheRead, bucket.CacheCreationTotal),
+                PeakPercent: null,
+                UsageDaySource.Backfilled,
+                now));
+        }
+
+        days.Sort(static (a, b) => a.Day.CompareTo(b.Day));
+        return days;
     }
 
     private TokenTotals? BuildTotals()

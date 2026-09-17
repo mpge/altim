@@ -379,6 +379,7 @@ public sealed class ClaudeTranscriptScanner
     {
         private readonly Dictionary<string, ClaudeTokenBucket> _byModel = new(StringComparer.Ordinal);
         private readonly Dictionary<string, ClaudeTokenBucket> _bySession = new(StringComparer.Ordinal);
+        private readonly Dictionary<DateOnly, ClaudeTokenBucket> _byDay = [];
 
         private ClaudeTokenBucket _totals;
         private int _duplicates;
@@ -436,6 +437,17 @@ public sealed class ClaudeTranscriptScanner
                 {
                     _latest = timestamp;
                 }
+
+                // The user's local calendar day, not the UTC one. A session that ran late in
+                // the evening west of Greenwich is stamped on the following UTC date, and
+                // filing it there would put a square on a day the user had not started yet.
+                // A line carrying no timestamp is deliberately absent from every day: it
+                // still counts towards the totals, and today is not a guess Altim gets to
+                // make on its behalf.
+                DateOnly day = DateOnly.FromDateTime(timestamp.ToLocalTime().Date);
+                _byDay[day] = _byDay.TryGetValue(day, out ClaudeTokenBucket bucket)
+                    ? bucket.Add(line)
+                    : default(ClaudeTokenBucket).Add(line);
             }
         }
 
@@ -443,6 +455,7 @@ public sealed class ClaudeTranscriptScanner
             _totals,
             _byModel,
             _bySession,
+            _byDay,
             _duplicates,
             _synthetic,
             _withoutIdentity,

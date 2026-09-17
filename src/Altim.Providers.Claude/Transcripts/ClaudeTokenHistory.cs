@@ -54,6 +54,21 @@ public readonly record struct ClaudeTokenBucket(
 /// <c>[1m]</c> variant stays separate from its base model. They price differently.
 /// </param>
 /// <param name="BySession">Counts per session id, for sessions that reported one.</param>
+/// <param name="ByDay">
+/// Counts per <b>local</b> calendar day, for lines that carried a timestamp. The day is the
+/// one the user was living in when the line was written, because that is the day they will
+/// look for it on; a line is placed by converting its instant to local time at the moment it
+/// is read, so a machine that later changes zone or crosses a daylight-saving boundary does
+/// not move days that were already counted.
+/// <para>
+/// A line with no timestamp is counted in <paramref name="Totals"/> and appears in no day at
+/// all. It happened; Altim cannot say when, and putting it on today would be inventing that.
+/// </para>
+/// <para>
+/// A day with no entry is a day this scan could not account for. It is <b>absent</b>, not
+/// present with zeroes: absent means unknown, zero means a day that used nothing.
+/// </para>
+/// </param>
 /// <param name="DuplicateMessagesDropped">
 /// How many lines repeated an already-counted message id. Expected to be large: this is the
 /// 3.15-times overcount that a naive sum would have produced, made visible.
@@ -74,6 +89,7 @@ public sealed record ClaudeTokenHistory(
     ClaudeTokenBucket Totals,
     IReadOnlyDictionary<string, ClaudeTokenBucket> ByModel,
     IReadOnlyDictionary<string, ClaudeTokenBucket> BySession,
+    IReadOnlyDictionary<DateOnly, ClaudeTokenBucket> ByDay,
     int DuplicateMessagesDropped,
     int SyntheticMessagesExcluded,
     int MessagesWithoutIdentity,
@@ -88,6 +104,7 @@ public sealed record ClaudeTokenHistory(
         default,
         new Dictionary<string, ClaudeTokenBucket>(StringComparer.Ordinal),
         new Dictionary<string, ClaudeTokenBucket>(StringComparer.Ordinal),
+        new Dictionary<DateOnly, ClaudeTokenBucket>(),
         0,
         0,
         0,

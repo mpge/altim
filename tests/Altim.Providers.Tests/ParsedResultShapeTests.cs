@@ -231,7 +231,10 @@ public sealed class ParsedResultShapeTests
             if (definition == typeof(IReadOnlyDictionary<,>))
             {
                 // A key is an identifier by construction: nothing writes a path into one.
-                return arguments[0] == typeof(string) && IsAllowed(arguments[1], propertyName);
+                // A key that is not even a string — a calendar day, say — cannot hold one at
+                // all, so it is allowed on the same terms as any other numeric field.
+                return (arguments[0] == typeof(string) || IsNumericLike(Unwrap(arguments[0])))
+                    && IsAllowed(arguments[1], propertyName);
             }
         }
 
@@ -250,6 +253,7 @@ public sealed class ParsedResultShapeTests
         || type == typeof(decimal)
         || type == typeof(DateTimeOffset)
         || type == typeof(DateTime)
+        || type == typeof(DateOnly)
         || type == typeof(TimeSpan);
 
     private static Type Unwrap(Type type) => Nullable.GetUnderlyingType(type) ?? type;
