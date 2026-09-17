@@ -22,6 +22,7 @@ internal sealed class DashboardHost : IDisposable
     private readonly IReadOnlyList<IUsageProvider> _providers;
     private readonly IUsageHistoryService _history;
     private readonly ISettingsStore _settings;
+    private readonly IStatusLineService _statusLine;
     private readonly TimeProvider _time;
 
     private DashboardWindow? _window;
@@ -32,21 +33,25 @@ internal sealed class DashboardHost : IDisposable
     /// <param name="providers">The providers the dashboard reports on.</param>
     /// <param name="history">The store the history page reads.</param>
     /// <param name="settings">The seam the settings page round-trips through.</param>
+    /// <param name="statusLine">The seam the settings page installs the status line through.</param>
     /// <param name="timeProvider">The clock every time on screen is measured against.</param>
     public DashboardHost(
         IReadOnlyList<IUsageProvider> providers,
         IUsageHistoryService history,
         ISettingsStore settings,
+        IStatusLineService statusLine,
         TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(statusLine);
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         _providers = providers;
         _history = history;
         _settings = settings;
+        _statusLine = statusLine;
         _time = timeProvider;
     }
 
@@ -78,7 +83,7 @@ internal sealed class DashboardHost : IDisposable
         {
             if (_window is null)
             {
-                _viewModel = new DashboardViewModel(_providers, _history, _settings, _time);
+                _viewModel = new DashboardViewModel(_providers, _history, _settings, _statusLine, _time);
                 _window = new DashboardWindow(_viewModel);
                 _window.Closed += OnClosed;
                 _window.Show();

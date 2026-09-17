@@ -44,6 +44,45 @@ on nothing but the BCL, which is what keeps the business logic testable.
 Adding a provider means adding one project that implements `IUsageProvider` and registering it. No
 UI change: views render whatever metrics a provider reports.
 
+## The process has two entry points
+
+`Program.Main` branches on its first statement, and the two branches share nothing but the
+executable:
+
+```
+Altim.exe                        the application: packaging hooks, single instance, Avalonia, tray
+Altim.exe altim-statusline       the status-line command Claude Code runs
+```
+
+The second is what makes reset times reachable at all. Claude Code publishes them only to a
+configured status-line command: it writes a JSON payload to the command's standard input and
+renders the command's standard output. So Altim registers *itself* as that command, and the branch
+reads the payload, writes the numbers to `<claude config>/altim-statusline.json`, prints one short
+line, and returns. `ClaudeStatusLineHelper` is the whole of it and
+`ClaudeStatusLineReader` reads the file back on the next refresh.
+
+Three constraints shape it, and each one is load-bearing:
+
+- **It must return in well under 100ms.** Claude Code debounces at 300ms and cancels an in-flight
+  command when a newer update arrives. Measured on Windows 11 26200: 18 to 24ms for the shipped
+  Native AOT build, 67 to 78ms for a framework-dependent `dotnet build`. Most of that is process
+  start, which is why the branch is ahead of `VelopackApp`, ahead of the single-instance guard and
+  ahead of every Avalonia type, with the rest of `Main` moved into a `NoInlining` method so the
+  helper does not pay to have those assemblies resolved.
+- **It writes numbers and nothing else.** The payload carries the working directory, the project
+  directory, the transcript path, a session id and the model. The serialiser can only write numbers
+  and instants, so there is no path through it a string could take. `PRIVACY.md` is the contract and
+  `ClaudeStatusLineHelperTests` asserts it over the bytes on disk.
+- **The file is swapped in, not rewritten.** `File.Replace`, not `File.Move(overwrite: true)`.
+  Measured on Windows 11 26200: with the state file open by a reader using the sharing
+  `ClaudeStatusLineReader` asks for, the move is refused outright and leaves both the stale file and
+  the temporary one on disk, while the replace succeeds and the reader's handle keeps reading the
+  file it opened. Altim's own provider opens that file on every refresh tick, so the move would have
+  dropped whichever write it collided with.
+
+The single-instance guard is deliberately not in this path. Two Claude Code sessions run the helper
+at the same time, and a guard would make one of them exit without writing.
+
 ## Contracts
 
 These signatures are fixed; implementations are written against them.
@@ -84,6 +123,16 @@ public interface IPlatformService      // tray host, screen geometry, theme, pow
 
 public interface INotificationService  { ValueTask ShowAsync(Notification n, CancellationToken ct); }
 public interface IAutoStartService     { ValueTask<bool> IsEnabledAsync(); ValueTask SetAsync(bool on); }
+
+// Claude Code's statusLine setting, from Altim's side. Both calls answer with the state the
+// settings file is actually in, never with the outcome of the request: install, not installed,
+// a status line of the user's own in the way, no Claude Code here, or a file that would not
+// be read. Implemented in the composition root over StatusLineInstaller.
+public interface IStatusLineService
+{
+    ValueTask<StatusLineInstallState> InspectAsync(CancellationToken ct);   // a dry run; writes nothing
+    ValueTask<StatusLineInstallState> SetAsync(bool install, CancellationToken ct);
+}
 public interface IProcessMonitor       { ValueTask<IReadOnlyList<DetectedProcess>> ScanAsync(CancellationToken ct); }
 ```
 
@@ -607,5 +656,10 @@ on 2-core hosts.
    limited, and falls back to local files.
 4. **Native AOT for Avalonia is officially supported but rarely shipped.** It is a Release-only
    Windows setting first, behind a verification step, and can be turned off without code changes.
-5. **Status line integration writes to a user configuration file.** It is opt-in, merges rather than
-   overwrites, refuses to replace an existing status line, and offers revert.
+5. **Status line integration writes to a user configuration file.** It is opt-in behind a settings
+   switch that is off on a fresh install and is never turned on by an upgrade or a first run. The
+   installer merges rather than overwrites, keeps a timestamped backup, preserves the file's own
+   comments and formatting, and reverts to the byte-for-byte original. An existing status line is
+   **refused, not replaced**: the install reports `RefusedExistingStatusLine`, writes nothing, and
+   the settings page says so and disables the switch. There is therefore nothing for revert to
+   restore in that case, because nothing was ever taken away.

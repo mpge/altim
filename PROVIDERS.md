@@ -220,6 +220,50 @@ obligations Altim must honour:
   Altim clamps anything above 101 and treats it as unavailable.
 - Only populated after the first API response of a session, and only for subscription plans.
 
+#### What supplies it, and what its absence costs
+
+The command Altim registers is **its own executable with one argument**:
+
+```
+"C:\Program Files\Altim\Altim.exe" altim-statusline
+```
+
+That branch of `Program.Main` reads the payload from stdin, writes the numbers to
+`<claude config>/altim-statusline.json`, and prints a line for Claude Code to render, of the shape:
+
+```
+5h 53% (3h12m) | 7d 85% (2d4h) | ctx 21% | $1.23
+```
+
+Each part appears only when the payload reported it. A session that has not had a response yet
+prints `altim: no limits reported yet` rather than a row of zeroes, because Claude Code renders the
+output verbatim and an empty string is a blank status bar.
+
+**Only the numbers are written down.** The payload also carries `cwd`, `workspace.project_dir`,
+`transcript_path`, `session_id` and the model; none of them reaches the state file or the printed
+line. The state file is the documented payload with everything non-numeric dropped, which is what
+`ClaudeStatusLineReader` is already written to expect.
+
+**The switch is off until the user turns it on** (Settings → Providers → "Add Altim's status line to
+Claude Code"). Nothing is written to Claude Code's settings on a first run or an upgrade. While it
+is off, every one of these is **Unavailable**, and no substitute is invented for any of them:
+
+| Metric | Without the status line |
+|---|---|
+| 5-hour and weekly **reset instants** | Unavailable. Nothing else local publishes them. Transcript `quotaLimits` events carry a `resetsAt` but appeared in 4 of 2,069 files, and only after a rejection. |
+| 5-hour and weekly percentages at **Documented** grade | Drop to Best-effort, from the headless `/usage` summary's prose, which carries no reset instant and needs the network. |
+| **Spend limit** | Unavailable. It has no other source at all. |
+| Live session **cost** in USD | Unavailable per session. |
+| **Context window** and **prompt cache** state | Unavailable. |
+
+Measured on this machine before the helper existed: the transcript provider had **0** samples
+carrying a reset time against Codex's **7,314**. The status line is the whole of that gap.
+
+**An existing status line is refused, never replaced.** If `statusLine` is already set to something
+that is not Altim's, the install writes nothing, the settings page says so, and the switch is
+disabled until the user clears it themselves. Revert removes only a command carrying the
+`altim-statusline` marker, so a status line Altim never touched is never removed either.
+
 ### Tier 1b: headless usage summary
 
 `claude -p --output-format json "/usage"` runs without a session, reports `num_turns: 0` and

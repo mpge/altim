@@ -75,6 +75,9 @@ public sealed class SqliteSettingsStore
 
         /// <summary>Key for <see cref="AltimSettings.AllowNetworkCalls"/>.</summary>
         public const string AllowNetworkCalls = "providers.allow_network_calls";
+
+        /// <summary>Key for <see cref="AltimSettings.ClaudeStatusLineEnabled"/>.</summary>
+        public const string ClaudeStatusLine = "providers.claude_status_line";
     }
 
     /// <summary>
@@ -113,6 +116,8 @@ public sealed class SqliteSettingsStore
                                                 defaults.ActiveRefreshInterval),
             RefreshOnResume = ReadBool(values, Keys.RefreshOnResume, defaults.RefreshOnResume),
             AllowNetworkCalls = ReadBool(values, Keys.AllowNetworkCalls, defaults.AllowNetworkCalls),
+            ClaudeStatusLineEnabled = ReadBool(values, Keys.ClaudeStatusLine,
+                                               defaults.ClaudeStatusLineEnabled),
         };
     }
 
@@ -157,6 +162,8 @@ public sealed class SqliteSettingsStore
         await Write(connection, Keys.RefreshOnResume, Format(settings.RefreshOnResume), ct)
             .ConfigureAwait(false);
         await Write(connection, Keys.AllowNetworkCalls, Format(settings.AllowNetworkCalls), ct)
+            .ConfigureAwait(false);
+        await Write(connection, Keys.ClaudeStatusLine, Format(settings.ClaudeStatusLineEnabled), ct)
             .ConfigureAwait(false);
 
         transaction.Commit();

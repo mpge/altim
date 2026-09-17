@@ -32,6 +32,7 @@ public sealed class SqliteSettingsStoreTests
         Assert.Equal(TimeSpan.FromSeconds(10), settings.ActiveRefreshInterval);
         Assert.True(settings.RefreshOnResume);
         Assert.True(settings.AllowNetworkCalls);
+        Assert.False(settings.ClaudeStatusLineEnabled);
         Assert.Equal(0L, temp.CountRows("setting"));
     }
 
@@ -55,6 +56,7 @@ public sealed class SqliteSettingsStoreTests
             ActiveRefreshInterval = TimeSpan.FromSeconds(5),
             RefreshOnResume = false,
             AllowNetworkCalls = false,
+            ClaudeStatusLineEnabled = true,
         };
 
         await store.SaveAsync(written, Ct);

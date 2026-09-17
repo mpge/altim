@@ -131,6 +131,28 @@
                      Text="{Binding LocalOnlyNotice}" />
         </StackPanel>
 
+        <!--
+          The only switch that writes to a file Altim does not own, so it is off until it is
+          asked for, the caption says what is written and that it can be undone, and the
+          notice under it carries the three answers that are not yes: no Claude Code here,
+          a status line of the user's own in the way, or a settings file that would not be
+          read. The switch is disabled for the first two, because there is nothing it could do.
+        -->
+        <StackPanel Spacing="{DynamicResource AltimSpace4}">
+          <ToggleSwitch Content="{Binding ClaudeStatusLineLabel}"
+                        IsEnabled="{Binding CanChangeStatusLine}"
+                        IsChecked="{Binding ClaudeStatusLineEnabled}" />
+          <TextBlock Theme="{DynamicResource AltimCaptionText}"
+                     Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                     TextWrapping="Wrap"
+                     Text="{Binding ClaudeStatusLineDescription}" />
+          <TextBlock IsVisible="{Binding ShowsStatusLineNotice}"
+                     Margin="0,4,0,0"
+                     Theme="{DynamicResource AltimCaptionText}"
+                     TextWrapping="Wrap"
+                     Text="{Binding StatusLineNotice}" />
+        </StackPanel>
+
         <ItemsControl ItemsSource="{Binding Providers}">
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:ProviderViewModel">

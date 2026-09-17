@@ -37,16 +37,19 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
         nameof(SelectedWeeklyThreshold),
         nameof(ResetAlertsEnabled),
         nameof(AllowNetworkCalls),
+        nameof(ClaudeStatusLineEnabled),
     ];
 
     private readonly ISettingsStore _store;
     private readonly IUsageHistoryService _history;
+    private readonly IStatusLineService _statusLine;
     private readonly List<ProviderViewModel> _providers;
     private readonly Lock _saveLock = new();
     private AltimSettings _current = AltimSettings.Default;
     private Task _saving = Task.CompletedTask;
     private int _saveGeneration;
     private bool _applying;
+    private bool _followingStatusLine;
 
     [ObservableProperty]
     private bool _launchAtLogin;
@@ -79,6 +82,15 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
     private bool _allowNetworkCalls = AltimSettings.Default.AllowNetworkCalls;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusLineNotice))]
+    [NotifyPropertyChangedFor(nameof(ShowsStatusLineNotice))]
+    [NotifyPropertyChangedFor(nameof(CanChangeStatusLine))]
+    private StatusLineInstallState _statusLineState = StatusLineInstallState.NotInstalled;
+
+    [ObservableProperty]
+    private bool _claudeStatusLineEnabled;
+
+    [ObservableProperty]
     private bool _saveFailed;
 
     [ObservableProperty]
@@ -87,18 +99,22 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
     /// <summary>Initializes the page.</summary>
     /// <param name="store">The settings seam values are read from and written to.</param>
     /// <param name="history">The store the clear action empties.</param>
+    /// <param name="statusLine">The seam the status-line switch installs and reverts through.</param>
     /// <param name="providers">The provider rows the providers section lists.</param>
     public SettingsViewModel(
         ISettingsStore store,
         IUsageHistoryService history,
+        IStatusLineService statusLine,
         IEnumerable<ProviderViewModel> providers)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(statusLine);
         ArgumentNullException.ThrowIfNull(providers);
 
         _store = store;
         _history = history;
+        _statusLine = statusLine;
         _providers = [.. providers];
 
         foreach (RefreshOption option in RefreshOption.Standard)
@@ -184,6 +200,61 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
     /// <summary>Shown under the toggle while live quota checks are switched off.</summary>
     public string LocalOnlyNotice => UsageFormat.LocalFiguresOnly;
 
+    /// <summary>The label on the status-line switch.</summary>
+    public string ClaudeStatusLineLabel => "Add Altim's status line to Claude Code";
+
+    /// <summary>
+    /// What the status-line switch does, said plainly, because it edits a file Altim does
+    /// not own.
+    /// </summary>
+    /// <remarks>
+    /// Three things have to be in it: what is written and where, what Altim gets back for
+    /// it, and that it can be undone. A reader who cannot tell from the copy that this
+    /// changes their Claude Code configuration has not been asked properly.
+    /// </remarks>
+    public string ClaudeStatusLineDescription =>
+        "Claude Code runs a short Altim command every time it redraws its status line, and "
+        + "shows the result. It is the only place reset times, the spend limit and the "
+        + "five-hour and weekly percentages are published, so they stay unavailable without "
+        + "it. Altim adds one entry to your Claude Code settings file, copies the file first, "
+        + "and removes the entry again when you switch this off.";
+
+    /// <summary>
+    /// What is standing in the way, or null when nothing is. Shown under the switch.
+    /// </summary>
+    public string? StatusLineNotice => StatusLineState switch
+    {
+        StatusLineInstallState.AnotherStatusLine =>
+            "Claude Code already has a status line of its own. Altim will not replace it. "
+            + "Remove it from your Claude Code settings first if you want this instead.",
+        StatusLineInstallState.NoConfiguration =>
+            "Claude Code was not found on this machine, so there is nothing to add a status "
+            + "line to.",
+        StatusLineInstallState.Failed =>
+            "Your Claude Code settings file could not be read or updated. Nothing was changed.",
+        _ => null,
+    };
+
+    /// <summary>True while there is something to say under the status-line switch.</summary>
+    public bool ShowsStatusLineNotice => StatusLineNotice is not null;
+
+    /// <summary>
+    /// False when the switch cannot do anything: there is no Claude Code to configure, or
+    /// the user's own status line is in the way. The notice says which.
+    /// </summary>
+    public bool CanChangeStatusLine =>
+        StatusLineState is not (StatusLineInstallState.AnotherStatusLine or StatusLineInstallState.NoConfiguration);
+
+    /// <summary>
+    /// The install or revert currently in flight, or a completed task when there is none.
+    /// </summary>
+    /// <remarks>
+    /// Flipping the switch starts the work rather than awaiting it, the same way every other
+    /// change on this page saves itself. This is the handle on it, for a caller that needs to
+    /// know the settings file has actually been written.
+    /// </remarks>
+    public Task StatusLineChange { get; private set; } = Task.CompletedTask;
+
     /// <summary>True while the figures on screen come only from local files.</summary>
     public bool ShowsLocalOnlyNotice => !AllowNetworkCalls;
 
@@ -225,6 +296,40 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
             // them with defaults that a later change would write back over the real ones.
             SaveFailed = true;
         }
+
+        // The stored flag records what the user asked for; Claude Code's own settings file
+        // is what is true. Read it, and let the switch follow it.
+        await RefreshStatusLineAsync(ct).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Installs or reverts the status line, then shows whatever the settings file holds
+    /// afterwards.
+    /// </summary>
+    /// <param name="install">True to add Altim's entry, false to remove it.</param>
+    /// <param name="ct">Cancels the write.</param>
+    /// <remarks>
+    /// The outcome is read back rather than assumed, so a refusal to replace somebody's own
+    /// status line, or a settings file that could not be written, leaves the switch showing
+    /// what is actually configured and the notice saying why.
+    /// </remarks>
+    public async Task ApplyStatusLineAsync(bool install, CancellationToken ct = default)
+    {
+        try
+        {
+            StatusLineInstallState state = await BackgroundWork
+                .RunAsync(token => _statusLine.SetAsync(install, token), ct)
+                .ConfigureAwait(true);
+            Follow(state);
+        }
+        catch (OperationCanceledException)
+        {
+            // The page closed before the write returned.
+        }
+        catch (Exception)
+        {
+            Follow(StatusLineInstallState.Failed);
+        }
     }
 
     /// <summary>Writes the current values through the settings store.</summary>
@@ -248,6 +353,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
             WeeklyThresholdPercent = SelectedWeeklyThreshold.Value,
             NotifyOnWindowReset = ResetAlertsEnabled,
             AllowNetworkCalls = AllowNetworkCalls,
+            ClaudeStatusLineEnabled = ClaudeStatusLineEnabled,
         };
 
         _current = next;
@@ -320,6 +426,69 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
         _ = SaveAsync(CancellationToken.None);
     }
 
+    /// <summary>
+    /// The switch moved. Anything that is not the user moving it is already following the
+    /// settings file and must not start a second write.
+    /// </summary>
+    partial void OnClaudeStatusLineEnabledChanged(bool value)
+    {
+        if (_applying || _followingStatusLine)
+        {
+            return;
+        }
+
+        StatusLineChange = ApplyStatusLineAsync(value, CancellationToken.None);
+    }
+
+    private async Task RefreshStatusLineAsync(CancellationToken ct)
+    {
+        try
+        {
+            StatusLineInstallState state = await BackgroundWork
+                .RunAsync(_statusLine.InspectAsync, ct)
+                .ConfigureAwait(true);
+            Follow(state);
+        }
+        catch (OperationCanceledException)
+        {
+            // The page closed before the read returned.
+        }
+        catch (Exception)
+        {
+            Follow(StatusLineInstallState.Failed);
+        }
+    }
+
+    /// <summary>
+    /// Points the switch at what the settings file actually holds.
+    /// </summary>
+    /// <remarks>
+    /// The correction is deliberately not guarded the way <see cref="Apply"/> is: it must
+    /// still reach the store, so a request that did not take is not left on record as though
+    /// it had. It is guarded against re-entering the install, which is the part that would
+    /// loop.
+    /// </remarks>
+    private void Follow(StatusLineInstallState state)
+    {
+        StatusLineState = state;
+
+        bool installed = state is StatusLineInstallState.Installed;
+        if (ClaudeStatusLineEnabled == installed)
+        {
+            return;
+        }
+
+        _followingStatusLine = true;
+        try
+        {
+            ClaudeStatusLineEnabled = installed;
+        }
+        finally
+        {
+            _followingStatusLine = false;
+        }
+    }
+
     [RelayCommand]
     private async Task ClearHistoryAsync(CancellationToken ct)
     {
@@ -359,6 +528,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
             SelectedWeeklyThreshold = FindThreshold(settings.WeeklyThresholdPercent);
             ResetAlertsEnabled = settings.NotifyOnWindowReset;
             AllowNetworkCalls = settings.AllowNetworkCalls;
+            ClaudeStatusLineEnabled = settings.ClaudeStatusLineEnabled;
         }
         finally
         {

@@ -27,6 +27,10 @@ public sealed class AltimSettingsTests
         Assert.Equal(TimeSpan.FromSeconds(10), settings.ActiveRefreshInterval);
         Assert.True(settings.RefreshOnResume);
         Assert.True(settings.AllowNetworkCalls);
+
+        // Off, and it stays off until somebody asks: turning it on writes to Claude Code's
+        // own settings file.
+        Assert.False(settings.ClaudeStatusLineEnabled);
     }
 
     [Fact]

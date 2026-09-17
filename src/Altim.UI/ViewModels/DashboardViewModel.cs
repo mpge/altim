@@ -34,16 +34,19 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
     /// <param name="providers">The providers to report on.</param>
     /// <param name="history">The store the history page reads.</param>
     /// <param name="settings">The seam the settings page round-trips through.</param>
+    /// <param name="statusLine">The seam the settings page installs the status line through.</param>
     /// <param name="timeProvider">The clock every time on screen is measured against.</param>
     public DashboardViewModel(
         IEnumerable<IUsageProvider> providers,
         IUsageHistoryService history,
         ISettingsStore settings,
+        IStatusLineService statusLine,
         TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(statusLine);
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         foreach (IUsageProvider provider in providers)
@@ -53,7 +56,7 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
 
         Overview = new OverviewViewModel(_providers, history, timeProvider);
         History = new HistoryViewModel(_providers, history, timeProvider);
-        Settings = new SettingsViewModel(settings, history, _providers);
+        Settings = new SettingsViewModel(settings, history, statusLine, _providers);
         Settings.HistoryCleared += OnHistoryCleared;
 
         Sections.Add(new NavigationItemViewModel(Overview, NavigationIcon.Overview));

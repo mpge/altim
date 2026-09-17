@@ -432,7 +432,12 @@ internal sealed class AltimRuntime : IAsyncDisposable
         _popup.Closed += OnWindowVisibilityChanged;
         _popup.Prime();
 
-        _dashboard = new DashboardHost(_providers, _storage!.History, _settings!, TimeProvider.System);
+        _dashboard = new DashboardHost(
+            _providers,
+            _storage!.History,
+            _settings!,
+            new ClaudeStatusLineService(),
+            TimeProvider.System);
         _dashboard.Opened += OnWindowVisibilityChanged;
         _dashboard.Closed += OnWindowVisibilityChanged;
 

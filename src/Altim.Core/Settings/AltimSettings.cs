@@ -139,6 +139,29 @@ public sealed record AltimSettings
     /// </remarks>
     public bool AllowNetworkCalls { get; init; } = true;
 
+    /// <summary>
+    /// Whether Altim's status-line command is registered in Claude Code's settings.
+    /// Defaults to false, and stays false until the user asks for it on the settings page:
+    /// this is the one switch that writes to a configuration file Altim does not own, so it
+    /// is never turned on by an upgrade, by a first run, or by anything other than somebody
+    /// deciding to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The status line is the only documented local source of reset instants, the spend
+    /// limit and the Documented-grade window percentages. Leaving it off costs those and
+    /// nothing else; <c>PROVIDERS.md</c> lists exactly what goes unavailable.
+    /// </para>
+    /// <para>
+    /// Like <see cref="LaunchAtLogin"/>, this records what the user asked for, not what is
+    /// true. The truth is in Claude Code's own settings file, which they can edit themselves,
+    /// so the effective state is read back through
+    /// <see cref="Core.Abstractions.IStatusLineService"/> and this flag follows it rather
+    /// than overruling it. Altim never reinstates the entry on its own.
+    /// </para>
+    /// </remarks>
+    public bool ClaudeStatusLineEnabled { get; init; }
+
     private static int Clamp(int percent) =>
         Math.Clamp(percent, MinimumThresholdPercent, MaximumThresholdPercent);
 }

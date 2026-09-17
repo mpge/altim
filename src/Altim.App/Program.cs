@@ -1,4 +1,6 @@
+using System.Runtime.CompilerServices;
 using Altim.App.Diagnostics;
+using Altim.Providers.Claude.StatusLine;
 using Altim.Storage;
 using Avalonia;
 using Avalonia.Controls;
@@ -18,6 +20,21 @@ internal static class Program
     /// <returns>The process exit code.</returns>
     /// <remarks>
     /// <para>
+    /// This process has two entirely different jobs, and which one it is doing is decided
+    /// here. With <see cref="ClaudeStatusLineHelper.Argument"/> among the arguments it is the
+    /// status-line command Claude Code is running: it reads one JSON payload from standard
+    /// input, writes the numbers to Altim's state file, prints one line and exits, inside the
+    /// budget Claude Code allows a status-line command. Everything else is the application.
+    /// </para>
+    /// <para>
+    /// The branch is first, ahead of the packaging hooks, the single-instance guard and every
+    /// Avalonia type, because all three are wrong for a command that has to return in
+    /// milliseconds: the guard would make the second concurrent session's helper exit without
+    /// writing, and starting a windowing subsystem to print a line of text would blow the
+    /// budget on its own. <see cref="RunApplication"/> holds the rest so that the types this
+    /// method forces the runtime to load are only the ones the helper needs.
+    /// </para>
+    /// <para>
     /// The single-instance check happens before Avalonia is touched, so a second launch
     /// costs a named handle rather than a windowing subsystem: it signals the instance that
     /// already owns the session, which surfaces its panel, and exits reporting success. From
@@ -31,6 +48,31 @@ internal static class Program
     /// </remarks>
     [STAThread]
     public static int Main(string[] args)
+    {
+        if (ClaudeStatusLineHelper.IsHelperInvocation(args))
+        {
+            // Standard input is where the payload is. When it is not redirected there is no
+            // payload and no Claude Code either, so the empty stream stands in rather than a
+            // read that would block on a console nobody is typing into.
+            using Stream input = Console.IsInputRedirected ? Console.OpenStandardInput() : Stream.Null;
+            return ClaudeStatusLineHelper.Run(input, Console.Out);
+        }
+
+        return RunApplication(args);
+    }
+
+    /// <summary>
+    /// Starts the application proper.
+    /// </summary>
+    /// <param name="args">Command line arguments, passed through to Avalonia.</param>
+    /// <returns>The process exit code.</returns>
+    /// <remarks>
+    /// Separate from <see cref="Main"/>, and never inlined into it, so that the helper branch
+    /// does not pay for loading Velopack and Avalonia: the runtime resolves the types a
+    /// method names when it compiles that method, and this is where they are named.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunApplication(string[] args)
     {
         // First statement, before anything else looks at the process. The installer runs
         // this same executable with its own arguments to perform install and uninstall

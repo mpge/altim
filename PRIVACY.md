@@ -51,6 +51,30 @@ activity is shown live in the interface and is not written to history.
 You can delete everything from **Settings → Privacy → Clear usage history**, or by deleting the
 database file. Settings live alongside it.
 
+## What Altim writes outside its own database
+
+One feature, and only with your say-so.
+
+Claude Code publishes reset times, the spend limit and its window percentages to one place: a
+status-line command you configure it to run. Altim can register itself as that command, which means
+writing one `statusLine` entry into your Claude Code `settings.json`.
+
+- **It is off until you turn it on**, in Settings → Providers. Nothing is written on a first run or
+  an upgrade.
+- Your settings file is **copied to a timestamped backup first**, and the edit is a merge: your
+  comments, indentation, line endings, key order and any setting Altim has never heard of are all
+  left exactly as they were. Turning the switch off restores the original.
+- If you already have a status line of your own, Altim **refuses to install** rather than replacing
+  it, and says so.
+
+While it is on, Claude Code runs `Altim.exe altim-statusline` whenever it redraws its status line
+and hands that command its status-line payload. The payload contains your working directory, your
+project directory, the transcript path, a session id and the model. Altim writes **none** of them.
+What it writes is one small file of numbers, `altim-statusline.json`, beside your Claude Code
+settings: window percentages, reset timestamps, session cost, context-window and prompt-cache token
+counts. The printed status line is built from the same numbers. Nothing leaves the machine, and the
+file is Altim's own to delete.
+
 ## Network activity
 
 Altim itself makes no network requests for usage data.

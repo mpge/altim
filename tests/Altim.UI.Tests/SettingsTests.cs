@@ -1,3 +1,4 @@
+using Altim.Core.Abstractions;
 using Altim.Core.Settings;
 using Altim.UI.Tests.Fakes;
 using Altim.UI.ViewModels;
@@ -17,7 +18,13 @@ public sealed class SettingsTests
         FakeSettingsStore store,
         FakeHistoryService history,
         params ProviderViewModel[] providers) =>
-        new(store, history, providers);
+        new(store, history, new FakeStatusLineService(), providers);
+
+    private static SettingsViewModel Page(
+        FakeSettingsStore store,
+        FakeStatusLineService statusLine,
+        params ProviderViewModel[] providers) =>
+        new(store, new FakeHistoryService(), statusLine, providers);
 
     private static ProviderViewModel Row() =>
         new(
@@ -348,6 +355,154 @@ public sealed class SettingsTests
         Assert.Equal("Claude Code", listed.DisplayName);
     }
 
+    /// <summary>
+    /// The status-line switch is off on a fresh install, and opening the page does not install
+    /// anything. This is the one switch that edits a file Altim does not own.
+    /// </summary>
+    [Fact]
+    public async Task TheStatusLineIsOffUntilSomebodyAsksForIt()
+    {
+        var statusLine = new FakeStatusLineService();
+        SettingsViewModel page = Page(new FakeSettingsStore(), statusLine);
+
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(AltimSettings.Default.ClaudeStatusLineEnabled);
+        Assert.False(page.ClaudeStatusLineEnabled);
+        Assert.True(page.CanChangeStatusLine);
+        Assert.False(page.ShowsStatusLineNotice);
+
+        // Looked at, never written to.
+        Assert.Equal(1, statusLine.Inspections);
+        Assert.Empty(statusLine.Changes);
+    }
+
+    /// <summary>Switching it on installs it and records the choice.</summary>
+    [Fact]
+    public async Task SwitchingTheStatusLineOnInstallsItAndPersistsTheChoice()
+    {
+        var store = new FakeSettingsStore();
+        var statusLine = new FakeStatusLineService();
+        SettingsViewModel page = Page(store, statusLine);
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        page.ClaudeStatusLineEnabled = true;
+        await page.StatusLineChange;
+        await page.SaveAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal([true], statusLine.Changes);
+        Assert.True(page.ClaudeStatusLineEnabled);
+        Assert.False(page.ShowsStatusLineNotice);
+        Assert.True(Assert.IsType<AltimSettings>(store.Saved).ClaudeStatusLineEnabled);
+    }
+
+    /// <summary>And switching it off reverts it.</summary>
+    [Fact]
+    public async Task SwitchingTheStatusLineOffRevertsIt()
+    {
+        var store = new FakeSettingsStore { Stored = AltimSettings.Default with { ClaudeStatusLineEnabled = true } };
+        var statusLine = new FakeStatusLineService { State = StatusLineInstallState.Installed };
+        SettingsViewModel page = Page(store, statusLine);
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(page.ClaudeStatusLineEnabled);
+
+        page.ClaudeStatusLineEnabled = false;
+        await page.StatusLineChange;
+        await page.SaveAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal([false], statusLine.Changes);
+        Assert.False(page.ClaudeStatusLineEnabled);
+        Assert.False(Assert.IsType<AltimSettings>(store.Saved).ClaudeStatusLineEnabled);
+    }
+
+    /// <summary>
+    /// A status line the user built themselves is not replaced, and the page says so rather
+    /// than leaving a switch that silently refuses to move.
+    /// </summary>
+    [Fact]
+    public async Task AStatusLineOfTheUsersOwnIsReportedAndNeverReplaced()
+    {
+        var statusLine = new FakeStatusLineService
+        {
+            State = StatusLineInstallState.AnotherStatusLine,
+            RefuseChanges = true,
+        };
+
+        SettingsViewModel page = Page(new FakeSettingsStore(), statusLine);
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(page.ClaudeStatusLineEnabled);
+        Assert.False(page.CanChangeStatusLine);
+        Assert.True(page.ShowsStatusLineNotice);
+        Assert.Contains("will not replace", page.StatusLineNotice!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Claude Code not being installed is an ordinary answer, not a failure, and the switch
+    /// has nothing to do.
+    /// </summary>
+    [Fact]
+    public async Task NoClaudeCodeConfigurationDisablesTheSwitchWithoutAnError()
+    {
+        var statusLine = new FakeStatusLineService { State = StatusLineInstallState.NoConfiguration };
+        SettingsViewModel page = Page(new FakeSettingsStore(), statusLine);
+
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(page.CanChangeStatusLine);
+        Assert.True(page.ShowsStatusLineNotice);
+        Assert.False(page.SaveFailed);
+    }
+
+    /// <summary>
+    /// A settings file that cannot be written surfaces as a sentence, and leaves the switch
+    /// showing what is true rather than what was asked for.
+    /// </summary>
+    /// <remarks>
+    /// The stored flag follows it back down too. A record that says the status line is on,
+    /// against a settings file that does not have it, would put the page back into the wrong
+    /// state on the next open and never correct itself.
+    /// </remarks>
+    [Fact]
+    public async Task AFailedWriteIsAMessageRatherThanAnExceptionAndTheSwitchTellsTheTruth()
+    {
+        var store = new FakeSettingsStore();
+        var statusLine = new FakeStatusLineService();
+        SettingsViewModel page = Page(store, statusLine);
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        statusLine.Failure = new UnauthorizedAccessException("settings.json");
+
+        page.ClaudeStatusLineEnabled = true;
+        await page.StatusLineChange;
+        await page.SaveAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(page.ClaudeStatusLineEnabled);
+        Assert.True(page.ShowsStatusLineNotice);
+        Assert.Contains("Nothing was changed", page.StatusLineNotice!, StringComparison.Ordinal);
+        Assert.False(Assert.IsType<AltimSettings>(store.Saved).ClaudeStatusLineEnabled);
+    }
+
+    /// <summary>
+    /// The stored flag is what the user asked for; Claude Code's settings file is what is
+    /// true. Somebody who removed the entry by hand gets a switch that says off, and Altim
+    /// does not put it back.
+    /// </summary>
+    [Fact]
+    public async Task TheSwitchFollowsTheSettingsFileRatherThanTheStoredFlag()
+    {
+        var store = new FakeSettingsStore { Stored = AltimSettings.Default with { ClaudeStatusLineEnabled = true } };
+        var statusLine = new FakeStatusLineService { State = StatusLineInstallState.NotInstalled };
+        SettingsViewModel page = Page(store, statusLine);
+
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(page.ClaudeStatusLineEnabled);
+        Assert.Empty(statusLine.Changes);
+        Assert.False(Assert.IsType<AltimSettings>(store.Saved).ClaudeStatusLineEnabled);
+    }
+
     /// <summary>On screen, the five sections are all there.</summary>
     [AvaloniaFact]
     public void RendersEverySection()
@@ -366,6 +521,7 @@ public sealed class SettingsTests
             Assert.True(Surface.Shows(window, "Clear usage history"));
             Assert.True(Surface.Shows(window, "altim.dev"));
             Assert.True(Surface.Shows(window, "Claude Code"));
-        }, width: 760d, height: 1400d);
+            Assert.True(Surface.Shows(window, "Add Altim's status line to Claude Code"));
+        }, width: 760d, height: 1600d);
     }
 }

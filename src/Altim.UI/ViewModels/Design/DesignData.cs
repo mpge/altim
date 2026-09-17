@@ -93,6 +93,7 @@ public static class DesignData
             Providers(),
             new DesignHistoryService(),
             new DesignSettingsStore(),
+            new DesignStatusLineService(),
             TimeProvider.System);
 
         Fill(dashboard.Providers);
@@ -319,5 +320,17 @@ public static class DesignData
             ValueTask.FromResult(AltimSettings.Default);
 
         public ValueTask SaveAsync(AltimSettings settings, CancellationToken ct) => ValueTask.CompletedTask;
+    }
+
+    // The previewer runs inside an editor on somebody's machine. It reports the switch off
+    // and refuses to move it, so that opening a designer can never write to a Claude Code
+    // settings file.
+    private sealed class DesignStatusLineService : IStatusLineService
+    {
+        public ValueTask<StatusLineInstallState> InspectAsync(CancellationToken ct) =>
+            ValueTask.FromResult(StatusLineInstallState.NotInstalled);
+
+        public ValueTask<StatusLineInstallState> SetAsync(bool install, CancellationToken ct) =>
+            ValueTask.FromResult(StatusLineInstallState.NotInstalled);
     }
 }

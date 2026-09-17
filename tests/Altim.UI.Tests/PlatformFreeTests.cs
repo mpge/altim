@@ -51,6 +51,7 @@ public sealed class PlatformFreeTests
             providers,
             new FakeHistoryService(),
             new FakeSettingsStore(),
+            new FakeStatusLineService(),
             new TestClock(Readings.Now));
 
         Assert.Equal(5, dashboard.Sections.Count);

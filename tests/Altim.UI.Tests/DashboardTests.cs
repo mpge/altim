@@ -29,7 +29,8 @@ public sealed class DashboardTests
             new FakeUsageProvider("codex", "Codex", Readings.Healthy("codex", 41d)),
         ];
 
-        return new DashboardViewModel(providers, history, settings, new TestClock(Readings.Now));
+        return new DashboardViewModel(
+            providers, history, settings, new FakeStatusLineService(), new TestClock(Readings.Now));
     }
 
     /// <summary>The sections are Overview, one per provider, then History and Settings.</summary>
@@ -108,7 +109,8 @@ public sealed class DashboardTests
         var settings = new FakeSettingsStore();
         IUsageProvider[] providers = [new FakeUsageProvider("claude", "Claude Code")];
 
-        using var dashboard = new DashboardViewModel(providers, history, settings, clock);
+        using var dashboard = new DashboardViewModel(
+            providers, history, settings, new FakeStatusLineService(), clock);
         await dashboard.LoadAsync(TestContext.Current.CancellationToken);
 
         // The greeting is the eyebrow above the title now, and the title names the page.
@@ -136,6 +138,7 @@ public sealed class DashboardTests
             providers,
             new FakeHistoryService(),
             new FakeSettingsStore(),
+            new FakeStatusLineService(),
             new TestClock(Readings.Now));
 
         // Navigating to the blocked provider's page returns at once. The page loads itself
