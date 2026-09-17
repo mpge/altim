@@ -46,8 +46,15 @@ namespace Altim.Providers.Codex;
 /// is organisation-and-key scoped and Codex Enterprise Analytics is workspace scoped.
 /// Calling any of this documented would be a lie about how stable it is.
 /// </para>
+/// <para>
+/// The provider is also an <see cref="IUsageHistorySource"/>. The same app-server exchange
+/// that answers the live quota question carries roughly three months of dated daily token
+/// totals, and <see cref="GetHistoryAsync"/> hands those back so a freshly installed Altim
+/// has a usage map on its first day rather than its ninetieth. It is the same network call,
+/// under the same permission and the same gate.
+/// </para>
 /// </remarks>
-public sealed class CodexUsageProvider : IUsageProvider, IDisposable
+public sealed class CodexUsageProvider : IUsageProvider, IUsageHistorySource, IDisposable
 {
     private readonly CodexOptions _options;
     private readonly ICodexAppServerClient _appServer;
@@ -210,6 +217,55 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>This is the network call.</b> It is the same <c>account/usage/read</c> exchange
+    /// the live quota read makes, and it is held to the same two permissions: the
+    /// <see cref="INetworkPolicy"/> the user controls and the <see cref="IRefreshGate"/>
+    /// that keeps the CLI from being asked more than once a minute. With permission off
+    /// nothing is started — not the app-server and not <c>codex doctor</c> — and the answer
+    /// is empty.
+    /// </para>
+    /// <para>
+    /// An empty answer always means "nothing to backfill" and never "nothing was used". A
+    /// missing CLI, a closed gate, a refused exchange and a reply whose buckets are in a
+    /// shape this reader does not recognise all produce the same empty list, which the map
+    /// renders as unknown days rather than as zeroes.
+    /// </para>
+    /// <para>
+    /// Every day returned is <see cref="UsageDaySource.Backfilled"/>, so a day Altim watched
+    /// itself is never overwritten by one read back from the provider.
+    /// </para>
+    /// </remarks>
+    public async ValueTask<IReadOnlyList<UsageDay>> GetHistoryAsync(DateOnly from, DateOnly to, CancellationToken ct)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (from > to)
+        {
+            return [];
+        }
+
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            DateTimeOffset now = _time.GetUtcNow();
+
+            CodexLiveResult live = await TryLiveAsync(_appServer.IsAvailable, now, ct).ConfigureAwait(false);
+
+            // The exchange answers both questions at once. Keeping the quota half means a
+            // backfill does not spend the minute's one call and leave the meters stale.
+            RememberLive(live, now);
+
+            return ToDays(live.AccountUsage, from, to, now);
+        }
+        finally
+        {
+            _ = _gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed)
@@ -240,6 +296,70 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
         }
 
         return new TokenTotals(value.Input, value.Output, value.CachedInput, value.CacheWrite);
+    }
+
+    /// <summary>
+    /// Turns the provider's daily buckets into day rows inside the requested range.
+    /// </summary>
+    /// <param name="usage">The account figures the exchange returned, if any.</param>
+    /// <param name="from">First day, inclusive.</param>
+    /// <param name="to">Last day, inclusive.</param>
+    /// <param name="now">The instant to stamp the rows with.</param>
+    /// <returns>One row per accounted day, oldest first. A day with no bucket is absent.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>The reply reports one undifferentiated token figure per day.</b> It does not say
+    /// how much of that was input, output, cache read or cache write, so the whole figure
+    /// goes into <see cref="TokenTotals.Input"/> and the other three components stay
+    /// <see langword="null"/> — unreported, which is not zero. Spreading the number across
+    /// components would be Altim inventing a breakdown the provider never gave, and the
+    /// tooltip would then present that invention as a reading.
+    /// </para>
+    /// <para>
+    /// <see cref="UsageDay.PeakPercent"/> is <see langword="null"/> for every row, because
+    /// these buckets are volumes and carry no percentage. The lifetime summary does report a
+    /// busiest-day figure, but turning that into a percentage would mean dividing by an
+    /// allowance OpenAI does not publish, and the result would be a number Altim computed
+    /// sitting in a field that says the provider reported it.
+    /// </para>
+    /// <para>
+    /// A date the reply gives twice is summed: both figures were reported, and dropping one
+    /// would quietly lose usage that the provider did account for.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<UsageDay> ToDays(CodexAccountUsage? usage, DateOnly from, DateOnly to, DateTimeOffset now)
+    {
+        if (usage is null || usage.DailyBuckets.Count == 0)
+        {
+            return [];
+        }
+
+        var totals = new Dictionary<DateOnly, long>();
+        foreach (CodexDailyBucket bucket in usage.DailyBuckets)
+        {
+            if (bucket.Day < from || bucket.Day > to)
+            {
+                continue;
+            }
+
+            totals[bucket.Day] = totals.TryGetValue(bucket.Day, out long running)
+                ? running + bucket.Tokens
+                : bucket.Tokens;
+        }
+
+        var days = new List<UsageDay>(totals.Count);
+        foreach (KeyValuePair<DateOnly, long> entry in totals.OrderBy(static pair => pair.Key))
+        {
+            days.Add(new UsageDay(
+                CodexProviderInfo.Id,
+                entry.Key,
+                new TokenTotals(entry.Value, null, null, null),
+                PeakPercent: null,
+                UsageDaySource.Backfilled,
+                now));
+        }
+
+        return days;
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Altim.Providers.Cli;
@@ -48,6 +49,12 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
     private const string DefaultCommand = "codex";
     private const int MaxLinesToRead = 512;
+
+    /// <summary>The property carrying the daily history. Inferred from the wire, not documented.</summary>
+    private const string DailyBucketsName = "dailyUsageBuckets";
+
+    /// <summary>The other dialect's spelling of <see cref="DailyBucketsName"/>.</summary>
+    private const string DailyBucketsAlternateName = "daily_usage_buckets";
 
     private static readonly JsonDocumentOptions DocumentOptions = new() { MaxDepth = 64 };
 
@@ -231,10 +238,11 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// defaulted to a number.
     /// </returns>
     /// <remarks>
-    /// The documented shape is <c>summary.{lifetimeTokens, currentStreakDays,
-    /// longestStreakDays, peakDailyTokens}</c> with the daily history in
-    /// <c>dailyUsageBuckets</c>. Alternate spellings are tolerated because the interface is
-    /// experimental, and the whole thing is graded best-effort.
+    /// The shape is <c>summary.{lifetimeTokens, currentStreakDays, longestStreakDays,
+    /// peakDailyTokens}</c> with the daily history in <c>dailyUsageBuckets</c>. None of
+    /// those names is documented — they were read off the wire — so alternate spellings are
+    /// tolerated, and anything unrecognised becomes an unavailable field rather than a
+    /// number. The whole thing is graded best-effort.
     /// </remarks>
     public static CodexAccountUsage? ReadAccountUsage(in JsonElement result)
     {
@@ -251,10 +259,70 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         long? current = JsonValues.ReadCount(summary, "currentStreakDays", "current_streak_days");
         long? longest = JsonValues.ReadCount(summary, "longestStreakDays", "longest_streak_days");
         long? peak = JsonValues.ReadCount(summary, "peakDailyTokens", "peak_daily_tokens");
-        long? buckets = CountArray(result, "dailyUsageBuckets", "daily_usage_buckets");
+        long? bucketCount = CountArray(result, DailyBucketsName, DailyBucketsAlternateName);
 
-        var usage = new CodexAccountUsage(lifetime, buckets, current, longest, peak);
+        var usage = new CodexAccountUsage(lifetime, bucketCount, current, longest, peak)
+        {
+            DailyBuckets = ReadDailyBuckets(result),
+        };
+
         return usage.HasAny ? usage : null;
+    }
+
+    /// <summary>
+    /// Reads the daily token history out of the account-usage result.
+    /// </summary>
+    /// <param name="result">The JSON-RPC result object.</param>
+    /// <returns>
+    /// One entry per bucket whose date and token count were both readable, in the order
+    /// they arrived. Empty when the array is absent, is not an array, or carries nothing
+    /// this reader understands.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Roughly three months of dated totals — the reason a freshly installed Altim can draw
+    /// a usage map at all. Each bucket is <b>one undifferentiated figure</b>: the reply does
+    /// not say how much of it was input, output or cache, and this reader does not pretend
+    /// otherwise.
+    /// </para>
+    /// <para>
+    /// <b>The field names here were inferred, not documented.</b> Both spellings of each
+    /// concept are accepted — <c>startDate</c>/<c>start_date</c> and
+    /// <c>tokens</c>/<c>total_tokens</c> — and the date must be an ISO calendar date,
+    /// <c>yyyy-MM-dd</c>. A bucket that fails any of that is dropped, so a rename by the
+    /// vendor produces <b>no backfill</b> — days that stay unknown — rather than a run of
+    /// zeroes or a failed read. That is the deliberate failure mode: an empty result is
+    /// honest about not knowing, and a zero is a claim.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<CodexDailyBucket> ReadDailyBuckets(in JsonElement result)
+    {
+        if (!TryGetArray(result, DailyBucketsName, DailyBucketsAlternateName, out JsonElement array))
+        {
+            return [];
+        }
+
+        var buckets = new List<CodexDailyBucket>(array.GetArrayLength());
+        foreach (JsonElement element in array.EnumerateArray())
+        {
+            if (element.ValueKind is not JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            // A bucket needs both halves. A date with no figure is a day the provider did
+            // not account for, and a figure with no date has nowhere to go: neither may be
+            // filled in from the clock or from zero.
+            if (ReadBucketDay(element) is not { } day
+                || JsonValues.ReadCount(element, "tokens", "total_tokens") is not { } tokens)
+            {
+                continue;
+            }
+
+            buckets.Add(new CodexDailyBucket(day, tokens));
+        }
+
+        return buckets;
     }
 
     /// <inheritdoc />
@@ -336,22 +404,51 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         }
     }
 
-    private static long? CountArray(in JsonElement parent, string name, string alternateName)
+    /// <summary>
+    /// Reads the one date a bucket carries, as an ISO calendar date and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The string comes through <see cref="JsonValues.ReadIdentifier(in JsonElement, string, string?)"/>,
+    /// the only string accessor these readers have, so nothing longer or more varied than an
+    /// identifier can be pulled out of the reply by a mistyped property name.
+    /// </para>
+    /// <para>
+    /// The format is exact on purpose. A lenient parse turns <c>"3"</c> into the third of
+    /// the current month, which is precisely the "malformed date silently became today"
+    /// failure this must not have: an unparseable date yields no day at all, and the
+    /// bucket is dropped.
+    /// </para>
+    /// </remarks>
+    private static DateOnly? ReadBucketDay(in JsonElement bucket)
     {
-        if (parent.ValueKind is not JsonValueKind.Object)
-        {
-            return null;
-        }
+        string? text = JsonValues.ReadIdentifier(bucket, "startDate", "start_date");
 
-        foreach (string candidate in new[] { name, alternateName })
+        return DateOnly.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day)
+            ? day
+            : null;
+    }
+
+    private static long? CountArray(in JsonElement parent, string name, string alternateName) =>
+        TryGetArray(parent, name, alternateName, out JsonElement array) ? array.GetArrayLength() : null;
+
+    private static bool TryGetArray(in JsonElement parent, string name, string alternateName, out JsonElement array)
+    {
+        if (parent.ValueKind is JsonValueKind.Object)
         {
-            if (parent.TryGetProperty(candidate, out JsonElement array) && array.ValueKind is JsonValueKind.Array)
+            if (parent.TryGetProperty(name, out array) && array.ValueKind is JsonValueKind.Array)
             {
-                return array.GetArrayLength();
+                return true;
+            }
+
+            if (parent.TryGetProperty(alternateName, out array) && array.ValueKind is JsonValueKind.Array)
+            {
+                return true;
             }
         }
 
-        return null;
+        array = default;
+        return false;
     }
 
     private static string Request(int id, string method) =>

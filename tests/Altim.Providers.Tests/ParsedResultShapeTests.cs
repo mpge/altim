@@ -46,6 +46,7 @@ public sealed class ParsedResultShapeTests
         typeof(CodexRolloutRecord),
         typeof(CodexTokenCounts),
         typeof(CodexAccountUsage),
+        typeof(CodexDailyBucket),
         typeof(CodexLiveResult),
         typeof(CodexThreadSummary),
         typeof(ClaudeStatusLineState),
