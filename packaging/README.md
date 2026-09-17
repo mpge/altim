@@ -330,6 +330,27 @@ Cross-publishing from a Windows host needs `-p:AltimPortableBuild=true`, which t
 script always passes; it is a no-op on Linux. You still cannot build the AppImage
 on Windows, because `appimagetool` is itself an AppImage.
 
+### Verifying the portable face on Windows
+
+`AltimPortableBuild=true` forces the non-Windows shape of `Altim.App` on a Windows
+host, which is the only way to compile what the Linux CI job compiles without a
+Linux machine. Nothing sets it by default:
+
+```
+dotnet build src/Altim.App -c Release -p:AltimPortableBuild=true --artifacts-path <scratch dir>
+```
+
+The output has to be redirected, because restore writes the chosen framework into
+`obj/project.assets.json` and sharing that with the normal build makes each one
+invalidate the other.
+
+Use `--artifacts-path`, **not** `-p:BaseIntermediateOutputPath`. That one applies to
+every project in the graph, so they all land in a single `obj` folder and the build
+fails with `MSB4006: There is a circular dependency in the target dependency graph
+involving target "ResolveProjectReferences"`. `--artifacts-path` keeps a subfolder
+per project, and leaves the repository's own `obj` alone, so the next ordinary build
+is not invalidated. Verified 2026-09-17 at 0 warnings.
+
 ### The `.deb` dependency list is hand-written, and has to be
 
 `packaging/linux/nfpm.yaml` lists the dependencies literally. **Do not replace it
