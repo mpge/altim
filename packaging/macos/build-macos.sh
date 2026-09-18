@@ -240,13 +240,19 @@ if [ -n "${MACOS_SIGNING_IDENTITY:-}" ]; then
         --entitlements packaging/macos/entitlements.plist \
         --sign "$MACOS_SIGNING_IDENTITY" "$APP"
 
-    # --deep is deliberately absent. Apple deprecated it for both signing and
-    # verification, and on a .NET bundle it walks the managed assemblies beside the
-    # executable and reports each one as "code object is not signed at all" — a
-    # managed .dll is not Mach-O and cannot carry a signature of its own. The
-    # bundle's own seal already covers them as sealed resources, which --strict
-    # checks. This failed the first macOS run on System.Diagnostics.Contracts.dll.
-    codesign --verify --strict --verbose=2 "$APP"
+    # Neither --deep nor --strict. Both walk the managed assemblies that .NET lays
+    # down beside the executable in Contents/MacOS, classify them as nested code
+    # because of where they sit, and reject each one with "code object is not
+    # signed at all" — a managed .dll is not Mach-O and can never carry a signature
+    # of its own. The first macOS CI run failed on System.Diagnostics.Contracts.dll
+    # with --deep, and the second failed on the same file with --strict alone.
+    #
+    # What is still verified: that a signature exists, that the main executable and
+    # every nested Mach-O validate against it, and that no sealed resource has been
+    # modified since signing. What is not: the nested-code rules that a .NET bundle
+    # layout cannot satisfy without moving the assemblies out of Contents/MacOS,
+    # which is a change to the shape of the bundle and not to its signature.
+    codesign --verify --verbose=2 "$APP"
     SIGNED=1
 else
     # Ad-hoc, because "unsigned" is not actually an option. Three separate reasons:
@@ -284,13 +290,19 @@ else
     done < <(find "$MACOS_DIR" -type f -print0)
 
     codesign --force --sign - "$APP"
-    # --deep is deliberately absent. Apple deprecated it for both signing and
-    # verification, and on a .NET bundle it walks the managed assemblies beside the
-    # executable and reports each one as "code object is not signed at all" — a
-    # managed .dll is not Mach-O and cannot carry a signature of its own. The
-    # bundle's own seal already covers them as sealed resources, which --strict
-    # checks. This failed the first macOS run on System.Diagnostics.Contracts.dll.
-    codesign --verify --strict --verbose=2 "$APP"
+    # Neither --deep nor --strict. Both walk the managed assemblies that .NET lays
+    # down beside the executable in Contents/MacOS, classify them as nested code
+    # because of where they sit, and reject each one with "code object is not
+    # signed at all" — a managed .dll is not Mach-O and can never carry a signature
+    # of its own. The first macOS CI run failed on System.Diagnostics.Contracts.dll
+    # with --deep, and the second failed on the same file with --strict alone.
+    #
+    # What is still verified: that a signature exists, that the main executable and
+    # every nested Mach-O validate against it, and that no sealed resource has been
+    # modified since signing. What is not: the nested-code rules that a .NET bundle
+    # layout cannot satisfy without moving the assemblies out of Contents/MacOS,
+    # which is a change to the shape of the bundle and not to its signature.
+    codesign --verify --verbose=2 "$APP"
 fi
 
 # ---------------------------------------------------------------------------

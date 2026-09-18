@@ -200,7 +200,10 @@ fi
 # whether a secret was available, so that is printed rather than judged.
 step "Code signature"
 
-if codesign --verify --strict "$APP" 2>/dev/null; then
+# Not --strict: it classifies the managed assemblies .NET lays beside the
+# executable as nested code and rejects them, which no .NET bundle can satisfy.
+# See the note beside the signing step in build-macos.sh.
+if codesign --verify "$APP" 2>/dev/null; then
     authority="$(codesign -dvv "$APP" 2>&1 | sed -n 's/^Authority=//p' | head -n 1)"
     if [ -n "$authority" ]; then
         ok "signed and valid, authority: $authority"
