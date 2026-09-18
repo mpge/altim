@@ -48,7 +48,7 @@ public sealed class CliRunner : ICliRunner
     /// <summary>
     /// The most standard output this runner will hold. A CLI answer that needs more than
     /// this is not an answer Altim knows how to read, and buffering it would only cost
-    /// memory in a process whose whole working-set budget is 120MB.
+    /// memory in a process whose whole idle budget is 55MB of private working set.
     /// </summary>
     public const int MaxCapturedOutputBytes = 512 * 1024;
 

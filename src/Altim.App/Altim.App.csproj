@@ -50,8 +50,13 @@
 
        Verified on 2026-09-16 against Windows 11 26200 with the VS 2022 Build Tools
        C++ workload. It is worth the step: measured against the same machine and the
-       same code, native compilation took cold start to tray icon from 627ms to
-       390ms and idle working set from 163MB to 105MB.
+       same code, native compilation took cold start to tray icon from 627ms to 390ms.
+
+       Re-measured on 2026-09-18, both builds 150 seconds after launch with no window
+       opened: 98MB working set against 147MB. The private working set, which is what
+       the budget is stated in, moves far less — 42MB against 48MB — because most of
+       what ahead-of-time compilation removes is mapped image pages rather than memory
+       Altim was spending.
 
        The ILC link step shells out to vswhere, which the Build Tools install does
        not put on PATH. If the link fails with "'vswhere.exe' is not recognized",
@@ -61,18 +66,33 @@
     <InvariantTimezone>false</InvariantTimezone>
   </PropertyGroup>
 
-  <!-- Idle footprint. ARCHITECTURE.md's budgets are under 120MB working set and under
-       5% of one core, both of which this file's settings are part of meeting. Three
-       numbers this comment has cited were retired: 80MB, because nothing ever met it;
+  <!-- Idle footprint. ARCHITECTURE.md's budgets are under 55MB of private working set,
+       under 110MB of working set, and under 5% of one core.
+
+       Four numbers this comment has cited were retired, and the reasons are worth keeping
+       because they are the same reason four times: 80MB, because nothing ever met it;
        "0.1% average", because a share of the machine is not a property of the program;
-       and 2% of one core, which the CPU budget moved off once child processes were
-       counted, and which this comment went on repeating after the documents had changed.
-       Measured 2026-09-17 on the native-compiled build with the usage map in place:
-       115.5MB working set, and 2.53% of one core over a 90 second window on a machine
-       that was actively running agents. The workstation non-concurrent collector with
-       ConserveMemory set is what the technique list prescribes: no background GC thread
-       waking a machine that is doing nothing, and a heap that is returned rather than
-       held. -->
+       2% of one core, which the CPU budget moved off once child processes were counted;
+       and "115.5MB working set", measured here on 2026-09-17 after a settle too short to
+       have settled, from a single run of a figure that moves by 13MB between runs.
+
+       Measured 2026-09-18 on the native-compiled build, mean of six interleaved runs,
+       150 seconds after launch with no window ever opened, against the real provider
+       stores while an agent was writing: 42MB private working set, 98MB working set, and
+       2.51% of one core over the last 120 seconds of each run.
+
+       These settings are part of meeting that, and they are in force in the Native AOT
+       build: an empty application built with the same properties and published the same
+       way reports ServerGC=False, ConcurrentGC=False and GCConserveMem=5 from
+       GC.GetConfigurationVariables(), Altim.exe carries the same embedded configuration
+       blob, and running this binary with DOTNET_GCConserveMemory=0 moves the working set
+       by 1.3MB, which it could not do if 5 were not otherwise applying.
+
+       What they are not is the reason the number is what it is. ConserveMemory 0, 5 and 9
+       measured 124.2MB, 122.9MB and 119.8MB on the build that preceded the sliding read
+       window; the 27MB that separated that build from this one was buffers a pool was
+       holding, which no collector setting can return. See ARCHITECTURE.md. -->
+
   <PropertyGroup>
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>

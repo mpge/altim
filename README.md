@@ -95,31 +95,51 @@ contents, commands or filenames anywhere. See [PRIVACY.md](PRIVACY.md).
 ## Performance
 
 Numbers, not adjectives. Everything below was measured on **Windows 11 26200, 16 cores, NVIDIA
-discrete graphics, 1920x1080 at 100%**, against real provider stores on that machine — 28.3 GB
-of Codex rollouts across 2,518 files and 1.3 GB of Claude Code transcripts across 2,069 — with
+discrete graphics, 1920x1080 at 100%**, against the real provider stores on that machine, with
 an agent actively working throughout, which is the expensive case rather than the flattering
-one.
+one. Those stores grow, so their size is stated beside the figures that depend on it.
 
 | | Budget | Shipping build | `dotnet build` |
 |---|---|---|---|
-| Cold start to tray icon | < 800ms | **260ms** | 0.9–1.2s |
+| Cold start to tray icon | < 800ms | **229ms** | 0.9–1.2s |
 | Popup open, already warm | < 100ms | **8.4ms**, then under 1ms | 4–43ms |
 | CPU, Altim **and its children** | < 5% of one core idle | see below | **3.1%** idle, 10.0% under load |
-| Idle working set | < 120MB | **107MB** | 156MB |
+| **Idle private working set** | < 55MB | **42MB** | 48MB |
+| Idle working set | < 110MB | **98MB** | 147MB |
 | Database | < 5MB/year | **270KB** after 7.4 hours; see below | same file |
+
+The memory rows and the cold-start figure were measured on **2026-09-18**, 150 seconds after
+launch with no window ever opened: six interleaved runs of the shipping build, one of the
+framework-dependent build. The store they ran against was 3,864 Claude Code transcripts
+totalling 1.38GB and 2,518 Codex rollout files. The other rows are from the earlier runs
+described below.
 
 "Shipping build" is `dotnet publish -c Release -r win-x64`, which compiles ahead of time.
 `dotnet build` produces a framework-dependent build that loads 77 managed assemblies and JIT
-compiles them; it is what you get from `dotnet run`, and it is 49MB heavier and three to four
-times slower to the tray icon. Both are honest numbers for what they are.
+compiles them; it is what you get from `dotnet run`, and it is three to four times slower to the
+tray icon. Both are honest numbers for what they are — and the gap between them is a good
+illustration of why the budget is on the private figure. The framework-dependent build's working
+set is **49MB** higher, because it maps a runtime and 77 assemblies; its private working set is
+**6MB** higher, because mapped code is not memory Altim is spending.
 
-**The working-set budget used to say 80MB and no build has ever met it.** It is now 120MB,
-against a measured 107MB. Most of that is mapped framework, Avalonia, Skia and graphics-driver
-pages; the live managed heap is 7MB. The hidden popup window costs 2.7MB of it, the provider
-caches almost nothing, and the GC configuration nothing at all — all three were measured before
-the number was changed. [ARCHITECTURE.md](ARCHITECTURE.md#the-working-set-budget-was-wrong-and-this-is-where-the-memory-goes)
-has the full breakdown, including the one change that would reach 80MB and why it has not been
-made.
+**The memory budget is now stated in private working set, and the number went down rather than
+up.** It said 80MB, which nothing ever met, and then 120MB, which the shipping build was missing
+by a few megabytes. Both were working set, and working set is the wrong thing to budget: 55MB of
+Altim's was pages shared with the rest of the desktop — Windows' own DLLs, the ICU data file, the
+font cache, the graphics driver — which are resident on the machine whether or not Altim is
+running. What Altim is answerable for is the private part, so that is what the budget is: **under
+55MB of private working set, against 42MB measured**. The total is published beside it because it
+is the figure one command returns.
+
+**Chasing the old number found a real bug.** The transcript reader rented one buffer for the
+whole slice it was about to read, which for the handful of transcripts over 85,000 bytes meant a
+large-object allocation that the shared array pool then held until a gen2 collection that an idle
+tray process never runs. It was **26.8MB of large object heap** against 0.09MB with an empty
+store, while the live object graph was 4.2MB. The reader now slides a 64KB window, and the same
+binary measures **97.6MB working set against 116.2MB**, with the run-to-run spread down from
+13MB to 3MB. [ARCHITECTURE.md](ARCHITECTURE.md#the-idle-memory-number-which-one-it-is-and-where-it-goes)
+has the full breakdown: what the empty-Avalonia floor costs, what each provider store costs, what
+the GC settings do and do not do, and the one change that would take another 29MB off.
 
 **CPU is a share of *one* core, not of the machine**, because "0.1% of the machine" means
 different things on a four-core laptop and a sixteen-core desktop and is not a property of the
@@ -186,7 +206,15 @@ discover that a reading had not moved — and both now compare before the writer
 - **Start-up, popup open and first readings** are timed by the application and written to
   `%APPDATA%\Altim\altim.log`. Launching Altim a second time signals the running instance to
   surface its panel, which is a repeatable way to time an open without touching the mouse.
-- **Working set** comes from the process itself: `(Get-Process Altim).WorkingSet64`.
+- **Working set** comes from the process itself: `(Get-Process Altim).WorkingSet64`. It moves by
+  a few megabytes between one look and the next, so take several.
+- **Private working set**, which is what the budget is stated in, is the resident pages that are
+  not shareable with anything else. The one-line version is the performance counter
+  `(Get-Counter '\Process(Altim)\Working Set - Private')`; the exact version is to walk the
+  process with `VirtualQueryEx` and ask `QueryWorkingSetEx` which pages are resident and which of
+  those have the `Shared` bit clear. The two differ by about 2MB, because the counter excludes
+  copy-on-write pages in mapped images and the walk includes them. The figures published here are
+  from the walk.
 - **CPU has to count the children, or it counts almost nothing.** A provider CLI runs for a
   second or two and exits, so it is gone before a sampling loop can find it, and
   `TotalProcessorTime` on the Altim process never knew it existed. Put Altim in a **job

@@ -524,12 +524,14 @@ bearing rather than a let-out.
 | Cold start to tray icon visible | < 800ms | 260ms |
 | Popup open (already warm) | < 100ms | 8.4ms first open, under 1ms after |
 | CPU, Altim and its children | < 5% of one core idle | 3.1% idle, 10.0% while an agent writes |
-| Idle working set | **< 120MB** | 107MB |
+| **Idle private working set** | **< 55MB** | 42MB (2026-09-18, mean of 6) |
+| Idle working set | < 110MB | 98MB (2026-09-18, mean of 6) |
 | Database growth | < 5MB/year at default cadence | on track; see the README |
 
 Techniques: no `MainWindow`, `ShutdownMode.OnExplicitShutdown`, lazy dashboard, workstation
-non-concurrent GC with `ConserveMemory=5` and 1MB regions, `PeriodicTimer` over `DispatcherTimer`
-for background work, diagnostics excluded from Release.
+non-concurrent GC with `ConserveMemory=5` and 1MB regions, a sliding read window so a scan never
+allocates a large object, `PeriodicTimer` over `DispatcherTimer` for background work, diagnostics
+excluded from Release.
 
 The CPU budget used to read "< 0.1% average" with no denominator, which is not a property of
 the program: the same binary doing the same work passes it on a sixteen-core machine and fails
@@ -558,71 +560,169 @@ nobody measured. The part ahead-of-time compilation moves is Altim's own share �
 and 1.8% at idle — and the rest is the provider command lines, which are the same processes
 whichever way Altim itself was compiled.
 
-### The working-set budget was wrong, and this is where the memory goes
+### The idle memory number: which one it is, and where it goes
 
-It was 80MB. Nothing built has ever met it, and the number was an aspiration written before
-anything ran. It has been replaced with a budget the product meets, and the measurements that
-set it are recorded here so the next person does not have to take the number on trust.
+The budget was 80MB, then 120MB, and both were expressed in **working set**. Working set is the
+wrong number to budget, for the same reason "0.1% of the machine" was the wrong number for CPU:
+most of it is not a property of this program. Of the 122.9MB Altim's working set used to read,
+**55.4MB was pages shared with the rest of the desktop** — `ntdll`, `combase`, `shell32`,
+DirectWrite, the ICU data file, the font cache and the NVIDIA user-mode driver, all of them
+resident on this machine whether or not Altim is running. Working set also moves when other
+processes map or release the same images, and the operating system trims it under pressure that
+has nothing to do with Altim.
 
-Measured on Windows 11 26200, 16 cores, NVIDIA discrete graphics, against the real provider
-stores on that machine (28.3GB of Codex rollouts, 1.3GB of Claude transcripts), four minutes
-after start:
+**The budget is therefore stated in private working set**: the resident pages that exist only
+because Altim is running. It is the figure Altim is responsible for, it is what the machine gets
+back when Altim exits, and it is markedly less noisy than the total. Working set is published
+beside it because it is the number a reader can get in one command and because it is what
+Resource Monitor shows.
 
-| Build | Working set | Private | Threads |
+One thing private working set leaves out, so it is published too: Altim's own binary's resident
+code pages. They are file-backed, so they do not count as private, but nothing else on the
+machine maps them. That is **15.6MB** of a 28.7MB Native AOT image.
+
+#### Conditions
+
+Measured **2026-09-18**. Everything below is the **Native AOT publish**, launched and left for
+150 seconds with **no window ever opened** — the panel is primed off screen at start-up, as it
+always is, and never shown. Windows 11 26200, 16 cores, 32GB, NVIDIA discrete graphics. The real
+provider stores are on this machine: **3,864 Claude Code transcripts totalling 1.38GB**, of which
+the 96 a scan selects are 37MB with a median of 16KB, plus the Codex rollout store. An agent was
+writing transcripts throughout.
+
+Each figure is the mean of three interleaved runs unless its own row says otherwise, and the
+spreads are given rather than the means alone, because a single reading of this number is worth
+little: repeated runs of the same binary on the same machine landed anywhere between 111MB and
+124MB before the change described below. The software-rendering row is one run, taken to size a
+trade rather than to set a budget.
+
+#### Where it goes
+
+| Configuration | Working set | Private working set | Managed heap |
 |---|---|---|---|
-| Framework-dependent `dotnet build` | 156MB | 105MB | 29 |
-| **Native AOT publish — what ships** | **107MB** | 99MB | 26 |
-| Native AOT, both provider stores empty | 89MB | 78MB | 25 |
+| Empty Avalonia app, software rendering, one hidden window | 31.4MB | 6.6MB | 1.8MB |
+| Empty Avalonia app, no window at all | 57.0MB | 15.3MB | 1.5MB |
+| Empty Avalonia app, one primed hidden window | 60.6MB | 15.8MB | 1.8MB |
+| Altim, both provider stores empty | 95.8MB | 40.7MB | 18.9MB |
+| Altim, real stores — **before** the read-window change | 122.9MB | 67.5MB | 46.0MB |
+| Altim, real stores — **after** it | 97.6MB | 42.1MB | 21.0MB |
 
-Where the 107MB is, from a walk of the process's committed regions cross-referenced against its
-resident pages:
+The second and third rows are the floor, measured by publishing an empty Avalonia 12 application in the
+same configuration as this one — Native AOT, the same GC settings, the Simple theme, the Inter
+font, `ShutdownMode.OnExplicitShutdown`, and one window primed off screen and hidden exactly as
+`PopupHost.Prime` does it. **60.6MB is what Avalonia, Skia, the D3D stack and the .NET runtime
+cost before Altim exists**, and it is almost perfectly repeatable: three runs spanned 0.2MB.
+Holding the hidden window costs 3.6MB of that, which is the price ARCHITECTURE requires paying,
+because screen geometry is unreachable without a live top level.
 
-| | Working set | Committed |
+The region walk of one of those pre-change runs, which read 121.8MB, bucketed by
+`VirtualQueryEx` type and cross-referenced with `QueryWorkingSetEx` for residency:
+
+| | Resident | Committed |
 |---|---|---|
-| Image (mapped executables) | 55MB | 289MB reserved address space |
-| Private | 49MB | 63MB |
-| Other file- and pagefile-backed sections | 3MB | 58MB |
+| Image (mapped executables) | 56.0MB | 293.7MB |
+| Private (heaps, stacks, TEBs) | 62.6MB | 79.3MB |
+| Other file-backed sections | 3.1MB | 59.5MB |
 
-- **55MB of image pages.** 14MB of it is Altim's own AOT binary; the rest is Skia, ICU,
-  HarfBuzz, SQLite, DirectWrite and — 10.5MB of it — the NVIDIA user-mode driver, most of that
-  shared with every other process that has it mapped. The framework-dependent build spends
-  another 18MB here on `System.Private.CoreLib`, `coreclr`, `clrjit` and 77 managed assemblies,
-  which is what AOT removes.
-- **49MB private.** The managed heap is **7MB live** against 34MB committed; the rest is runtime
-  structures, native allocators and thread stacks.
+Committed is far larger than resident in every row, which is the ordinary shape of mapped images
+and a reserved address space rather than memory anyone is paying for. The process also reserves
+69GB it has not committed at all, most of it the GC's region range.
 
-Committed is much larger than resident in every row, which is the normal shape of a reserved
-address space rather than memory anyone is paying for.
+Of the 56.0MB of image pages, **15.6MB is Altim's own binary**, 9.6MB is the NVIDIA user-mode
+driver, 4.8MB is the native payload Altim ships (Skia, ANGLE, SQLite, HarfBuzz) and the remaining
+26MB is Windows. Of the 62.6MB private, **45.8MB was the managed heap** and 16.8MB is native
+allocators, thread stacks and thread environment blocks across 25 threads.
 
-Four candidate explanations were tested. Three are not the cause and one is:
+#### The managed heap was the whole of the difference, and it was not user data
 
-- **The hidden popup window is not it.** Never priming the window at all saved 2.7MB. Avalonia
-  brings its rendering stack up whether or not a top level exists, so keeping the panel alive —
-  which ARCHITECTURE.md requires, because screen geometry is unreachable without it — costs
-  almost nothing. This was the most likely suspect and it is wrong.
-- **The provider caches are not the bulk of it, but they are not nothing.** Pointing both
-  providers at empty stores measures 89MB against 107MB, so the real 28.3GB and 1.3GB stores
-  are worth about 18MB of working set. Almost none of that is managed: the live heap is 7MB
-  either way, which is the incremental scanner working as designed. It is the pages touched
-  reading file tails plus the message-identity set that has to outlive a pass, and it is the
-  price of reading the tails rather than the files.
-- **The GC configuration is not it.** An aggressive compacting gen2 collection with LOH
-  compaction, run after the expensive first scan, returned 1.2MB.
+Reading the real stores cost 27.1MB of working set, and 27.1MB of managed heap. Attributing it by
+store settles which reader: with the Codex store real and the transcript store empty the heap is
+17.1MB twice over, which is the empty-store baseline; with the transcript store real and Codex
+empty it is 32.5MB and 44.9MB on two runs. **It is the transcript reader.**
 
-**The fourth is the answer: the GPU rendering stack.** Running Avalonia with
-`Win32RenderingMode.Software` — no D3D11, no DXGI, no ANGLE, no vendor user-mode driver —
-measures **80MB working set, 49MB private and 13 threads**, against 107MB, 99MB and 26. That is
-the whole of the gap, and it closes it exactly.
+The framework-dependent build reports generation sizes, and they name it exactly. With the real
+store the **large object heap is 26.78MB**; with the same build pointed at an empty transcript
+store it is **0.09MB**. A `dotnet-gcdump`, which forces a blocking gen2 collection before it
+walks, reports **4.2MB live across 35,199 objects**. So the 27MB was neither the day and session
+totals, nor the message-identity set, nor fragmentation. It was buffers.
 
-**It has not been taken, and the reason is not inertia.** On this machine the trade looks free:
-the popup is pixel-identical between the two modes, including its shadow and transparency, the
-dashboard renders correctly including the history chart, and the first popup open is 8.4ms
-against 9.1ms. What cannot be tested here is the case the change would actually hurt — software
-rasterisation costs pixels, so a 1400x900 dashboard being resized on a 4K display is several
-megapixels per frame on the CPU where it is currently free. Choosing the rendering backend for
-the whole application on the evidence of one 1080p display with a discrete GPU is not a trade to
-make silently. The measurement is recorded here so it can be made deliberately, and it is one
-line in `Program.cs` when it is.
+`JsonlTailReader` rented one array for the whole slice it was about to read, up to 8MB. Most
+transcripts are far smaller than that, but five of the 96 a cold scan reads are over 85,000 bytes
+and one is 16.2MB — and 85,000 bytes is where an array stops being an ordinary allocation and
+becomes a large object. `ArrayPool<byte>.Shared` holds returned arrays per core until a gen2
+collection sweeps them, and a tray process at idle allocates about 25KB every two seconds, which
+is nowhere near enough to cause one. The buffers simply stayed.
+
+**The reader now slides a 64KB window** instead of renting the slice, growing only for a line
+longer than the window and never for a tail read's discarded fragment. Measured A/B against the
+previous binary, six interleaved runs each:
+
+| | Before | After |
+|---|---|---|
+| Working set | 116.2MB [111.1–121.1] | **97.6MB** [95.8–99.2] |
+| Private working set | 60.7MB | **42.1MB** |
+| Managed heap | 39.5MB | **21.0MB** |
+| Altim's own CPU, 120s window | 2.62% of one core | 2.51% |
+| Cold start to tray icon | 221ms | 229ms |
+| First readings complete | 4,643ms | 4,763ms |
+
+The spread is the point of the first row as much as the mean: nine pre-change runs spanned
+111MB to 124MB, and six post-change runs spanned 95.8MB to 99.2MB. The variance was the buffers
+too, because how much a cold scan rents depends on how much the agent happened to have written.
+
+Equivalence was checked against the real store rather than argued: the old and the new reader
+were run over the same 96 files, 23.5MB, 2,004 usage lines, comparing values, line counts, skip
+counts, end offsets and both flags, for forward reads and for tail reads at 8KB and 200KB.
+**Zero differences.**
+
+#### The GC settings are in force, and they were not the lever
+
+`Altim.App.csproj` asks for workstation non-concurrent GC and `System.GC.ConserveMemory=5`. That
+kind of setting is exactly the kind that stops applying without saying so, so it was checked
+rather than assumed. An empty application built with the same csproj settings and
+Native-AOT-published reports `ServerGC=False`, `ConcurrentGC=False`, `GCConserveMem=5` from
+`GC.GetConfigurationVariables()`; `Altim.exe` carries the same embedded configuration blob; and
+`DOTNET_GCConserveMemory=0` on the shipping binary raises the working set by 1.3MB and the heap
+by about 2MB, which it could only do if 5 were in force to begin with.
+
+They were still not where the memory was. Measured on the shipping binary, two runs each:
+
+| GC configuration | Working set | Managed heap |
+|---|---|---|
+| `ConserveMemory=0` | 124.2MB | 46.7MB |
+| `ConserveMemory=5` (what ships) | 122.9MB | 46.0MB |
+| `ConserveMemory=9` | 119.8MB | 44.1MB |
+| gen0 max budget 16MB, environment override | 120.9MB | 44.6MB |
+| gen0 max budget 4MB, environment override | 118.7MB | 41.8MB |
+
+Every one of those is a few megabytes against a spread of two, because the memory was live by
+reference rather than collectable slack. No GC configuration can return a buffer a pool is still
+holding. That is why the fix is in the reader.
+
+#### What would have to change to go lower
+
+The floor is 60.6MB and Altim's own part is now 37MB, so the two ways down are both structural.
+
+- **The GPU rendering stack, which is now the largest single item.** Running Avalonia with
+  `Win32RenderingMode.Software` — no D3D11, no DXGI, no ANGLE, no vendor user-mode driver — takes
+  the empty Avalonia floor from **60.7MB working set, 15.8MB private and 17 threads to 31.4MB,
+  6.6MB and 3**. That is 29.3MB and 14 threads for the GPU path in a program that draws a panel
+  a few times a day, and it matches the 80MB against 107MB measured on Altim itself before this
+  work. It has not been taken, and the reason is not inertia: on this machine the trade looks
+  free, since the popup was pixel-identical between the two modes when that was checked, and the
+  first popup open was 8.4ms against 9.1ms, both of them measurements from before this work. What cannot be tested here is the case it would hurt, because software
+  rasterisation costs pixels and a 1400x900 dashboard being resized on a 4K display is several
+  megapixels per frame on the CPU where it is currently free. Choosing the rendering backend for
+  the whole application on the evidence of one 1080p display with a discrete GPU is not a trade
+  to make silently. It is one line in `Program.cs` when it is made.
+- **The binary.** 15.6MB of resident image is Altim's own 28.7MB AOT image. `IlcOptimizationPreference`,
+  `UseSystemResourceKeys` and friends would move it, and each of them trades something — code
+  speed, or the exception text a developer sees. None has been measured yet, so none is claimed.
+
+The budget moved from 80MB to 120MB because 80MB was an aspiration nothing ever met. It has moved
+to 55MB of private working set because the metric changed to the honest one and 27MB of the old
+number turned out to be a bug. It should not move again without the same kind of evidence: a
+breakdown that says which bytes, and a measurement that survives repetition.
 
 ## Testing
 
