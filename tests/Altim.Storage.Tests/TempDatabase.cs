@@ -142,18 +142,15 @@ internal sealed class TempDatabase : IDisposable
 
         Delete(_directory);
 
-        // The shared parent is emptied by whichever test finishes last; the others find
-        // it still occupied, which is not their problem.
-        try
-        {
-            Directory.Delete(Root);
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
+        // The shared parent is deliberately left behind. Removing it when it happened to be
+        // empty raced every other test that was about to create its own directory inside it:
+        // xUnit runs these classes in parallel, so "the last one out tidies up" and "the next
+        // one in is already opening the door" are the same moment. macOS reported it as
+        // Invalid argument from mkdir and failed the test that lost; Windows and Linux
+        // tolerated the same race quietly, which is why it survived until macOS joined CI.
+        //
+        // What it bought was one empty directory under the system temp path, which the
+        // operating system already cleans up. That is not worth a flaky suite.
     }
 
     /// <summary>

@@ -240,7 +240,13 @@ if [ -n "${MACOS_SIGNING_IDENTITY:-}" ]; then
         --entitlements packaging/macos/entitlements.plist \
         --sign "$MACOS_SIGNING_IDENTITY" "$APP"
 
-    codesign --verify --deep --strict --verbose=2 "$APP"
+    # --deep is deliberately absent. Apple deprecated it for both signing and
+    # verification, and on a .NET bundle it walks the managed assemblies beside the
+    # executable and reports each one as "code object is not signed at all" — a
+    # managed .dll is not Mach-O and cannot carry a signature of its own. The
+    # bundle's own seal already covers them as sealed resources, which --strict
+    # checks. This failed the first macOS run on System.Diagnostics.Contracts.dll.
+    codesign --verify --strict --verbose=2 "$APP"
     SIGNED=1
 else
     # Ad-hoc, because "unsigned" is not actually an option. Three separate reasons:
@@ -278,7 +284,13 @@ else
     done < <(find "$MACOS_DIR" -type f -print0)
 
     codesign --force --sign - "$APP"
-    codesign --verify --deep --strict --verbose=2 "$APP"
+    # --deep is deliberately absent. Apple deprecated it for both signing and
+    # verification, and on a .NET bundle it walks the managed assemblies beside the
+    # executable and reports each one as "code object is not signed at all" — a
+    # managed .dll is not Mach-O and cannot carry a signature of its own. The
+    # bundle's own seal already covers them as sealed resources, which --strict
+    # checks. This failed the first macOS run on System.Diagnostics.Contracts.dll.
+    codesign --verify --strict --verbose=2 "$APP"
 fi
 
 # ---------------------------------------------------------------------------
