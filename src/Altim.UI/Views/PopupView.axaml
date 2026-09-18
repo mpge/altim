@@ -5,12 +5,18 @@
   status and the one action. The rules are full bleed, so the padding belongs to each section
   rather than to the panel.
 
-  The reading heads the panel: one dial carrying the window nearest its ceiling, the figure
-  inside its face, and under it the window's name with its provider and when that window
-  resets. The dial is the only place the panel shows the configured threshold, which is why
-  the hero is a dial rather than a bigger number. The figure and the name are the view's own
-  text blocks rather than something the control draws, so they take the type scale's Figure,
-  Lead and Caption and the design system's tabular numerals.
+  The reading heads the panel: one dial carrying one sweep per provider on concentric rings,
+  the figure of whichever of them is nearest its ceiling inside its face, under it that
+  window's name with its provider and when it resets, and under that a legend naming every
+  ring. The dial is the only place the panel shows the configured threshold, which is why the
+  hero is a dial rather than a bigger number. The figure and the name are the view's own text
+  blocks rather than something the control draws, so they take the type scale's Figure, Lead
+  and Caption and the design system's tabular numerals.
+
+  Nothing on the face is combined. Two providers' percentages are proportions of two
+  different, undisclosed allowances, so there is no single figure to show: the rings share a
+  face, a graduation tape and an angular mapping because they share a unit, and the legend is
+  what turns a ring back into a provider.
 
   A provider is one line here, not a stack of metric rows: the mark, the name, and every window
   it reports as "5h 42% . 7d 68%" with the figures in the ink and the windows in grey. There
@@ -59,9 +65,8 @@
                 Spacing="{DynamicResource AltimSpace8}">
 
       <Panel HorizontalAlignment="Center">
-        <controls:Dial Value="{Binding Headline.Value}"
-                       Threshold="{Binding Headline.Threshold}"
-                       AutomationProperties.Name="{Binding Headline.SourceLabel}" />
+        <controls:Dial Readings="{Binding DialReadings}"
+                       AutomationProperties.Name="{Binding DialLabel}" />
 
         <!-- Inside the face. The dial's band is 14 deep and the clear circle inside it is
              116 across, which is what the face was sized against. The figure is the dial's
@@ -83,6 +88,46 @@
                    Theme="{DynamicResource AltimCaptionMetricText}"
                    Text="{Binding Headline.ResetText}" />
       </StackPanel>
+
+      <!-- The legend. A ring with nothing naming it is a ring nobody can read, and this is
+           the panel's primary surface. The mark is the ring itself, at the ring's own place
+           in the stack, so the widest circle is the outermost arc without anybody being told
+           the convention; the rows stand in the same order as the rings. A provider that
+           reported no figure keeps its row and shows an em dash, because unknown is not
+           zero and a ring missing from the legend would be a provider missing from the
+           panel. -->
+      <ItemsControl ItemsSource="{Binding DialReadings}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="{DynamicResource AltimSpace4}" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="controls:DialReading">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <Panel Grid.Column="0"
+                     Width="{DynamicResource AltimDialLegendMarkSize}"
+                     Height="{DynamicResource AltimDialLegendMarkSize}"
+                     VerticalAlignment="Center">
+                <Ellipse Classes="dialRing"
+                         Width="{Binding LegendMarkDiameter}"
+                         Height="{Binding LegendMarkDiameter}" />
+              </Panel>
+              <TextBlock Grid.Column="1"
+                         Margin="8,0,8,0"
+                         VerticalAlignment="Center"
+                         TextTrimming="CharacterEllipsis"
+                         Theme="{DynamicResource AltimLabelText}"
+                         Text="{Binding Label}" />
+              <TextBlock Grid.Column="2"
+                         VerticalAlignment="Center"
+                         Theme="{DynamicResource AltimLabelMetricText}"
+                         FontWeight="{DynamicResource AltimFontWeightHeading}"
+                         Text="{Binding PercentText}" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
 
     </StackPanel>
 

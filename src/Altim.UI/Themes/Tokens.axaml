@@ -68,6 +68,25 @@
       <SolidColorBrush x:Key="AltimChartLineSecondaryBrush" Color="#666666" />
       <SolidColorBrush x:Key="AltimChartLabelBrush" Color="#666666" />
 
+      <!-- The dial's three bands, aviation convention: the range an instrument is expected
+           to sit in, the range that wants watching, and the range past the limit. The sweep
+           is coloured by WHERE IT HAS REACHED rather than repainted whole, and both
+           boundaries land on a mark the face draws anyway - the full depth graduation at 50
+           and the two hairline threshold index - so taking every hue away leaves the arc's
+           length, those two marks and the figure saying the same thing.
+
+           Blue to amber to red rather than green to amber to red. Green and red are the one
+           pair protanopia and deuteranopia cannot separate; a blue is on the other end of
+           the axis both dichromacies keep. Caution and exceeded both fall toward the yellow
+           pole for those two, so they are separated by lightness instead: every band stands
+           at least 3:1 from its own ground under normal vision, protanopia, deuteranopia and
+           tritanopia alike. The meter is not banded - it reports one of several levels in a
+           column, where three colours per rail would be decoration. -->
+      <SolidColorBrush x:Key="AltimDialNormalBrush" Color="#1D4ED8" />
+      <SolidColorBrush x:Key="AltimDialCautionBrush" Color="#CA6A04" />
+      <SolidColorBrush x:Key="AltimDialExceededBrush" Color="#7F1D1D" />
+
+
       <!-- The usage map's ramp: five steps of TextPrimary opacity and nothing else.
            Monochrome in both variants, because the map carries a quantity and a provider's
            accent carries identity - a square tinted by whose row it is in would be reading
@@ -128,6 +147,25 @@
       <SolidColorBrush x:Key="AltimChartLineSecondaryBrush" Color="#666666" />
       <SolidColorBrush x:Key="AltimChartLabelBrush" Color="#666666" />
 
+      <!-- The dial's three bands, aviation convention: the range an instrument is expected
+           to sit in, the range that wants watching, and the range past the limit. The sweep
+           is coloured by WHERE IT HAS REACHED rather than repainted whole, and both
+           boundaries land on a mark the face draws anyway - the full depth graduation at 50
+           and the two hairline threshold index - so taking every hue away leaves the arc's
+           length, those two marks and the figure saying the same thing.
+
+           Blue to amber to red rather than green to amber to red. Green and red are the one
+           pair protanopia and deuteranopia cannot separate; a blue is on the other end of
+           the axis both dichromacies keep. Caution and exceeded both fall toward the yellow
+           pole for those two, so they are separated by lightness instead: every band stands
+           at least 3:1 from its own ground under normal vision, protanopia, deuteranopia and
+           tritanopia alike. The meter is not banded - it reports one of several levels in a
+           column, where three colours per rail would be decoration. -->
+      <SolidColorBrush x:Key="AltimDialNormalBrush" Color="#1D4ED8" />
+      <SolidColorBrush x:Key="AltimDialCautionBrush" Color="#CA6A04" />
+      <SolidColorBrush x:Key="AltimDialExceededBrush" Color="#7F1D1D" />
+
+
 
       <!-- The usage map's ramp: five steps of TextPrimary opacity and nothing else.
            Monochrome in both variants, because the map carries a quantity and a provider's
@@ -187,6 +225,25 @@
       <SolidColorBrush x:Key="AltimChartLinePrimaryBrush" Color="#F2F2F3" />
       <SolidColorBrush x:Key="AltimChartLineSecondaryBrush" Color="#8A8A90" />
       <SolidColorBrush x:Key="AltimChartLabelBrush" Color="#8A8A90" />
+
+      <!-- The dial's three bands, aviation convention: the range an instrument is expected
+           to sit in, the range that wants watching, and the range past the limit. The sweep
+           is coloured by WHERE IT HAS REACHED rather than repainted whole, and both
+           boundaries land on a mark the face draws anyway - the full depth graduation at 50
+           and the two hairline threshold index - so taking every hue away leaves the arc's
+           length, those two marks and the figure saying the same thing.
+
+           Blue to amber to red rather than green to amber to red. Green and red are the one
+           pair protanopia and deuteranopia cannot separate; a blue is on the other end of
+           the axis both dichromacies keep. Caution and exceeded both fall toward the yellow
+           pole for those two, so they are separated by lightness instead: every band stands
+           at least 3:1 from its own ground under normal vision, protanopia, deuteranopia and
+           tritanopia alike. The meter is not banded - it reports one of several levels in a
+           column, where three colours per rail would be decoration. -->
+      <SolidColorBrush x:Key="AltimDialNormalBrush" Color="#3B82F6" />
+      <SolidColorBrush x:Key="AltimDialCautionBrush" Color="#FCD34D" />
+      <SolidColorBrush x:Key="AltimDialExceededBrush" Color="#E04747" />
+
 
 
       <!-- The usage map's ramp: five steps of TextPrimary opacity and nothing else.

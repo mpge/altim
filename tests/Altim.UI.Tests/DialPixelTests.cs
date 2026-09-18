@@ -258,21 +258,22 @@ public sealed class DialPixelTests
     public void TheSweepRunsFromNothingUsedToTheReading(string name)
     {
         ThemeVariant variant = Variant(name);
-        var dial = new Dial { Value = 62d };
+        var dial = new Dial { Value = 62d, Threshold = 80d };
 
         using PixelHost host = Show(dial, variant);
         Frame frame = host.Capture();
 
         Point centre = Centre(host, dial);
-        Color fill = Token(variant, "AltimMeterFillBrush");
+        Color normal = Token(variant, "AltimDialNormalBrush");
+        Color caution = Token(variant, "AltimDialCautionBrush");
         Color track = Token(variant, "AltimMeterTrackBrush");
         double reading = Dial.AngleFor(62d);
 
         Assert.True(
-            Ink.Near(frame.At(Polar(centre, RailCentre, Dial.AngleFor(2d))), fill, 3),
+            Ink.Near(frame.At(Polar(centre, RailCentre, Dial.AngleFor(2d))), normal, 3),
             "The sweep does not start at nothing used.");
         Assert.True(
-            Ink.Near(frame.At(Polar(centre, RailCentre, reading - 4d)), fill, 3),
+            Ink.Near(frame.At(Polar(centre, RailCentre, reading - 4d)), caution, 3),
             "The sweep stops short of the reading.");
         Assert.True(
             Ink.Near(frame.At(Polar(centre, RailCentre, reading + 4d)), track, 3),
@@ -280,6 +281,103 @@ public sealed class DialPixelTests
         Assert.True(
             Ink.Near(frame.At(Polar(centre, RailCentre, Dial.AngleFor(99d))), track, 3),
             "The rail is filled at the ceiling on a reading of 62.");
+    }
+
+    /// <summary>
+    /// The sweep changes colour where the bands change and nowhere else: normal up to half
+    /// way, caution from there to the configured threshold, and past the threshold from there
+    /// on. Both boundaries are levels the product already treats as meaningful, and each one
+    /// stands on a mark the face draws anyway.
+    /// </summary>
+    /// <param name="name">The theme variant to render under.</param>
+    [AvaloniaTheory]
+    [MemberData(nameof(Variants))]
+    public void TheSweepIsBandedAtTheTwoBoundaries(string name)
+    {
+        ThemeVariant variant = Variant(name);
+        var dial = new Dial { Value = 95d, Threshold = 80d };
+
+        using PixelHost host = Show(dial, variant);
+        Frame frame = host.Capture();
+
+        Point centre = Centre(host, dial);
+        Color normal = Token(variant, "AltimDialNormalBrush");
+        Color caution = Token(variant, "AltimDialCautionBrush");
+        Color exceeded = Token(variant, "AltimDialExceededBrush");
+
+        // Three inks, not one repainted: the bands are told apart before anything is measured.
+        Assert.NotEqual(normal, caution);
+        Assert.NotEqual(caution, exceeded);
+        Assert.NotEqual(normal, exceeded);
+
+        foreach ((double level, Color want, string band) in (ValueTuple<double, Color, string>[])
+        [
+            (5d, normal, "normal"),
+            (30d, normal, "normal"),
+            (48d, normal, "normal"),
+            (52d, caution, "caution"),
+            (70d, caution, "caution"),
+            (78d, caution, "caution"),
+            (83d, exceeded, "exceeded"),
+            (93d, exceeded, "exceeded"),
+        ])
+        {
+            double degrees = Dial.AngleFor(level);
+            Assert.True(
+                Ink.Near(frame.At(Polar(centre, RailCentre, degrees)), want, 4),
+                $"At {level}% the sweep is not the {band} band: "
+                    + frame.Describe(Dot(centre, RailCentre, degrees)));
+        }
+    }
+
+    /// <summary>
+    /// With every colour taken away the reading is still there: the sweep's own length is a
+    /// different grey from the track it stops in, and the two band boundaries are still marks
+    /// on the engraving rather than colour changes.
+    /// </summary>
+    /// <param name="name">The theme variant to render under.</param>
+    /// <remarks>
+    /// This is the promise that lets colour be added at all. Colour says where the reading has
+    /// got to and says nothing geometry does not also say, so a greyscale print, a photocopy
+    /// or a reader who cannot separate two hues loses the emphasis and keeps the reading.
+    /// </remarks>
+    [AvaloniaTheory]
+    [MemberData(nameof(Variants))]
+    public void TheReadingSurvivesHavingEveryColourRemoved(string name)
+    {
+        ThemeVariant variant = Variant(name);
+        var dial = new Dial { Value = 62d, Threshold = 80d };
+
+        using PixelHost host = Show(dial, variant);
+        Frame frame = host.Capture();
+
+        Point centre = Centre(host, dial);
+        double track = Grey(frame.At(Polar(centre, RailCentre, Dial.AngleFor(90d))));
+
+        // Where the sweep has reached, and where it has not, are different greys either side
+        // of the reading, in all three bands: the length is legible with no hue at all.
+        foreach (double level in (double[])[5d, 30d, 48d, 55d, 60d])
+        {
+            double swept = Grey(frame.At(Polar(centre, RailCentre, Dial.AngleFor(level))));
+            Assert.True(
+                Math.Abs(swept - track) > 0.15d,
+                $"At {level}% the sweep and the track are the same grey: {swept:F3} against "
+                    + $"{track:F3}.");
+        }
+
+        // The two boundaries are marks, not colour changes. Half way is a full depth
+        // graduation and the threshold is the index, and both are found by the reader that
+        // finds every other mark, which is told a ground and an ink and never a hue.
+        IReadOnlyList<Mark> marks = MarksRound(
+            frame,
+            centre,
+            (Dial.Size / 2d) - 1d,
+            Token(variant, "AltimSurfaceBrush"),
+            Token(variant, "AltimMeterScaleBrush"));
+
+        Assert.Equal(20, marks.Count);
+        AssertAt(Dial.AngleFor(50d), Nearest(marks, Dial.AngleFor(50d)));
+        AssertAt(Dial.AngleFor(80d), Nearest(marks, Dial.AngleFor(80d)));
     }
 
     /// <summary>
@@ -299,25 +397,44 @@ public sealed class DialPixelTests
         Frame frame = host.Capture();
 
         Point centre = Centre(host, dial);
-        Color fill = Token(variant, "AltimMeterFillBrush");
+        Color caution = Token(variant, "AltimDialCautionBrush");
+        Color exceeded = Token(variant, "AltimDialExceededBrush");
         Color index = Token(variant, "AltimMeterThresholdBrush");
         Color ground = Token(variant, "AltimSurfaceBrush");
 
         Assert.True(
-            Ink.Near(frame.At(Polar(centre, RailCentre, Dial.AngleFor(99d))), fill, 3),
+            Ink.Near(frame.At(Polar(centre, RailCentre, Dial.AngleFor(99d))), exceeded, 3),
             "The rail is not filled at the ceiling on a reading of 100.");
 
-        // Over the filled rail, short of the round ends where the page starts again.
-        Mark only = Assert.Single(MarksRound(
+        // The index stands exactly where the two bands meet, which is the one place a colour
+        // change could be mistaken for it, so it is looked for from each side in turn against
+        // that side's own band. A mark found in both is a mark rather than the seam.
+        AssertAt(Dial.AngleFor(80d), Assert.Single(MarksRound(
             frame,
             centre,
             RailCentre,
-            fill,
+            caution,
             index,
-            over: Dial.AngleFor(10d),
-            until: Dial.AngleFor(95d)));
+            over: Dial.AngleFor(60d),
+            until: Dial.AngleFor(80d))));
+        AssertAt(Dial.AngleFor(80d), Assert.Single(MarksRound(
+            frame,
+            centre,
+            RailCentre,
+            exceeded,
+            index,
+            over: Dial.AngleFor(80d),
+            until: Dial.AngleFor(95d))));
 
-        AssertAt(Dial.AngleFor(80d), only);
+        // And the two bands do meet there rather than somewhere near it.
+        Assert.True(
+            Ink.Near(frame.At(Polar(centre, RailCentre, Dial.AngleFor(76d))), caution, 4),
+            "The caution band does not run up to the threshold: "
+                + frame.Describe(Dot(centre, RailCentre, Dial.AngleFor(76d))));
+        Assert.True(
+            Ink.Near(frame.At(Polar(centre, RailCentre, Dial.AngleFor(84d))), exceeded, 4),
+            "The exceeded band does not begin at the threshold: "
+                + frame.Describe(Dot(centre, RailCentre, Dial.AngleFor(84d))));
 
         // The engraving is untouched by a full sweep: twenty graduations, and the index
         // standing on the one at 80 rather than in place of it.
@@ -336,12 +453,12 @@ public sealed class DialPixelTests
     {
         ThemeVariant variant = Variant(name);
         Color track = Token(variant, "AltimMeterTrackBrush");
-        Color fill = Token(variant, "AltimMeterFillBrush");
         Color index = Token(variant, "AltimMeterThresholdBrush");
         Color ground = Token(variant, "AltimSurfaceBrush");
 
         var zeroDial = new Dial { Value = 0d, Threshold = 80d };
         var unknownDial = new Dial { Threshold = 80d };
+        var fullDial = new Dial { Value = 40d, Threshold = 80d };
 
         using PixelHost zeroHost = Show(zeroDial, variant);
         Frame zero = zeroHost.Capture();
@@ -349,6 +466,9 @@ public sealed class DialPixelTests
 
         using PixelHost unknownHost = Show(unknownDial, variant);
         Frame unknown = unknownHost.Capture();
+
+        using PixelHost fullHost = Show(fullDial, variant);
+        Frame full = fullHost.Capture();
 
         // A reported nothing has a rail behind it. An unreported reading has the page.
         Assert.True(
@@ -369,9 +489,23 @@ public sealed class DialPixelTests
             PaintedAcrossTheBand(zero, centre, ground) >= 7,
             "A reading of nothing did not fill its rail across the band.");
 
-        // And no sweep anywhere. A dial with nothing to report must not put its reading at the
-        // bottom of the scale, which is the one thing that would read as a reported zero.
-        Assert.Equal(0, unknown.Count(Face(centre), c => Ink.Near(c, fill, 6)));
+        // And no sweep anywhere, in any band. A dial with nothing to report must not put its
+        // reading at the bottom of the scale, which is the one thing that would read as a
+        // reported zero.
+        foreach (string band in (string[])
+            ["AltimDialNormalBrush", "AltimDialCautionBrush", "AltimDialExceededBrush"])
+        {
+            Color ink = Token(variant, band);
+            Assert.Equal(0, unknown.Count(Face(centre), c => Ink.Near(c, ink, 6)));
+
+            // The same reader does find the reported reading, so the count above is zero
+            // because there is nothing there rather than because it was looking for a colour
+            // nothing on this dial is ever painted in.
+            Assert.True(
+                band != "AltimDialNormalBrush"
+                    || full.Count(Face(centre), c => Ink.Near(c, ink, 6)) > 100,
+                $"{band} was not found on a dial that does report a reading.");
+        }
     }
 
     /// <summary>
@@ -668,6 +802,23 @@ public sealed class DialPixelTests
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// What a colour comes out as with every hue taken away: its relative luminance, from 0
+    /// to 1, through the sRGB transfer function rather than a channel average.
+    /// </summary>
+    private static double Grey(Color colour)
+    {
+        static double Linear(byte channel)
+        {
+            double value = channel / 255d;
+            return value <= 0.04045d ? value / 12.92d : Math.Pow((value + 0.055d) / 1.055d, 2.4d);
+        }
+
+        return (0.2126d * Linear(colour.R))
+            + (0.7152d * Linear(colour.G))
+            + (0.0722d * Linear(colour.B));
     }
 
     private static Color Token(ThemeVariant variant, string key)

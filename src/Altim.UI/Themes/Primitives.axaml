@@ -138,6 +138,14 @@
        and DialTests fails if the two disagree. -->
   <x:Double x:Key="AltimDialSize">144</x:Double>
   <x:Double x:Key="AltimDialSweep">240</x:Double>
+
+  <!-- The box a legend's ring mark stands in. The face carries one sweep per provider on
+       concentric rings, and the legend names them with circles that shrink the same way the
+       rings do, so "the big circle" and "the outer ring" are the same thing without anybody
+       being told the convention. The widest mark is this box; each ring inward is 4 smaller,
+       which the control owns as Dial.LegendMarkSize and Dial.LegendMarkStep. DialTests fails
+       if this copy and the control's disagree. -->
+  <x:Double x:Key="AltimDialLegendMarkSize">14</x:Double>
   <x:Double x:Key="AltimTapeMinHeight">96</x:Double>
   <x:Double x:Key="AltimTapeLineThickness">2</x:Double>
   <x:Double x:Key="AltimTapeDotDiameter">4</x:Double>

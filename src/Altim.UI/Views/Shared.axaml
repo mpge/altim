@@ -126,6 +126,19 @@
     <Setter Property="Fill" Value="{DynamicResource AltimChartLineSecondaryBrush}" />
   </Style>
 
+  <!-- The dial's legend mark: the ring it names, at the ring's own place in the stack. It
+       is an outline rather than a disc because the thing it stands for is a ring, and its
+       diameter rather than its colour is what ties it to an arc - two providers can easily be
+       in the same band, and a size survives having the colour taken away. The ink is the
+       engraving's, because the mark belongs to the instrument rather than to the reading. -->
+  <Style Selector="Ellipse.dialRing">
+    <Setter Property="Fill" Value="{x:Null}" />
+    <Setter Property="Stroke" Value="{DynamicResource AltimMeterScaleBrush}" />
+    <Setter Property="StrokeThickness" Value="{DynamicResource AltimHairline}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
   <!-- The panel's status icon: a filled disc with the mark cut through it in the ground
        colour. The disc is ink when everything answered and StatusError when something did
        not, which is status appearing as colour on a mark rather than as a tinted panel. -->

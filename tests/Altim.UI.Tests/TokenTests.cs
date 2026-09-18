@@ -62,6 +62,12 @@ public sealed class TokenTests
         "AltimChartLineSecondaryBrush",
         "AltimChartLabelBrush",
 
+        // The dial's three bands. Blue to amber to red rather than green to amber to red:
+        // green and red are the one pair protanopia and deuteranopia cannot separate.
+        "AltimDialNormalBrush",
+        "AltimDialCautionBrush",
+        "AltimDialExceededBrush",
+
         // The usage map's ramp. Five steps of TextPrimary opacity, monochrome in both
         // variants: the map carries a quantity, and a provider's accent carries identity.
         // Level 0 is the faintest FILL and is not the outline a day nothing is known about
@@ -95,7 +101,7 @@ public sealed class TokenTests
         "AltimIconSize", "AltimIconStrokeThickness",
         "AltimMeterHeight", "AltimMeterRailHeight", "AltimMeterScaleGap",
         "AltimMeterScaleHeight", "AltimMeterMinWidth",
-        "AltimDialSize", "AltimDialSweep",
+        "AltimDialSize", "AltimDialSweep", "AltimDialLegendMarkSize",
         "AltimTapeMinHeight", "AltimTapeLineThickness", "AltimTapeDotDiameter",
         "AltimScrollBarThickness", "AltimToggleTrackWidth", "AltimToggleTrackHeight",
         "AltimToggleKnobSize", "AltimToggleKnobInset", "AltimToggleTrackRadius",

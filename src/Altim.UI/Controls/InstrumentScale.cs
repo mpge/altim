@@ -53,6 +53,17 @@ public static class InstrumentScale
     public const double IndexWeight = 2d;
 
     /// <summary>
+    /// Half way up the scale: the landmark the tape rules at, where the graduation interval
+    /// first halves, and where <see cref="DialBands"/> begins its caution band.
+    /// </summary>
+    /// <remarks>
+    /// Named rather than written out three times, because the three uses have to be the same
+    /// level: a colour boundary that did not land on a drawn mark would be a boundary only
+    /// colour could report.
+    /// </remarks>
+    public const double HalfWay = 50d;
+
+    /// <summary>
     /// The levels the scale is graduated at, from 0 to 100, in order.
     /// </summary>
     /// <remarks>
@@ -81,7 +92,7 @@ public static class InstrumentScale
     /// The same three levels the history tape rules at. Two readings on one page should be
     /// read against the same three landmarks whichever control is carrying them.
     /// </remarks>
-    public static bool IsMajorGraduation(double level) => level is 0d or 50d or 100d;
+    public static bool IsMajorGraduation(double level) => level is 0d or HalfWay or 100d;
 
     /// <summary>
     /// Maps a level to a distance along the scale. The mapping is linear and has no
@@ -160,8 +171,8 @@ public static class InstrumentScale
     private static double[] BuildGraduations()
     {
         List<double> levels = [];
-        AddBand(levels, 0d, 50d, 10d);
-        AddBand(levels, 50d, 80d, 5d);
+        AddBand(levels, 0d, HalfWay, 10d);
+        AddBand(levels, HalfWay, 80d, 5d);
         AddBand(levels, 80d, 100d, 2.5d);
         return [.. levels];
     }

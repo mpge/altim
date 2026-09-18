@@ -268,14 +268,21 @@ public sealed class DialTests
 
     /// <summary>
     /// The dial is a tab stop exactly when it has something the words beside it do not print:
-    /// a threshold measured against a level.
+    /// a threshold measured against a level. What it shows is its <see cref="Dial.Detail"/>,
+    /// which is the reading plus the sentence explaining the bands: the accessible name stops
+    /// at the reading, because a client that receives no colour needs no colour key and would
+    /// hear it on every announcement.
     /// </summary>
     [AvaloniaFact]
     public void HoverAndFocusAreOfferedTheSameDetail()
     {
         var reading = new Dial { Value = 62d, Threshold = 80d };
         Assert.True(reading.Focusable);
-        Assert.Equal(reading.Reading, ToolTip.GetTip(reading));
+        Assert.Equal(reading.Detail, ToolTip.GetTip(reading));
+        Assert.Equal(
+            "62% used, threshold 80%. Caution band. It begins at 50% and the threshold is at 80%.",
+            reading.Detail);
+        Assert.Equal("62% used, threshold 80%", reading.Reading);
 
         var unmeasured = new Dial { Value = 62d };
         Assert.False(unmeasured.Focusable);

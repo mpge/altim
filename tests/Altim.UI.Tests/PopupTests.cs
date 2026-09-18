@@ -8,6 +8,7 @@ using Altim.UI.ViewModels;
 using Altim.UI.Views;
 using Avalonia.Automation.Peers;
 using Avalonia.Controls;
+using Avalonia.Controls.Shapes;
 using Avalonia.Headless.XUnit;
 using Xunit;
 
@@ -293,9 +294,10 @@ public sealed class PopupTests
     }
 
     /// <summary>
-    /// The dial is on screen, carrying the reading and named with the window it belongs to.
-    /// A screen reader is handed the provider, the window, the level and the threshold in one
-    /// sentence, because the dial is drawn and has nothing else to announce.
+    /// The dial is on screen carrying one sweep per provider, and a screen reader is handed
+    /// every one of them: whose it is, the level and the threshold. The dial is drawn and has
+    /// nothing else to announce, and a client handed only the figure in the middle would be
+    /// handed a face with fewer sweeps on it than it has.
     /// </summary>
     [AvaloniaFact]
     public void TheDialIsOnScreenAndNamed()
@@ -306,17 +308,177 @@ public sealed class PopupTests
         {
             Dial dial = Assert.Single(Surface.Visible<Dial>(window));
 
-            Assert.Equal(62d, dial.Value);
-            Assert.Equal(AltimSettings.Default.SessionThresholdPercent, dial.Threshold);
+            Assert.Equal(2, dial.Arcs.Count);
+            Assert.Equal(62d, dial.Arcs[0].Value);
+            Assert.Equal(41d, dial.Arcs[1].Value);
+            Assert.Equal(
+                AltimSettings.Default.SessionThresholdPercent,
+                dial.Arcs[0].Threshold);
             Assert.True(Surface.Shows(window, "Session (Claude Code)"));
             Assert.True(Surface.Shows(window, "Resets in 2h 14m"));
 
             AutomationPeer peer = ControlAutomationPeer.CreatePeerForElement(dial);
-            Assert.Equal("Session (Claude Code), 62% used, threshold 80%", peer.GetName());
+            Assert.Equal(
+                "Usage by provider, Session (Claude Code), 62% used, threshold 80%."
+                    + " Session (Codex), 41% used, threshold 80%",
+                peer.GetName());
 
             // Still no meters: the panel's provider lines are one line each, not a stack of
             // rails, and the dial is the one instrument on the surface.
             Assert.Empty(Surface.Visible<Meter>(window));
+        }, width: 320d, height: 900d);
+    }
+
+    /// <summary>
+    /// One sweep per provider, on its own ring, in the order the providers were registered,
+    /// and each carrying that provider's own head window rather than a figure made out of
+    /// several.
+    /// </summary>
+    /// <remarks>
+    /// Registration order is what keeps the picture still. These three are registered lowest
+    /// first, so a face that sorted its rings by level would produce a different order here
+    /// and would reshuffle itself every time two numbers crossed. Gemini's session reads 12
+    /// and its week 38, so its ring is the week: each ring is its own provider's head window,
+    /// and two rings can easily be measuring different windows.
+    /// </remarks>
+    [AvaloniaFact]
+    public void TheDialCarriesOneSweepPerProviderInRegistrationOrder()
+    {
+        using PopupViewModel panel = Panel(Gemini(), Codex(), Claude());
+
+        Assert.Equal(3, panel.DialReadings.Count);
+        Assert.Equal(
+            ["Weekly (Gemini CLI)", "Session (Codex)", "Session (Claude Code)"],
+            panel.DialReadings.Select(r => r.Label));
+        Assert.Equal([38d, 41d, 62d], panel.DialReadings.Select(r => r.Value));
+
+        // The ring numbers are the list positions, which is what the legend sizes its marks
+        // from: a reading numbered differently from where it is drawn would put the legend's
+        // circles in one order and the arcs in another.
+        Assert.Equal([0, 1, 2], panel.DialReadings.Select(r => r.Ring));
+        Assert.Equal([14d, 10d, 6d], panel.DialReadings.Select(r => r.LegendMarkDiameter));
+
+        // The figure in the middle is always one of the rings, never a fourth number.
+        Assert.Equal("Session (Claude Code)", panel.Headline?.SourceLabel);
+        Assert.Contains(panel.Headline?.SourceLabel, panel.DialReadings.Select(r => r.Label));
+
+        // Each ring is its own provider's head window, so a provider's weekly figure never
+        // ends up on another provider's ring.
+        for (int i = 0; i < panel.Providers.Count; i++)
+        {
+            Assert.Equal(panel.Providers[i].Headline?.SourceLabel, panel.DialReadings[i].Label);
+            Assert.Equal(panel.Providers[i].Headline?.Value, panel.DialReadings[i].Value);
+        }
+    }
+
+    /// <summary>
+    /// <b>No figure on the panel is two providers' figures put together.</b> They are
+    /// proportions of two different, undisclosed allowances: their sum, their mean and their
+    /// difference all measure nothing, and a number that looks authoritative and measures
+    /// nothing is the one thing this product will not show.
+    /// </summary>
+    [AvaloniaFact]
+    public void ThePanelNeverShowsACombinedFigure()
+    {
+        using PopupViewModel panel = Panel(Claude(), Codex());
+
+        Surface.Show(new PopupView { DataContext = panel }, window =>
+        {
+            IReadOnlyList<string> lines = Surface.Lines(window);
+
+            Assert.Contains("62%", lines);
+            Assert.Contains("41%", lines);
+
+            // 62 + 41, their mean either way rounded, and their difference.
+            foreach (string invented in (string[])["103%", "52%", "51%", "21%"])
+            {
+                Assert.DoesNotContain(invented, lines);
+            }
+        }, width: 320d, height: 900d);
+    }
+
+    /// <summary>
+    /// The legend names every ring, in the rings' own order, with each provider's figure
+    /// beside it and a mark the size of the ring it stands for.
+    /// </summary>
+    /// <remarks>
+    /// A ring with nothing naming it is a ring nobody can read, and this is the panel's
+    /// primary surface. The window on the dial is named twice on purpose: once under the face
+    /// as the figure standing in it, and once in the legend as one arc of several. They are
+    /// two questions - "what is the big number" and "which arc is whose" - and answering only
+    /// the first leaves the other arcs anonymous.
+    /// </remarks>
+    [AvaloniaFact]
+    public void TheLegendNamesEveryRing()
+    {
+        using PopupViewModel panel = Panel(Claude(), Codex());
+
+        Surface.Show(new PopupView { DataContext = panel }, window =>
+        {
+            ItemsControl legend = Assert.Single(
+                Surface.Visible<ItemsControl>(window),
+                items => items.ItemsSource is IReadOnlyList<DialReading>);
+
+            Assert.Equal(
+                ["Session (Claude Code)", "62%", "Session (Codex)", "41%"],
+                Surface.Lines(legend));
+
+            // The marks are circles, shrinking inward the way the rings do.
+            IReadOnlyList<Ellipse> marks = Surface.Visible<Ellipse>(legend);
+            Assert.Equal(2, marks.Count);
+            Assert.Equal(14d, marks[0].Bounds.Width, 6);
+            Assert.Equal(10d, marks[1].Bounds.Width, 6);
+            Assert.True(
+                marks[0].Bounds.Width > marks[1].Bounds.Width,
+                "The legend's marks do not shrink the way the rings do.");
+
+            // The window on the dial is under the face as well, which is the one repetition
+            // the section makes and makes on purpose.
+            Assert.Equal(2, Surface.Count(window, "Session (Claude Code)"));
+        }, width: 320d, height: 900d);
+    }
+
+    /// <summary>
+    /// A provider that reports no figure keeps its ring and its legend row, and is named as
+    /// unreported rather than drawn as a nothing. A ring missing from the legend would be a
+    /// provider missing from the panel.
+    /// </summary>
+    [AvaloniaFact]
+    public void AProviderWithNoFigureKeepsItsRingAndSaysSo()
+    {
+        var silent = new FakeUsageProvider("codex", "Codex", new ProviderUsage(
+            "codex",
+            ProviderStatus.Idle,
+            [Readings.Metric("five_hour", "Session", null, TimeSpan.FromHours(5), Readings.Now.AddHours(1))],
+            null,
+            Readings.Now,
+            null));
+
+        using PopupViewModel panel = Panel(Claude(), silent);
+
+        Assert.Equal(2, panel.DialReadings.Count);
+        Assert.Null(panel.DialReadings[1].Value);
+        Assert.False(panel.DialReadings[1].IsReported);
+        Assert.Equal(UsageFormat.Unknown, panel.DialReadings[1].PercentText);
+
+        Surface.Show(new PopupView { DataContext = panel }, window =>
+        {
+            Dial dial = Assert.Single(Surface.Visible<Dial>(window));
+
+            // The face still has a reading on it, because the other provider reported one.
+            Assert.False(dial.IsUnavailable);
+            Assert.Equal(2, dial.Arcs.Count);
+
+            ItemsControl legend = Assert.Single(
+                Surface.Visible<ItemsControl>(window),
+                items => items.ItemsSource is IReadOnlyList<DialReading>);
+
+            Assert.Equal(
+                ["Session (Claude Code)", "62%", "Session (Codex)", UsageFormat.Unknown],
+                Surface.Lines(legend));
+
+            // And never a zero for the provider that reported nothing.
+            Assert.DoesNotContain("0%", Surface.Lines(legend));
         }, width: 320d, height: 900d);
     }
 

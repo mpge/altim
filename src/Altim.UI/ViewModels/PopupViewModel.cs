@@ -4,6 +4,7 @@ using Altim.Core.Abstractions;
 using Altim.Core.Models;
 using Altim.Core.Settings;
 using Altim.Core.Usage;
+using Altim.UI.Controls;
 using Altim.UI.Formatting;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -43,6 +44,9 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasHeadline))]
     private HeadlineReadingViewModel? _headline;
+
+    [ObservableProperty]
+    private IReadOnlyList<DialReading> _dialReadings = [];
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StatusIsOk))]
@@ -103,6 +107,13 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
 
     /// <summary>The heading over the resets section.</summary>
     public string ResetsLabel => UsageFormat.ResetsLabel;
+
+    /// <summary>
+    /// The accessible name of the dial. The face is drawn, carries a sweep per provider and
+    /// has no one window to be named after, so this says what it is and its own peer reads
+    /// out every reading on it afterwards.
+    /// </summary>
+    public string DialLabel => "Usage by provider";
 
     /// <summary>Whether the status icon reads as operational.</summary>
     public bool StatusIsOk => !StatusIsError;
@@ -217,10 +228,32 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Picks the one window the dial shows: <b>the highest level any provider reports</b> -
-    /// the window nearest its ceiling.
+    /// Builds the face: <b>one sweep per provider</b>, on its own concentric ring, and the
+    /// one window the figure in the middle belongs to - the highest level any provider
+    /// reports, the window nearest its ceiling.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>Nothing is combined.</b> 33 per cent of one vendor's weekly allowance and 54 per
+    /// cent of another's are proportions of two different, undisclosed limits: summing,
+    /// averaging or token weighting them would produce an authoritative looking number that
+    /// means nothing, and neither vendor publishes the allowance that would make one
+    /// meaningful. The rings share a face because they share a <i>unit</i>, not because their
+    /// figures have been put together. It is the same rule that makes the usage map's
+    /// combined row sum tokens and never percentages.
+    /// </para>
+    /// <para>
+    /// <b>The rings are in the order the providers were registered</b>, outermost first,
+    /// which is the order the legend prints and the order the provider lines below stand in.
+    /// Ordering them by level instead would make two rings swap places every time the numbers
+    /// crossed, so the ring somebody had learned to read as one provider's would quietly
+    /// become the other's; registration order does not move.
+    /// </para>
+    /// <para>
+    /// Each ring carries that provider's own head window, chosen by the same rule an Overview
+    /// card picks its dial's window by, so the figure in the middle is always one of the rings
+    /// the legend names.
+    /// </para>
     /// <para>
     /// The panel already prints every window's figure on its provider's own line, so the dial
     /// is not there to add a number. It is there to say which of those numbers decides
@@ -247,6 +280,7 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     {
         MetricViewModel? best = null;
         string? provider = null;
+        List<DialReading> rings = [];
 
         foreach (ProviderViewModel row in Providers)
         {
@@ -258,7 +292,25 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
                     provider = row.DisplayName;
                 }
             }
+
+            if (row.Headline is { } head)
+            {
+                // The ring number is taken from the list as it stands rather than from a
+                // counter of its own, so the legend's marks and the face's rings cannot end
+                // up numbered differently.
+                rings.Add(new DialReading(
+                    rings.Count,
+                    head.SourceLabel,
+                    head.Value,
+                    head.Threshold,
+                    head.ResetText));
+            }
         }
+
+        // Replaced rather than mutated: the dial caches its paths against the list it was
+        // handed, so a collection edited in place would leave the face drawing the readings
+        // before last.
+        DialReadings = rings;
 
         Headline = best is not null && provider is not null
             ? new HeadlineReadingViewModel(best, provider)

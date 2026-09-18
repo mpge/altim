@@ -352,10 +352,12 @@ public sealed class ProviderCardTests
     }
 
     /// <summary>
-    /// The two sweeps actually read differently, in pixels. At the top of the face the scale
-    /// stands at half way, so a provider over 50 has ink there and one under it has track: the
-    /// difference between 62 and 41 is visible without reading either figure, which is the
-    /// whole claim being made for putting a dial on each card.
+    /// The two sweeps actually read differently, in pixels. Just past the top of the face the
+    /// scale has passed half way, so a provider over 50 has ink there and one under it has
+    /// track: the difference between 62 and 41 is visible without reading either figure, which
+    /// is the whole claim being made for putting a dial on each card. The card's dial is
+    /// banded too, so the ink there is the caution band's rather than the meter's fill: a card
+    /// left on one colour while the panel's dial banded would be two instruments.
     /// </summary>
     [AvaloniaTheory]
     [InlineData("Light")]
@@ -383,20 +385,30 @@ public sealed class ProviderCardTests
         Assert.Equal(62d, dials[0].Value);
         Assert.Equal(41d, dials[1].Value);
 
-        Color fill = Token(variant, "AltimMeterFillBrush");
+        Color caution = Token(variant, "AltimDialCautionBrush");
+        Color normal = Token(variant, "AltimDialNormalBrush");
         Color track = Token(variant, "AltimMeterTrackBrush");
 
-        // Half way is the top of the face. The rail runs from the face's edge less the 4 deep
-        // engraving, the 2 gap and the 8 rail, so its middle is 62 in from a 72 radius.
-        Point over = RailAtTheTop(host, dials[0]);
-        Point under = RailAtTheTop(host, dials[1]);
+        // 55 rather than the top of the face itself: half way is where the caution band
+        // begins, and a pixel sampled exactly on a boundary is a blend of the two colours
+        // meeting there. The rail runs from the face's edge less the 4 deep engraving, the 2
+        // gap and the 8 rail, so its middle is 62 in from a 72 radius.
+        Point over = RailAt(host, dials[0], 55d);
+        Point under = RailAt(host, dials[1], 55d);
 
         Assert.True(
-            Ink.Near(frame.At(over), fill, 12),
-            $"62% does not reach half way: {frame.At(over)} at {over}.");
+            Ink.Near(frame.At(over), caution, 12),
+            $"62% does not reach half way in the caution band: {frame.At(over)} at {over}.");
         Assert.True(
             Ink.Near(frame.At(under), track, 12),
             $"41% has swept past half way: {frame.At(under)} at {under}.");
+
+        // And the same sweep is the normal band before it gets there, so the card's dial is
+        // banded rather than repainted whole.
+        Point early = RailAt(host, dials[0], 20d);
+        Assert.True(
+            Ink.Near(frame.At(early), normal, 12),
+            $"62% is not in the normal band at a fifth: {frame.At(early)} at {early}.");
 
         // Said outright: at one place on two identical faces the two providers are a different
         // colour. That is the comparison the shared scale exists to make, and it is the claim
@@ -486,15 +498,18 @@ public sealed class ProviderCardTests
     }
 
     /// <summary>The middle of the rail at the top of a dial, which is half way up the scale.</summary>
-    private static Point RailAtTheTop(PixelHost host, Dial dial)
+    private static Point RailAt(PixelHost host, Dial dial, double level)
     {
         Rect face = host.BoundsOf(dial);
         double rail = (face.Width / 2d)
             - InstrumentScale.ScaleDepth
             - InstrumentScale.ScaleGap
             - (InstrumentScale.RailThickness / 2d);
+        double radians = Dial.AngleFor(level) * Math.PI / 180d;
 
-        return new Point(face.Center.X, face.Center.Y - rail);
+        return new Point(
+            face.Center.X + (rail * Math.Sin(radians)),
+            face.Center.Y - (rail * Math.Cos(radians)));
     }
 
     /// <summary>Every name an assistive technology is offered below a root, in tree order.</summary>

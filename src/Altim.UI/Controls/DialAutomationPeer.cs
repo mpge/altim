@@ -22,6 +22,14 @@ namespace Altim.UI.Controls;
 /// meter, because the dial shows one window out of several and the name is what says which.
 /// </para>
 /// <para>
+/// <b>Every reading on the face, not only the one the figure belongs to.</b> The dial carries
+/// one sweep per provider, and a client handed only the highest of them would be handed a
+/// dial with fewer sweeps on it than the face has. What the name does not carry is the
+/// sentence explaining the colour bands: that is in the tip, which a pointer and the keyboard
+/// both open, because colour is the one thing this audience does not receive and the level
+/// and the threshold already say everything the bands mark.
+/// </para>
+/// <para>
 /// <b>There is deliberately no range value pattern.</b> That pattern carries a
 /// <see cref="double"/>, and this control's whole position is that an unreported reading is
 /// not a zero: a client reading the value of a dial with nothing to report would be handed
@@ -66,7 +74,9 @@ public sealed class DialAutomationPeer : ControlAutomationPeer
     /// </summary>
     private void OnOwnerPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs change)
     {
-        if (change.Property != Dial.ValueProperty && change.Property != Dial.ThresholdProperty)
+        if (change.Property != Dial.ValueProperty
+            && change.Property != Dial.ThresholdProperty
+            && change.Property != Dial.ReadingsProperty)
         {
             return;
         }

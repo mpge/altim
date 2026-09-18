@@ -28,7 +28,17 @@ the way. Two ideas carry the identity:
    lives in one place rather than being restated per control.
 
 Restraint rules: separators and whitespace instead of nesting cards; one accent per surface;
-colour carries provider identity and status only, never decoration.
+colour carries provider identity, status and **how far a reading has got along its own scale**,
+never decoration.
+
+> **Amended 2026-09-18, at the product owner's request.** This document previously read "colour
+> carries provider identity and status only, never decoration", and said of both instruments
+> that the bar and the dial never turn red. That is no longer true of the dial: its sweep is
+> banded, aviation fashion, and changes colour where the reading crosses a boundary. What has
+> *not* changed is that colour is never the only thing saying it. Both boundaries stand on a
+> mark the face draws anyway, the sweep's length still reports the level on its own, and the
+> figure still prints it. See **Dial bands** below. The meter is unchanged and stays
+> monochrome.
 
 ## Colour
 
@@ -64,6 +74,9 @@ geometry. Status and provider colour:
 | `StatusError` | `#B42318` | `#F87171` | provider unreachable |
 | `AccentAnthropic` | `#C05B32` | `#D2764D` | provider glyph and dot only |
 | `AccentOpenAI` | `#0A0A0A` | `#F2F2F3` | provider glyph and dot only |
+| `DialNormal` | `#1D4ED8` | `#3B82F6` | a dial's sweep below half way |
+| `DialCaution` | `#CA6A04` | `#FCD34D` | a dial's sweep from half way to the threshold |
+| `DialExceeded` | `#7F1D1D` | `#E04747` | a dial's sweep past the threshold |
 
 A provider accent never fills a meter, a button, or a background. It marks identity at 16,
 20 or 28px and nothing else. Status colour appears as a 6px or 8px dot, a single word, or the
@@ -243,13 +256,82 @@ The threshold is the same **index**: `TextSecondary`, two hairlines, crossing th
 carrying on to the face's edge. It is the only mark that touches both and the only one at that
 weight, so position, extent and weight tell it apart from a graduation with no help from colour,
 and it is drawn over the sweep rather than under it so it is still there at 100%. Above the
-threshold the sweep stays `TextPrimary`; the *name* under the dial turns `StatusWarn`. The dial
-never turns red.
+threshold the *name* under the dial turns `StatusWarn`.
+
+**Dial bands.** The sweep is drawn in three, aviation fashion: `DialNormal` up to half way,
+`DialCaution` from half way to the configured threshold, `DialExceeded` past it. The colour is a
+property of **where the reading has got to**, not a repaint of the whole instrument: a reading of
+92 is blue for its first half, amber to 80 and red from there, so the arc says at a glance both
+how far it has gone and which range it ended in.
+
+Neither boundary is a new number. Half way is the landmark the scale already rules at and where
+its graduation interval first halves; the threshold is the level Altim already notifies at and
+where the index already stands. **That is what keeps colour redundant here**: every colour change
+lands on a mark the face draws anyway - the full depth graduation at 50 and the two hairline index
+at the threshold - so with every hue removed the arc's length, those two marks and the figure
+still say the same thing. A threshold below half way collapses the caution band rather than
+reordering the three; a reading with no configured threshold has no exceeded band, because there
+is nothing for it to have exceeded and Altim does not invent a limit.
+
+**Blue to amber to red, not green to amber to red.** Green and red are the single worst pair for
+the two common dichromacies: a protanope or a deuteranope sees them as the same olive. A blue sits
+at the far end of the axis both of them keep, so normal is unmistakable from the other two
+whatever the viewer's vision; caution and exceeded both fall toward the yellow pole for those two,
+so they are separated by lightness instead. Every band stands at least 3:1 from its own ground
+under normal vision, protanopia, deuteranopia and tritanopia alike, and the caution and exceeded
+bands stand at least 2.5:1 from one another - on top of which the index is drawn exactly where
+they meet.
+
+**The meter is not banded.** It reports one of several levels in a column, where three colours per
+rail would be a texture rather than a reading, and its fill stays `TextPrimary`. The dial is the
+instrument that heads a surface and answers "can I keep working", which is the question a band
+answers.
 
 The engraving is radial, so its marks cannot be snapped to the pixel grid the way the meter's
 vertical rules are: a mark at 37° lands where it lands. Their weight is still resolved to a whole
 number of device pixels and the radii they run between are snapped, so the engraving is one
 weight throughout rather than a different grey per mark.
+
+**Several readings, one face.** A dial can carry one sweep per provider, each on its own
+concentric ring, outermost first in the order the providers were registered. **Percentages from
+different providers are never combined.** 33% of one vendor's weekly allowance and 54% of
+another's are proportions of two different, undisclosed limits: their sum, their mean and any
+token weighting of them produce an authoritative looking number that measures nothing, and neither
+vendor publishes the allowance that would make one meaningful. What the rings share is a *unit* -
+how much of that provider's own allowance is gone - which is why they can stand on one face, one
+graduation tape and one angular mapping with no arithmetic done to them at all. It is the same
+rule that makes the usage map's combined row sum tokens and never percentages.
+
+The order is **registration order, never level order**. Sorting by "nearest its ceiling" would
+swap two rings every time the numbers crossed, so a ring somebody had learned to read as one
+provider's would quietly become the other's, and the swap would happen exactly when the numbers
+were worth watching.
+
+One reading keeps the meter's own 8 rail, to the pixel. Two share a stack of two 5 rings with a 2
+between them, three take three 3 rings: the engraving never moves, so the tape is the same on
+every face whatever it carries. The limit is the figure standing inside: `100%` is 95 wide at
+`Figure` and its ink stands 12 either side of the middle, so what has to clear the innermost ring
+is the clear circle's chord at that height. One ring leaves 9 either side, two leave 5, three leave
+4, and **a fourth leaves less than nothing**. *A 144 face carries three rings.* A fourth provider
+is where either the face or the figure inside it has to give way, and that is the measurement to
+look at when one arrives.
+
+**Each ring carries its own provider's head window**, chosen by the same rule a card picks its
+dial's window by, so two rings can easily be measuring different windows - one provider's session
+against another's week. A ring with no figure draws its own outline and no sweep while the rings
+beside it read normally; only when *nothing anywhere* reports does the whole face drop to the
+unavailable state below. Each reading brings its own threshold, and one index is drawn per
+distinct threshold, from the innermost ring that both reports a level and measures against it. A
+ring with nothing reported carries no index: ink laid across an outlined ring would be the one
+thing on it that looked like a reading.
+
+**A ring is meaningless without a legend.** Wherever a dial carries more than one reading, every
+ring is named beside it, in the rings' own order, with that provider's figure. The mark is a
+circle the size of the ring it names - 14, then 10, then 6 - so "the big circle" and "the outer
+ring" are the same thing with nobody being told the convention, and it is a size rather than a
+colour because two rings are often in the same band and because a size survives the colour being
+taken away. A provider that reported nothing keeps its row and shows an em dash: a ring missing
+from the legend would be a provider missing from the panel.
 
 A dial with nothing to report draws the rail as a hairline outline and nothing else: no track, no
 sweep, no engraving, no index, and the figure inside it is an em dash. **There is never a sweep
@@ -258,12 +340,29 @@ zero. Nothing used draws the rail filled with its track and no sweep either — 
 length is not a reading of nothing — so the two states are told apart by the rail behind them,
 which is exactly how the meter tells them apart.
 
-The reading is named in words by the dial's tip, which is also its accessible name, and the
-words are the meter's: `62% used, threshold 80%`, or "Not reported by this provider". A view that
-names the dial has that name read first — "Session (Claude Code), 62% used, threshold 80%" —
-which matters more here than on the meter, because the dial shows one window out of several and
-the name is what says which. It is a tab stop exactly when it has both a level and a threshold,
-and **focus opens the same tip a pointer opens**.
+The reading is named in words by the dial's accessible name, and the words are the meter's:
+`62% used, threshold 80%`, or "Not reported by this provider". A view that names the dial has that
+name read first - "Session (Claude Code), 62% used, threshold 80%" - which matters more here than
+on the meter, because the dial shows one window out of several and the name is what says which.
+**Every ring is named, not only the one the figure belongs to**: a client handed the highest
+reading alone would be handed a face with fewer sweeps on it than it has.
+
+**The tip says more than the name, and that is deliberate.** Pointing at a ring, or arriving on it
+with the keyboard, gives that ring's reading, when its window rolls over, and **what the bands mean
+in words**: which band the reading is in, where caution begins and where the threshold stands.
+Colour is being asked to carry meaning, and a colour code nobody can read out is a code the reader
+has to learn. Those words are not in the accessible name, because the audience that receives no
+colour needs no colour key and would hear it on every announcement; the level and the threshold
+already say everything the bands mark.
+
+The ring being read is marked on the face by a hairline traced round its own band, in the
+engraving's ink. It is static - nothing on this control moves - and it is the same mark whether a
+pointer or the keyboard asked for it, so **focus reveals exactly what hover reveals**. The arrows
+step between rings, outward and inward, stopping at the ends rather than wrapping; a dial carrying
+one reading leaves the arrow keys alone, because it stands inside the Overview's scrolling area
+and one that swallowed them would stop the page scrolling to say nothing. The dial is a tab stop
+when it has a threshold measured against a level, and always when it carries more than one ring:
+which ring belongs to whom is drawn and nowhere else said.
 
 **The dial does not animate**, on either surface. The meter's fill travels 180ms because it
 lives on a window somebody already has open. The dial's first surface is the tray panel, which is
@@ -449,9 +548,12 @@ same ground. Three things stacked:
 Six sections split by 1px rules: header, reading, providers, resets, status, action.
 
 - **Header**: the 22px mark and the wordmark in `Heading`, with the gear at the far end.
-- **Reading**: the panel's hero. One dial, centred, carrying the window nearest its ceiling,
-  with the figure in `Figure` inside its face and, 8 under it, the window's name in `Lead` and
-  when that window resets in `Caption`. The name always carries its provider in parentheses —
+- **Reading**: the panel's hero. **One dial, centred, carrying one sweep per provider** on its
+  own concentric ring, with the figure in `Figure` inside its face, 8 under it the window that
+  figure belongs to in `Lead` and when it resets in `Caption`, and 8 under that the legend naming
+  every ring. The figure is the reading nearest its ceiling out of the rings, because that is the
+  one that decides whether work can continue; the legend is what turns every other ring back into
+  a provider. Nothing is combined: see **Dial bands** and the rings above. The name always carries its provider in parentheses —
   `Session (Claude Code)`, the form the resets section already uses — because the panel reports
   several windows and a figure that does not say which one it measures is a figure nobody can
   act on. The reset reads `Resets in 2h 14m`, or `Resets in —` when the provider reports no
@@ -517,7 +619,9 @@ the build if it does not.
 
 The dial is the one instrument that does not move, and the reason is above: its surface goes on
 taking readings while it is hidden, so a transition there would animate a picture nobody can see
-and rebuild a path for every frame of it.
+and rebuild a path for every frame of it. That includes its hover treatment: the mark round the
+ring being read appears and disappears in one frame, which is why there is nothing here for the
+reduce-motion setting to suppress.
 
 ### Reduced motion
 

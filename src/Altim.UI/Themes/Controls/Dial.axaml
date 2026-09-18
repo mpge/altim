@@ -1,14 +1,22 @@
 <!--
   Dial.
 
-  The control draws itself; the theme only hands it brushes and measurements, and it is handed
-  the meter's, key for key. The sweep is TextPrimary in both variants and stays TextPrimary
-  above the threshold - the dial never turns red. It is the words beside it that move to
-  StatusWarn, which a view does by binding to the dial's IsAboveThreshold.
+  The control draws itself; the theme only hands it brushes and measurements. The track, the
+  engraving and the threshold index are still the meter's, key for key.
+
+  The sweep is banded rather than one ink: AltimDialNormalBrush below half way,
+  AltimDialCautionBrush from there to the configured threshold, AltimDialExceededBrush past
+  it. The colour is a property of where the reading has reached, not a repaint of the whole
+  instrument, and both boundaries stand on a mark the face draws anyway - the full depth
+  graduation at 50 and the index at the threshold - so the picture survives having every hue
+  removed. The words beside the dial still move to StatusWarn above the threshold, which a
+  view does by binding to the dial's IsAboveThreshold.
 
   The engraving and the threshold index are the same ink, TextSecondary, and are told apart by
   geometry rather than by colour: the index is twice the weight of a graduation and is the
-  only mark that crosses the rail. Two keys carry the one value because they are two roles.
+  only mark that crosses a ring. That ink is also what marks the ring a pointer or the
+  keyboard is reading, traced round its band at a hairline. Three keys carry the one value
+  because they are three roles.
 
   The focus ring is handed over as a brush, a weight and an offset rather than hosted as a
   template part, because there is no template. It carries no radius: the dial's ring is a
@@ -23,7 +31,9 @@
 
   <ControlTheme x:Key="{x:Type controls:Dial}" TargetType="controls:Dial">
     <Setter Property="TrackBrush" Value="{DynamicResource AltimMeterTrackBrush}" />
-    <Setter Property="FillBrush" Value="{DynamicResource AltimMeterFillBrush}" />
+    <Setter Property="NormalBrush" Value="{DynamicResource AltimDialNormalBrush}" />
+    <Setter Property="CautionBrush" Value="{DynamicResource AltimDialCautionBrush}" />
+    <Setter Property="ExceededBrush" Value="{DynamicResource AltimDialExceededBrush}" />
     <Setter Property="ScaleBrush" Value="{DynamicResource AltimMeterScaleBrush}" />
     <Setter Property="ThresholdBrush" Value="{DynamicResource AltimMeterThresholdBrush}" />
     <Setter Property="FocusRingBrush" Value="{DynamicResource AltimFocusRingBrush}" />

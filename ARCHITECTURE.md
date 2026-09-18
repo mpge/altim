@@ -376,6 +376,10 @@ spam, no notifications during the first refresh after start.
 - `Controls/Meter.cs`, `Controls/Dial.cs`, `Controls/UsageTape.cs`, `Controls/UsageMap.cs` — custom render
   controls, no dependency
 - `Controls/InstrumentScale.cs` — the one graduated scale the meter and the dial are both read against
+- `Controls/DialBands.cs`, `Controls/DialReading.cs` — where a dial's three colour bands begin, and
+  one sweep on a dial. A dial carries one reading per provider on concentric rings and **never
+  combines two providers' percentages**: they are proportions of two different, undisclosed
+  allowances. See `docs/DESIGN.md`.
 
 Two windows:
 
