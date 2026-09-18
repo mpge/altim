@@ -124,8 +124,11 @@ public sealed class TypographyTests
         stack.Children.Add(text);
         stack.Children.Add(tape);
 
-        using WriteableBitmap frame = DesignSystem.Render(stack, width: 320d, height: 200d);
-        Assert.True(frame.PixelSize.Width > 0);
+        // Rendered so the tree is attached and styled before the families are read, and
+        // asserted through the helper that reads the control rather than the window it was
+        // given: the old assertion here was the frame's own width, which is the number the
+        // caller passed in.
+        DesignSystem.AssertRenders(stack, width: 320d, height: 200d);
 
         var expected = Resolve<FontFamily>("AltimFontFamily");
         Assert.Equal(expected, text.FontFamily);
@@ -136,8 +139,7 @@ public sealed class TypographyTests
     {
         var text = new TextBlock { Text = content, Theme = Resolve<ControlTheme>(key) };
 
-        using WriteableBitmap frame = DesignSystem.Render(text, width: 320d, height: 80d);
-        Assert.True(frame.PixelSize.Width > 0);
+        DesignSystem.AssertRenders(text, width: 320d, height: 80d);
 
         return text;
     }
