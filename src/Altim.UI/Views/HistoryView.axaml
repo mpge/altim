@@ -33,20 +33,23 @@
     <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
   </UserControl.Styles>
 
-  <Grid Margin="{DynamicResource AltimInset32}" RowDefinitions="Auto,Auto,*">
+  <!-- The page scrolls, as Overview and Settings do. It did not, and could not: the root was
+       a Grid, so everything past the window's bottom edge was simply unreachable. The map
+       used to be short enough to hide that. Sharing the panel's width out among a year of
+       columns made the squares bigger and the blocks taller, and the tape below went off the
+       bottom with no way to reach it. -->
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="{DynamicResource AltimInset32}"
+                Spacing="{DynamicResource AltimSpace24}">
 
-    <StackPanel Grid.Row="0"
-                Margin="0,0,0,24"
-                Spacing="{DynamicResource AltimSpace8}">
+    <StackPanel Spacing="{DynamicResource AltimSpace8}">
       <TextBlock Theme="{DynamicResource AltimDisplayText}" Text="{Binding Title}" />
       <TextBlock Theme="{DynamicResource AltimLeadText}"
                  TextWrapping="Wrap"
                  Text="{Binding SubHeading}" />
     </StackPanel>
 
-    <Border Grid.Row="1"
-            Margin="0,0,0,24"
-            Theme="{DynamicResource AltimPanel}">
+    <Border Theme="{DynamicResource AltimPanel}">
       <StackPanel Spacing="{DynamicResource AltimSpace16}">
         <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding Map.PanelTitle}" />
 
@@ -64,8 +67,9 @@
       </StackPanel>
     </Border>
 
-    <views:UsageHistoryPanelView Grid.Row="2" MinHeight="280" />
+    <views:UsageHistoryPanelView MinHeight="280" />
 
-  </Grid>
+    </StackPanel>
+  </ScrollViewer>
 
 </UserControl>

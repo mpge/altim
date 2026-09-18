@@ -8,6 +8,7 @@ using Altim.UI.ViewModels;
 using Altim.UI.Views;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Avalonia.VisualTree;
 using Xunit;
@@ -27,6 +28,48 @@ public sealed class HistoryTests
 
     private static HistoryViewModel Page(FakeHistoryService history, params ProviderViewModel[] rows) =>
         new(rows, history, new TestClock(Readings.Now));
+
+    /// <summary>
+    /// The page can be scrolled to its bottom in a window too short to hold it.
+    /// </summary>
+    /// <remarks>
+    /// It could not. The root was a <c>Grid</c>, so anything past the window's lower edge was
+    /// simply unreachable, and Overview and Settings had each been wrapped in a scroll viewer
+    /// while this page was not. Nothing caught it because every test here either measured the
+    /// view models or rendered into a window tall enough for the whole page. The map hid it
+    /// too: it was narrow and short until its squares were shared out across the panel's full
+    /// width, and then the tape below it went off the bottom.
+    ///
+    /// The assertion is that the content is genuinely taller than the viewport and that the
+    /// viewer will move — an extent equal to its viewport would satisfy "a scroll viewer is
+    /// present" while leaving the page exactly as unreachable as before.
+    /// </remarks>
+    [AvaloniaFact]
+    public void TheWholePageCanBeReachedInAWindowTooShortToHoldIt()
+    {
+        var provider = new FakeUsageProvider(ProviderId, "Claude Code");
+        using ProviderViewModel row = Row(provider);
+        HistoryViewModel page = Page(new FakeHistoryService(), row);
+        var view = new HistoryView { DataContext = page };
+
+        Surface.Show(view, window =>
+        {
+            ScrollViewer scroller = Assert.Single(
+                window.GetVisualDescendants().OfType<ScrollViewer>(),
+                v => v.VerticalScrollBarVisibility != ScrollBarVisibility.Disabled);
+
+            Assert.True(
+                scroller.Extent.Height > scroller.Viewport.Height,
+                $"The page is {scroller.Extent.Height} tall in a {scroller.Viewport.Height} viewport, "
+                + "so this window does not exercise scrolling at all.");
+
+            scroller.ScrollToEnd();
+
+            Assert.True(
+                scroller.Offset.Y > 0d,
+                "The page did not move, so its lower half is unreachable.");
+        }, width: 760d, height: 320d);
+    }
 
     /// <summary>A range with no sample at all produces no line.</summary>
     [Fact]
