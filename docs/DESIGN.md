@@ -499,13 +499,57 @@ keep the whole inset.
 
 ## Motion
 
-Only in response to something changing: meter fill 180ms ease-out, popup fade+4px rise 120ms,
-theme change crossfade 120ms. No entrance animations, no hover lifts, no spinners longer than
-a second — refreshes show a 12px inline `Caption`, not a modal.
+Only in response to something changing, and only where the machine has not asked for stillness.
+No entrance animations, no hover lifts, no spinners longer than a second — refreshes show a 12px
+inline `Caption`, not a modal.
+
+**The meter fill is the only animation in Altim**: 180ms ease-out, travelling from the level that
+was reported to the level that is. It does not run on the first value, on becoming unavailable or
+on coming back from unavailable, because none of those is a level changing.
+
+Two further transitions were specified here and never built: a popup fade with a 4px rise, and a
+theme crossfade, both at 120ms. The panel is shown and the palette is swapped in one frame each,
+and always have been. The specification is withdrawn rather than left standing over something
+nobody wrote — it described an interface busier than the one that exists, and it sent the first
+person to go looking for motion to make accessible hunting for two animations that were not there.
+If either is ever built it goes through the same gate as the fill, and a source-shape test fails
+the build if it does not.
 
 The dial is the one instrument that does not move, and the reason is above: its surface goes on
 taking readings while it is hidden, so a transition there would animate a picture nobody can see
 and rebuild a path for every frame of it.
+
+### Reduced motion
+
+Every desktop carries an accessibility setting that asks applications to stop animating —
+"Animation effects" on Windows, "Reduce motion" on macOS, `enable-animations` on a GNOME desktop.
+People switch it on because motion makes them unwell. Altim reads it, obeys it, reacts while it is
+running when the platform reports it changing, and **offers no setting of its own**: the operating
+system owns this answer, and a second copy of it in Altim's settings could only ever disagree with
+the first, with nothing on screen to say which one was winning.
+
+The reading has three states, not two, because "Altim could not find out" is a real answer:
+Windows can refuse `SPI_GETCLIENTAREAANIMATION`, a Mac can be unreachable through its Objective-C
+runtime, and a Linux session may run no portal or one that does not carry GNOME's namespace.
+
+| The platform says | What Altim does |
+|---|---|
+| the user asked for reduced motion | nothing animates |
+| the user did not | the meter fill animates |
+| nothing Altim could read | nothing animates |
+
+**The unknown falls to stillness, and that is a decision rather than a default.** It is also the
+one place in Altim where an unknown is rendered as a value, because a surface either animates or
+it does not and there is no third picture to draw. The tie is broken on the size of the two
+mistakes: animating for somebody who asked for stillness and whose machine could not be questioned
+can make them ill, and withholding a 180ms ease from somebody who never asked cannot. The unknown
+itself is not thrown away — it survives in the platform service and in the start-up log, and only
+the one call that has to produce a yes or a no collapses it.
+
+**Reduced never means less.** The meter still reaches its new level; it is drawn there in the next
+frame instead of travelling. A fill already in the air when the setting is switched on is cut
+short at the level it was travelling to, so the relief arrives on the animation that is on screen
+and not only on the next one. Nothing disappears, nothing is delayed, and no figure is withheld.
 
 ## Words
 

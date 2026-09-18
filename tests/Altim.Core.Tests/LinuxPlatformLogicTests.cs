@@ -324,6 +324,54 @@ public sealed class PortalAppearanceTests
     }
 }
 
+/// <summary>
+/// The animation preference the portal carries, including the shapes that mean "this desktop
+/// has not said".
+/// </summary>
+public sealed class PortalAnimationsTests
+{
+    [Fact]
+    public void AnimationsEnabledIsFullMotion() =>
+        Assert.Equal(MotionPreference.Full, PortalAnimations.ToPreference(true));
+
+    [Fact]
+    public void AnimationsDisabledIsReducedMotion() =>
+        Assert.Equal(MotionPreference.Reduced, PortalAnimations.ToPreference(false));
+
+    [Fact]
+    public void APortalThatDidNotAnswerIsUnknownRatherThanAnimated() =>
+        // A KDE or Sway session has not said motion is wanted; it has said nothing, and the
+        // difference has to survive all the way to the renderer.
+        Assert.Equal(MotionPreference.Unknown, PortalAnimations.ToPreference(null));
+
+    [Fact]
+    public void APlainBooleanIsRead()
+    {
+        Assert.True(PortalAnimations.TryRead(VariantValue.Bool(false), out bool enabled));
+        Assert.False(enabled);
+    }
+
+    [Fact]
+    public void ANestedVariantIsUnwrapped()
+    {
+        // Read returns a variant whose contents are themselves a variant; ReadOne and
+        // SettingChanged can hand the value over unwrapped. Both shapes have to work.
+        VariantValue doubled = VariantValue.Variant(VariantValue.Variant(VariantValue.Bool(false)));
+
+        Assert.True(PortalAnimations.TryRead(doubled, out bool enabled));
+        Assert.False(enabled);
+    }
+
+    [Fact]
+    public void SomeOtherShapeIsNotReadAsPermissionToAnimate()
+    {
+        // A portal answering with a number where the specification says boolean has told
+        // Altim nothing. The caller turns a false here into Unknown, never into Full.
+        Assert.False(PortalAnimations.TryRead(VariantValue.UInt32(1), out bool enabled));
+        Assert.False(enabled);
+    }
+}
+
 /// <summary>The bus addresses and match rules, which are easy to get subtly wrong and silent when they are.</summary>
 public sealed class DBusServicesTests
 {
@@ -352,6 +400,24 @@ public sealed class DBusServicesTests
 
         // Without this the process is woken for every portal setting any application changes.
         Assert.Equal("org.freedesktop.appearance", rule.Arg0);
+    }
+
+    [Fact]
+    public void TheAnimationsRuleFiltersOnGnomesOwnNamespace()
+    {
+        MatchRule rule = DBusServices.AnimationsChangedRule();
+
+        Assert.Equal(MessageType.Signal, rule.Type);
+        Assert.Equal("org.freedesktop.portal.Desktop", rule.Sender);
+        Assert.Equal("/org/freedesktop/portal/desktop", rule.Path);
+        Assert.Equal("org.freedesktop.portal.Settings", rule.Interface);
+        Assert.Equal("SettingChanged", rule.Member);
+
+        // There is no freedesktop key for motion, so this one is GNOME's by name. Pointing
+        // it at org.freedesktop.appearance would subscribe successfully and then never carry
+        // an animation change at all.
+        Assert.Equal("org.gnome.desktop.interface", rule.Arg0);
+        Assert.Equal("enable-animations", DBusServices.EnableAnimationsKey);
     }
 }
 

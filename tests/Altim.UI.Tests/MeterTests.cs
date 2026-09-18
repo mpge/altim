@@ -1,4 +1,6 @@
 using Altim.Core.Abstractions;
+using Altim.Core.Models;
+using Altim.UI.Accessibility;
 using Altim.UI.Controls;
 using Altim.UI.Formatting;
 using Altim.UI.Tests.Fakes;
@@ -201,6 +203,8 @@ public sealed class MeterTests
     [AvaloniaFact]
     public void AChangedValueAnimatesForOneHundredAndEightyMillisecondsEaseOut()
     {
+        using MotionScope scope = MotionScope.Of(MotionPreference.Full);
+
         var meter = new Meter { Value = 40d };
         meter.Value = 90d;
 
@@ -212,6 +216,85 @@ public sealed class MeterTests
         Assert.Equal(TimeSpan.FromMilliseconds(180d), Meter.FillDuration);
         Assert.IsType<CubicEaseOut>(transition.Easing);
     }
+
+    /// <summary>
+    /// A machine that has asked for reduced motion gets the new level and no travel to it.
+    /// The level is not withheld and it is not delayed: it is the drawn value immediately.
+    /// </summary>
+    /// <remarks>
+    /// On screen, because an unhosted meter has no transitions running whatever it is told:
+    /// Avalonia enables them on attachment. Asserted off screen this would pass against an
+    /// implementation that ignored the preference entirely.
+    /// </remarks>
+    /// <param name="preference">The reading the platform reported.</param>
+    [AvaloniaTheory]
+    [InlineData(MotionPreference.Reduced)]
+    [InlineData(MotionPreference.Unknown)]
+    public void AChangedValueLandsFlatWhenMotionIsNotAllowed(MotionPreference preference)
+    {
+        using MotionScope scope = MotionScope.Of(preference);
+
+        var meter = new Meter { Value = 40d };
+        using PixelHost host = PixelHost.Show(new StackPanel { Children = { meter } });
+
+        meter.Value = 90d;
+
+        Assert.Null(meter.Transitions);
+        Assert.Equal(90d, meter.DisplayValue);
+    }
+
+    /// <summary>
+    /// With motion allowed the same change does not land flat, which is what makes the
+    /// assertion above about suppression rather than about the meter never animating.
+    /// </summary>
+    /// <remarks>
+    /// On screen, because Avalonia enables a control's transitions when it is attached to a
+    /// visual tree and not before: an unhosted meter takes every value straight away whatever
+    /// its transitions say, which would make this pass for the wrong reason.
+    /// </remarks>
+    [AvaloniaFact]
+    public void TheSameChangeDoesNotLandFlatWhenMotionIsAllowed()
+    {
+        using MotionScope scope = MotionScope.Of(MotionPreference.Full);
+
+        var meter = new Meter { Value = 40d };
+        using PixelHost host = PixelHost.Show(new StackPanel { Children = { meter } });
+
+        meter.Value = 90d;
+
+        Assert.NotNull(meter.Transitions);
+        Assert.NotEqual(90d, meter.DisplayValue);
+    }
+
+    /// <summary>
+    /// A fill already in the air is cut short when the machine asks for reduced motion, at
+    /// the value it was travelling to. Somebody switching the setting on gets relief from
+    /// the animation that is on screen, not only from the next one.
+    /// </summary>
+    [AvaloniaFact]
+    public void ReducingMotionMidFlightCutsTheTravelShortAtTheNewLevel()
+    {
+        using MotionScope scope = MotionScope.Of(MotionPreference.Full);
+
+        var meter = new Meter { Value = 40d, Threshold = 80d };
+
+        // On screen, because a meter listens for the preference only while it is attached.
+        using PixelHost host = PixelHost.Show(new StackPanel { Children = { meter } });
+
+        meter.Value = 90d;
+        Assert.NotEqual(90d, meter.DisplayValue);
+
+        Motion.Set(MotionPreference.Reduced);
+
+        Assert.Equal(90d, meter.DisplayValue);
+
+        // And it stays there: a cut that only held for one frame would be handed straight
+        // back to the animation on the next tick.
+        Frame frame = host.Capture();
+        Assert.True(frame.Width > 0);
+        Assert.Equal(90d, meter.DisplayValue);
+    }
+
 
     /// <summary>A level at or above the threshold is reported, so the label can react.</summary>
     [AvaloniaFact]

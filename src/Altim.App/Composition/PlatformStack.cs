@@ -37,10 +37,14 @@ internal sealed class PlatformStack : IDisposable
     private readonly List<IDisposable> _owned = [];
     private bool _disposed;
 
-    private PlatformStack(INotificationService notifications, IAutoStartService autoStart)
+    private PlatformStack(
+        INotificationService notifications,
+        IAutoStartService autoStart,
+        IMotionPreferenceService motion)
     {
         Notifications = notifications;
         AutoStart = autoStart;
+        Motion = motion;
     }
 
     /// <summary>The tray host and system signals, or null when this platform has none.</summary>
@@ -51,6 +55,12 @@ internal sealed class PlatformStack : IDisposable
 
     /// <summary>Never null: a platform without autostart gets one that reports false.</summary>
     public IAutoStartService AutoStart { get; }
+
+    /// <summary>
+    /// Never null: a platform Altim cannot ask about reduced motion gets one that reports
+    /// <see cref="Altim.Core.Models.MotionPreference.Unknown"/>.
+    /// </summary>
+    public IMotionPreferenceService Motion { get; }
 
     /// <summary>
     /// The running-process detector providers use to say whether an agent is active, or null
@@ -92,7 +102,8 @@ internal sealed class PlatformStack : IDisposable
 
         report.Add("No tray support on this platform yet");
         AltimLog.Write("platform", "No platform implementation for this OS; running without a tray.");
-        return new PlatformStack(new NullNotificationService(), new NullAutoStartService());
+        return new PlatformStack(
+            new NullNotificationService(), new NullAutoStartService(), new UnknownMotionPreferenceService());
     }
 
     /// <summary>Releases the tray host, the notification registration and the power hooks.</summary>
@@ -200,7 +211,20 @@ internal sealed class PlatformStack : IDisposable
             AltimLog.Write("processes", "Creating the process monitor failed; providers will build their own", ex);
         }
 
-        var stack = new PlatformStack(notifications, autoStart)
+        IMotionPreferenceService motion;
+        MacOSMotionPreferenceService? reduceMotion = null;
+        try
+        {
+            reduceMotion = new MacOSMotionPreferenceService();
+            motion = reduceMotion;
+        }
+        catch (Exception ex)
+        {
+            motion = new UnknownMotionPreferenceService();
+            AltimLog.Write("motion", "Reading the reduce motion preference failed; it stays unknown", ex);
+        }
+
+        var stack = new PlatformStack(notifications, autoStart, motion)
         {
             Platform = platform,
             Processes = processes,
@@ -208,8 +232,14 @@ internal sealed class PlatformStack : IDisposable
         };
 
         // Neither the notification centre nor the login item service holds anything to tear
-        // down: one retains a singleton it did not create, the other a class object. Only the
-        // platform service owns state — the observer registrations and the status item.
+        // down: one retains a singleton it did not create, the other a class object. The
+        // motion service and the platform service each own observer registrations, and the
+        // platform service owns the status item as well.
+        if (reduceMotion is not null)
+        {
+            stack._owned.Add(reduceMotion);
+        }
+
         if (platform is not null)
         {
             stack._owned.Add(platform);
@@ -297,19 +327,38 @@ internal sealed class PlatformStack : IDisposable
             AltimLog.Write("processes", "Creating the process monitor failed; providers will build their own", ex);
         }
 
-        var stack = new PlatformStack(notifications, autoStart)
+        IMotionPreferenceService motion;
+        LinuxMotionPreferenceService? reduceMotion = null;
+        try
+        {
+            reduceMotion = new LinuxMotionPreferenceService();
+            motion = reduceMotion;
+        }
+        catch (Exception ex)
+        {
+            motion = new UnknownMotionPreferenceService();
+            AltimLog.Write("motion", "Reading the reduce motion preference failed; it stays unknown", ex);
+        }
+
+        var stack = new PlatformStack(notifications, autoStart, motion)
         {
             Platform = platform,
             Processes = processes,
             NotificationsWork = notificationsWork,
         };
 
-        // The notification service owns a session-bus connection; the platform service owns
-        // two more plus its subscriptions and the panel host. Disposed in reverse, so the
-        // notification connection closes before the one carrying the panel item.
+        // The notification service owns a session-bus connection; the motion service owns a
+        // third; the platform service owns two more plus its subscriptions and the panel
+        // host. Disposed in reverse, so the notification connection closes before the one
+        // carrying the panel item.
         if (daemon is not null)
         {
             stack._owned.Add(daemon);
+        }
+
+        if (reduceMotion is not null)
+        {
+            stack._owned.Add(reduceMotion);
         }
 
         if (platform is not null)
@@ -327,13 +376,21 @@ internal sealed class PlatformStack : IDisposable
 #if WINDOWS
     private static PlatformStack CreateWindows(StartupReport report)
     {
+        // The tray host is built here rather than inside the platform service, the way the
+        // Linux branch does it, because two things need it: the platform service, which owns
+        // it and disposes it, and the motion service, which only subscribes to the broadcasts
+        // its hidden top-level window already receives.
         WindowsPlatformService? platform = null;
+        WindowsTrayHost? tray = null;
         try
         {
-            platform = new WindowsPlatformService("Altim");
+            tray = new WindowsTrayHost("Altim");
+            platform = new WindowsPlatformService(tray, ownsTray: true);
         }
         catch (Exception ex)
         {
+            tray?.Dispose();
+            tray = null;
             report.Add("Tray icon unavailable; Altim is running without one");
             AltimLog.Write("tray", "Creating the Windows tray host failed", ex);
         }
@@ -391,7 +448,22 @@ internal sealed class PlatformStack : IDisposable
             AltimLog.Write("processes", "Creating the process monitor failed; providers will build their own", ex);
         }
 
-        var stack = new PlatformStack(notifications, autoStart)
+        IMotionPreferenceService motion;
+        WindowsMotionPreferenceService? reduceMotion = null;
+        try
+        {
+            // A null tray host still gives a reading; it gives up only the change signal,
+            // because the broadcast has nowhere to land.
+            reduceMotion = new WindowsMotionPreferenceService(tray);
+            motion = reduceMotion;
+        }
+        catch (Exception ex)
+        {
+            motion = new UnknownMotionPreferenceService();
+            AltimLog.Write("motion", "Reading the reduce motion preference failed; it stays unknown", ex);
+        }
+
+        var stack = new PlatformStack(notifications, autoStart, motion)
         {
             Platform = platform,
             Processes = processes,
@@ -406,6 +478,14 @@ internal sealed class PlatformStack : IDisposable
         if (platform is not null)
         {
             stack._owned.Add(platform);
+        }
+
+        // Last, so that it is disposed first: the list is torn down in reverse, and the
+        // motion service's subscription has to be dropped while the tray window it is
+        // attached to is still alive. The platform service is what destroys that window.
+        if (reduceMotion is not null)
+        {
+            stack._owned.Add(reduceMotion);
         }
 
         return stack;

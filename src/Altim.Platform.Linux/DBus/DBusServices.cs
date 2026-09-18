@@ -64,6 +64,24 @@ public static class DBusServices
     public const string ColorSchemeKey = "color-scheme";
 
     /// <summary>
+    /// The namespace carrying the desktop's animation preference.
+    /// </summary>
+    /// <remarks>
+    /// <b>This one is GNOME's, not freedesktop's.</b> There is no
+    /// <c>org.freedesktop.appearance</c> key for motion, so the portal is asked for GNOME's
+    /// setting by name. A session that does not publish it — a portal backend that carries
+    /// only the freedesktop namespace, or no portal at all — answers with an error, which is
+    /// the unknown case rather than a failure.
+    /// </remarks>
+    public const string GnomeInterfaceNamespace = "org.gnome.desktop.interface";
+
+    /// <summary>
+    /// The key inside that namespace. <c>true</c> means animations are wanted, <c>false</c>
+    /// means the desktop has asked applications to stop animating.
+    /// </summary>
+    public const string EnableAnimationsKey = "enable-animations";
+
+    /// <summary>
     /// The rule that delivers logind's wake signal. <b>System bus.</b>
     /// </summary>
     /// <returns>A match rule narrowed to the one signal, so no other traffic is woken for.</returns>
@@ -91,5 +109,25 @@ public static class DBusServices
         Interface = SettingsInterface,
         Member = SettingChangedSignal,
         Arg0 = AppearanceNamespace,
+    };
+
+    /// <summary>
+    /// The rule that delivers the desktop's animation preference changing. <b>Session bus.</b>
+    /// </summary>
+    /// <returns>
+    /// A match rule narrowed to the GNOME interface namespace by its first argument. It is
+    /// not narrowed to the key as well: the key is the signal's <em>second</em> argument and
+    /// <see cref="MatchRule"/> filters on the first only, so the key is checked when the
+    /// signal is read. The namespace carries a dozen or so keys, and the others cost one
+    /// string comparison each.
+    /// </returns>
+    public static MatchRule AnimationsChangedRule() => new()
+    {
+        Type = MessageType.Signal,
+        Sender = PortalService,
+        Path = PortalPath,
+        Interface = SettingsInterface,
+        Member = SettingChangedSignal,
+        Arg0 = GnomeInterfaceNamespace,
     };
 }

@@ -1,3 +1,4 @@
+using Altim.Core.Models;
 using Altim.UI.Controls;
 using Avalonia;
 using Avalonia.Controls;
@@ -299,6 +300,84 @@ public sealed class MeterPixelTests
         Assert.True(
             painted >= (int)above.Width * 9 / 10,
             $"The ring painted {painted} of {(int)above.Width}: {after.Describe(above)}");
+    }
+
+    /// <summary>
+    /// Reduced motion is visible in the frame, not only in a flag: the level changes and the
+    /// very next frame is already drawn at the new level, where with motion allowed the same
+    /// frame is still short of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two halves are deliberately symmetrical - same meter, same window, same number of
+    /// captures - so the only thing that differs between them is what the operating system
+    /// is reported to have said. A gate that never suppressed anything fails on the first
+    /// assertion; a meter that had stopped animating altogether fails on the second.
+    /// </para>
+    /// <para>
+    /// <b>The second assertion is the one assertion here that watches a clock</b>, because
+    /// "the fill has not arrived yet" is only true while the 180ms is still running. The
+    /// capture between them is a render tick and a bitmap copy of a 240x60 window, which is
+    /// three orders of magnitude inside that. The first assertion - the one the change is
+    /// actually about - cannot race anything, because with the animation suppressed there is
+    /// no clock involved at all.
+    /// </para>
+    /// </remarks>
+    /// <param name="name">The theme variant to render under.</param>
+    [AvaloniaTheory]
+    [MemberData(nameof(Variants))]
+    public void ReducedMotionDrawsTheNewLevelInTheVeryNextFrame(string name)
+    {
+        ThemeVariant variant = Variant(name);
+
+        // What a meter that was simply at 80 all along looks like. Every assertion below is
+        // against this picture rather than against a column count, so nothing here depends
+        // on where a rounded end happens to antialias.
+        var settled = new Meter { Value = 80d };
+        using PixelHost settledHost = Show(settled, variant);
+        Frame reference = settledHost.Capture();
+        Rect area = settledHost.BoundsOf(settled);
+
+        Frame reduced = FrameAfterChangingTo(80d, variant, MotionPreference.Reduced, area, reference);
+        Frame travelling = FrameAfterChangingTo(80d, variant, MotionPreference.Full, area, reference);
+
+        Assert.Equal(0, reduced.DifferenceWith(reference, area));
+        Assert.True(
+            travelling.DifferenceWith(reference, area) > 0,
+            "One frame after the level changed the rail was already drawn at the new level"
+                + " with motion allowed, so there was no animation to suppress and the"
+                + " assertion above proves nothing.");
+    }
+
+    /// <summary>
+    /// Lays a meter out at 20, changes it, and returns the very next frame.
+    /// </summary>
+    /// <param name="to">The level to change to.</param>
+    /// <param name="variant">The theme variant to render under.</param>
+    /// <param name="preference">What the platform is reported to say about motion.</param>
+    /// <param name="area">The meter's bounds, which every host here shares.</param>
+    /// <param name="reference">The picture of a meter already at the new level.</param>
+    /// <returns>The frame captured immediately after the change.</returns>
+    private static Frame FrameAfterChangingTo(
+        double to, ThemeVariant variant, MotionPreference preference, Rect area, Frame reference)
+    {
+        using MotionScope scope = MotionScope.Of(preference);
+
+        // No threshold: the index is drawn across the rail and would be one more thing the
+        // comparison had to account for.
+        var meter = new Meter { Value = 20d };
+        using PixelHost host = Show(meter, variant);
+
+        Assert.Equal(area, host.BoundsOf(meter));
+
+        // It really does start somewhere else, or arriving at the new level would prove
+        // nothing at all.
+        Assert.True(
+            host.Capture().DifferenceWith(reference, area) > 0,
+            "A meter at 20 is already drawn the same as one at 80.");
+
+        meter.Value = to;
+        return host.Capture();
     }
 
     private static PixelHost Show(Meter meter, ThemeVariant variant) =>

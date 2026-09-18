@@ -269,6 +269,14 @@ internal static unsafe partial class ObjC
     internal static byte SendBool(IntPtr receiver, IntPtr selector) =>
         receiver == IntPtr.Zero ? (byte)0 : SendBoolNative(receiver, selector);
 
+    /// <summary>Sends a message taking one pointer argument and returning <c>BOOL</c>.</summary>
+    /// <param name="receiver">The object or class to message.</param>
+    /// <param name="selector">The selector.</param>
+    /// <param name="argument">The argument, for example the selector <c>respondsToSelector:</c> asks about.</param>
+    /// <returns>Non-zero for YES; zero for a nil receiver.</returns>
+    internal static byte SendBool(IntPtr receiver, IntPtr selector, IntPtr argument) =>
+        receiver == IntPtr.Zero ? (byte)0 : SendBoolArgumentNative(receiver, selector, argument);
+
     /// <summary>Sends a message whose single argument is a <c>BOOL</c>.</summary>
     /// <param name="receiver">The object or class to message.</param>
     /// <param name="selector">The selector.</param>
@@ -421,6 +429,9 @@ internal static unsafe partial class ObjC
 
     [LibraryImport(LibObjC, EntryPoint = "objc_msgSend")]
     private static partial byte SendBoolNative(IntPtr receiver, IntPtr selector);
+
+    [LibraryImport(LibObjC, EntryPoint = "objc_msgSend")]
+    private static partial byte SendBoolArgumentNative(IntPtr receiver, IntPtr selector, IntPtr argument);
 
     [LibraryImport(LibObjC, EntryPoint = "objc_msgSend")]
     private static partial void SendVoidBoolNative(IntPtr receiver, IntPtr selector, byte argument);

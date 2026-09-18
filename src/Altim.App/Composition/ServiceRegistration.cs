@@ -108,6 +108,12 @@ internal static class ServiceRegistration
 
         _ = services.AddSingleton(platform.Notifications);
         _ = services.AddSingleton(platform.AutoStart);
+
+        // The reduce-motion reading. Registered like the rest of the native stack even though
+        // the interface reaches it through Altim.UI's ambient value rather than through the
+        // container: the composition root is what bridges the two, and a diagnostic asking
+        // what this machine reported should find the service here with everything else.
+        _ = services.AddSingleton(platform.Motion);
         _ = services.AddSingleton(networkGate);
         _ = services.AddSingleton<IRefreshGate>(networkGate);
         _ = services.AddSingleton(networkPolicy);

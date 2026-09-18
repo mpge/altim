@@ -118,6 +118,29 @@ internal sealed class NullNotificationService : INotificationService
 }
 
 /// <summary>
+/// The reduce-motion preference on a platform Altim has no way to ask.
+/// </summary>
+/// <remarks>
+/// Reports <see cref="MotionPreference.Unknown"/> forever, which is the truth: this machine
+/// has not said that motion is wanted, it has said nothing. What an unknown does on screen is
+/// <see cref="Altim.Core.Accessibility.MotionPolicy"/>'s single decision, not this class's,
+/// which is why there is nothing here that looks like a default.
+/// </remarks>
+internal sealed class UnknownMotionPreferenceService : IMotionPreferenceService
+{
+    /// <inheritdoc />
+    /// <remarks>Never raised: there is nothing here that can change.</remarks>
+    public event EventHandler? Changed
+    {
+        add { }
+        remove { }
+    }
+
+    /// <inheritdoc />
+    public MotionPreference Current => MotionPreference.Unknown;
+}
+
+/// <summary>
 /// Autostart on a platform Altim cannot register with.
 /// </summary>
 /// <remarks>

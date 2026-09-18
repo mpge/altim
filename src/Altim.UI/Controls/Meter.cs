@@ -1,3 +1,4 @@
+using Altim.UI.Accessibility;
 using Altim.UI.Formatting;
 using Avalonia;
 using Avalonia.Animation;
@@ -50,6 +51,15 @@ namespace Altim.UI.Controls;
 /// number to another. It does not animate on the first value, on becoming unavailable, or
 /// on coming back from unavailable, because those are not a level changing. Nothing else in
 /// the control moves.
+/// </para>
+/// <para>
+/// <b>It does not animate at all while <see cref="Accessibility.Motion"/> reports that
+/// motion is not permitted</b>, which covers both an operating system asking for reduced
+/// motion and an operating system Altim could not ask. The level still arrives - the rail
+/// is drawn at the new value on the very next frame - it simply arrives without travelling
+/// there, and a change that lands mid flight cuts the travel short rather than letting it
+/// finish. This is the only animation in Altim, so this is the only control that has to
+/// care.
 /// </para>
 /// <para>
 /// A meter reports a level by its width, so a meter with no width reports nothing. It asks
@@ -428,6 +438,24 @@ public sealed class Meter : Control
 
     /// <inheritdoc />
     /// <remarks>
+    /// Listening only while the meter is on screen is what keeps a static event from holding
+    /// on to every meter this process has ever built.
+    /// </remarks>
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        Motion.Changed += OnMotionChanged;
+    }
+
+    /// <inheritdoc />
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        Motion.Changed -= OnMotionChanged;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
     /// Focus opens the same tip a pointer opens, because it is the same detail: the level and
     /// the threshold the index stands at. A meter that only answered a pointer would keep the
     /// one thing it knows that the row does not print away from anybody using a keyboard.
@@ -465,8 +493,13 @@ public sealed class Meter : Control
             UpdateReading();
 
             // A level only "changes" when it moves between two reported numbers. The
-            // first value, and every crossing into or out of unavailable, lands flat.
-            bool animate = _hasValueBeenSet && oldValue is not null && newValue is not null;
+            // first value, and every crossing into or out of unavailable, lands flat. So
+            // does every value on a machine that has asked for reduced motion, or that
+            // could not be asked.
+            bool animate = _hasValueBeenSet
+                && oldValue is not null
+                && newValue is not null
+                && Motion.AnimationsAllowed;
             _hasValueBeenSet = true;
             SetDisplayValue(newValue ?? 0d, animate);
         }
@@ -596,6 +629,25 @@ public sealed class Meter : Control
         double radius = Math.Max(0d, FocusRingRadius);
 
         context.DrawRectangle(null, new Pen(brush, weight), ring, radius, radius);
+    }
+
+    /// <summary>
+    /// Cuts a fill that is still travelling when the machine asks for reduced motion.
+    /// </summary>
+    /// <remarks>
+    /// Without this, somebody switching the setting on would keep whatever animation was
+    /// already in the air, and on a meter that refreshes every minute the relief would look
+    /// as though it had not arrived. The level is not changed - only the travel to it is
+    /// abandoned, at the value it was travelling to.
+    /// </remarks>
+    private void OnMotionChanged(object? sender, EventArgs e)
+    {
+        if (Motion.AnimationsAllowed)
+        {
+            return;
+        }
+
+        SetDisplayValue(Value ?? 0d, animate: false);
     }
 
     private void UpdateAboveThreshold()

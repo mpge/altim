@@ -38,6 +38,16 @@ internal static unsafe partial class NativeMethods
     internal const uint WM_CONTEXTMENU = 0x007B;
     internal const uint WM_POWERBROADCAST = 0x0218;
 
+    /// <summary>
+    /// Broadcast when a system parameter changes, which is how the accessibility setting
+    /// behind <see cref="SPI_GETCLIENTAREAANIMATION"/> announces itself.
+    /// </summary>
+    /// <remarks>
+    /// Broadcasts reach top-level windows only, so this arrives at the tray's hidden shell
+    /// window and never at its message-only one.
+    /// </remarks>
+    internal const uint WM_SETTINGCHANGE = 0x001A;
+
     /// <summary>Version 4 primary activation: mouse or keyboard.</summary>
     internal const uint NIN_SELECT = WM_USER + 0;
 
@@ -118,6 +128,13 @@ internal static unsafe partial class NativeMethods
     internal static readonly Guid GUID_CONSOLE_DISPLAY_STATE =
         new(0x6fe69556, 0x704a, 0x47a0, 0x8f, 0x24, 0xc2, 0x8d, 0x93, 0x6f, 0xda, 0x47);
 
+    /// <summary>
+    /// <c>SPI_GETCLIENTAREAANIMATION</c>: reads the "Animation effects" accessibility
+    /// setting into a <c>BOOL</c>. True means animations are wanted; false means the user
+    /// has asked applications to stop animating.
+    /// </summary>
+    internal const uint SPI_GETCLIENTAREAANIMATION = 0x1042;
+
     internal const uint TH32CS_SNAPPROCESS = 0x00000002;
     internal const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x00001000;
     internal static readonly IntPtr INVALID_HANDLE_VALUE = -1;
@@ -192,6 +209,20 @@ internal static unsafe partial class NativeMethods
 
     [LibraryImport("user32.dll")]
     internal static partial int GetSystemMetricsForDpi(int nIndex, uint dpi);
+
+    /// <summary>
+    /// Reads or writes a system parameter. Altim only ever reads, and only
+    /// <see cref="SPI_GETCLIENTAREAANIMATION"/>.
+    /// </summary>
+    /// <param name="uiAction">The parameter to read.</param>
+    /// <param name="uiParam">Parameter-specific; zero for the reads used here.</param>
+    /// <param name="pvParam">Where to put the answer.</param>
+    /// <param name="fWinIni">Write flags; zero, because nothing here writes.</param>
+    /// <returns>False when the parameter could not be read, which is an answer in itself.</returns>
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SystemParametersInfoW(
+        uint uiAction, uint uiParam, void* pvParam, uint fWinIni);
 
     [LibraryImport("user32.dll")]
     internal static partial uint GetDpiForWindow(IntPtr hWnd);

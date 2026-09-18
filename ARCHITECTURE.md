@@ -124,6 +124,16 @@ public interface IPlatformService      // tray host, screen geometry, theme, pow
 public interface INotificationService  { ValueTask ShowAsync(Notification n, CancellationToken ct); }
 public interface IAutoStartService     { ValueTask<bool> IsEnabledAsync(); ValueTask SetAsync(bool on); }
 
+// The operating system's reduce-motion setting. Cached, so reading it is free and the probe
+// runs only when the platform says it moved. Three states, because "Altim could not find out"
+// is a real answer: MotionPolicy.AllowsAnimation is the single place it becomes a yes or a no,
+// and it answers no. Altim offers no setting of its own; see docs/DESIGN.md.
+public interface IMotionPreferenceService
+{
+    MotionPreference Current { get; }   // Unknown | Full | Reduced, and Unknown is the default
+    event EventHandler? Changed;        // on a move only, on whichever thread heard about it
+}
+
 // Claude Code's statusLine setting, from Altim's side. Both calls answer with the state the
 // settings file is actually in, never with the outcome of the request: install, not installed,
 // a status line of the user's own in the way, no Claude Code here, or a file that would not
@@ -395,6 +405,7 @@ straight to the working-area corner.
 | Autostart | `HKCU\...\Run`, **reporting state from `StartupApproved`** | `SMAppService` (the selector is `mainAppService`), macOS 13+, bundle required; only *enabled* reports true, "requires approval" does not | `~/.config/autostart/*.desktop`, disable via `Hidden=true`; the entry names `$APPIMAGE` when it is set, never the AppImage's temporary mount point |
 | Power/session | `Microsoft.Win32.SystemEvents` plus `PBT_APMSUSPEND` / `GUID_CONSOLE_DISPLAY_STATE` | `NSWorkspace.shared.notificationCenter` (not the default centre): `WillSleep`, `DidWake`, `ScreensDidWake` | logind `PrepareForSleep` on the **system** bus — one signal, `true` to sleep and `false` to wake |
 | Theme | `ColorValuesChanged` | **`NSDistributedNotificationCenter`** — appearance is *not* posted to the workspace centre | portal `org.freedesktop.appearance` on the **session** bus; may resolve late |
+| Reduce motion | `SPI_GETCLIENTAREAANIMATION`, re-read on every `WM_SETTINGCHANGE` reaching the tray's hidden top-level window | `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion`, with `AccessibilityDisplayOptionsDidChange` on the **workspace** centre | portal `org.gnome.desktop.interface` / `enable-animations` on the **session** bus; **no freedesktop key exists**, so a session without GNOME's namespace reports unknown |
 
 macOS uses **three** notification centres, and picking the wrong one fails silently rather than
 loudly: the workspace centre for sleep and wake, the distributed centre for appearance, and the

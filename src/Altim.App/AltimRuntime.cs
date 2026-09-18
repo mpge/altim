@@ -10,6 +10,7 @@ using Altim.Core.Models;
 using Altim.Core.Monitoring;
 using Altim.Core.Settings;
 using Altim.Storage;
+using Altim.UI.Accessibility;
 using Altim.UI.ViewModels;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -157,6 +158,17 @@ internal sealed class AltimRuntime : IAsyncDisposable
             _ = ShowTrayAsync();
         }
 
+        // Before any view exists, so the first meter the panel builds already knows whether
+        // it is allowed to move. The reading is cached in the platform service; this only
+        // copies it across, and the subscription keeps it in step for the rest of the run.
+        // Read back from the interface rather than from the platform service, for the reason
+        // OnMotionPreferenceChanged gives: no test project binds to the composition root, so
+        // this line is the only evidence the hand-off happened, and a line reporting what the
+        // platform said would print the right sentence even if nothing had been told.
+        Motion.Set(_platform.Motion.Current);
+        AltimLog.Write("motion", "Reduced motion at start-up: " + Describe(Motion.Preference));
+        _platform.Motion.Changed += OnMotionPreferenceChanged;
+
         // A sensible variant before the settings are known, so that if anything at all is
         // constructed early it is not built against the wrong palette. The loaded
         // preference is applied again before the panel is created.
@@ -236,6 +248,11 @@ internal sealed class AltimRuntime : IAsyncDisposable
             platform.ThemeChanged -= OnPlatformThemeChanged;
         }
 
+        if (_platform is not null)
+        {
+            _platform.Motion.Changed -= OnMotionPreferenceChanged;
+        }
+
         // The container owns the providers and the scheduler it created, and both are
         // idempotent about a second dispose.
         if (_services is not null)
@@ -285,6 +302,21 @@ internal sealed class AltimRuntime : IAsyncDisposable
             return DateTimeOffset.UtcNow;
         }
     }
+
+    /// <summary>
+    /// What a reduce-motion reading says, in a sentence for the log.
+    /// </summary>
+    /// <param name="preference">The reading.</param>
+    /// <remarks>
+    /// The unknown names what Altim does about it, because "unknown" alone reads like a
+    /// defect and this one is a supported state with a deliberate consequence.
+    /// </remarks>
+    private static string Describe(MotionPreference preference) => preference switch
+    {
+        MotionPreference.Reduced => "this machine asks for reduced motion",
+        MotionPreference.Full => "this machine does not ask for reduced motion",
+        _ => "this machine could not be asked, so nothing animates",
+    };
 
     private static ThemeVariant VariantFor(ThemePreference preference) => preference switch
     {
@@ -1163,6 +1195,35 @@ internal sealed class AltimRuntime : IAsyncDisposable
         }
 
         scheduler.Resume();
+    }
+
+    /// <summary>
+    /// Carries a reduce-motion change from the platform to the interface.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The platform raises this on whichever thread heard about it - the tray message loop on
+    /// Windows, a bus thread on Linux - and <see cref="Motion"/>'s subscribers are controls,
+    /// so the hand-off is posted to the dispatcher. It is not awaited: the next frame is soon
+    /// enough for a preference somebody has just changed in another application's window.
+    /// </para>
+    /// <para>
+    /// The line is written from inside the posted work rather than before it, so that what
+    /// reaches the log is "the interface has been told" and not "something intended to tell
+    /// it". No test project binds to the composition root, which makes this line the only
+    /// evidence that the chain from the platform to the interface is joined up, and evidence
+    /// for the wrong half of it would be worse than none.
+    /// </para>
+    /// </remarks>
+    private void OnMotionPreferenceChanged(object? sender, EventArgs e)
+    {
+        MotionPreference preference = _platform?.Motion.Current ?? MotionPreference.Unknown;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            Motion.Set(preference);
+            AltimLog.Write("motion", "Reduced motion changed: " + Describe(preference));
+        });
     }
 
     private void OnPlatformThemeChanged(object? sender, EventArgs e) =>

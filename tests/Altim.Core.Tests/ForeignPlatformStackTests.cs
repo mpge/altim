@@ -16,7 +16,7 @@ namespace Altim.Core.Tests;
 /// layers work — nothing available here can, and ARCHITECTURE.md records both as unverified.
 /// What it proves is the one thing that is checkable from anywhere and is also the most
 /// likely way the wiring breaks: <c>PlatformStack.CreateMacOS</c> and
-/// <c>PlatformStack.CreateLinux</c> construct four services each, and a constructor that
+/// <c>PlatformStack.CreateLinux</c> construct five services each, and a constructor that
 /// throws on the wrong platform turns a degraded capability into a failure to start. Every
 /// type in both layers is compiled into every build of the solution and is documented to be
 /// inert rather than absent off its own operating system; this is the test of that claim,
@@ -42,6 +42,7 @@ public sealed class ForeignPlatformStackTests
         var notifications = new MacOSNotificationService();
         var autoStart = new MacOSAutoStartService();
         var processes = new MacOSProcessMonitor();
+        using var motion = new MacOSMotionPreferenceService();
 
         Assert.False(platform.IsSupported);
         Assert.False(notifications.IsAvailable);
@@ -62,10 +63,15 @@ public sealed class ForeignPlatformStackTests
         // instead of throwing; which platform gets to call it is decided above it.
         Assert.NotNull(await processes.ScanAsync(Ct));
 
+        // No NSWorkspace to ask, so no answer: unknown, and never "the user wants motion".
+        Assert.False(motion.IsSupported);
+        Assert.Equal(MotionPreference.Unknown, motion.Current);
+
         // The signals exist and simply never fire, which is what the contract asks of a
         // platform that cannot report them.
         platform.SystemSuspending += (_, _) => Assert.Fail("No macOS notification centre exists here.");
         platform.SystemResumed += (_, _) => Assert.Fail("No macOS notification centre exists here.");
+        motion.Changed += (_, _) => Assert.Fail("No macOS notification centre exists here.");
     }
 
     [Fact]
@@ -78,13 +84,19 @@ public sealed class ForeignPlatformStackTests
         using var notifications = new LinuxNotificationService("Altim", LinuxAutoStartService.DefaultEntryName);
         var autoStart = new LinuxAutoStartService();
         var processes = new LinuxProcessMonitor();
+        using var motion = new LinuxMotionPreferenceService();
 
-        // Nothing waits for this in the application; a test can, and does, so the assertions
+        // Nothing waits for these in the application; a test can, and does, so the assertions
         // below are about a settled state rather than a race.
         await platform.Ready;
+        await motion.Ready;
 
         Assert.False(platform.SleepSignalConnected);
         Assert.False(platform.AppearancePortalConnected);
+
+        // No session bus, so no portal, so no answer about motion. Unknown, not "animate".
+        Assert.False(motion.PortalAnswered);
+        Assert.Equal(MotionPreference.Unknown, motion.Current);
 
         // Null on Linux in every session, on every desktop: the StatusNotifierItem
         // specification carries no geometry. Null here is the answer, not a failure.
