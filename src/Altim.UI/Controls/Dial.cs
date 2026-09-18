@@ -235,6 +235,27 @@ public sealed class Dial : Control
             nameof(IsUnavailable),
             o => o.IsUnavailable);
 
+    /// <summary>What the face is drawing, whichever property supplied it.</summary>
+    /// <remarks>
+    /// Raised rather than merely readable so a legend can take its rows from the face
+    /// itself. A legend bound to the same list the view handed the dial would be a second
+    /// copy of the truth, and two copies can be handed two lists.
+    /// </remarks>
+    public static readonly DirectProperty<Dial, IReadOnlyList<DialReading>> ArcsProperty =
+        AvaloniaProperty.RegisterDirect<Dial, IReadOnlyList<DialReading>>(
+            nameof(Arcs),
+            o => o.Arcs);
+
+    /// <summary>The one reading being read, or null while none is.</summary>
+    /// <remarks>
+    /// <b>One answer, resolved in one place.</b> A pointer on a ring, the keyboard on a ring
+    /// and a legend row naming one all arrive here through <see cref="Settle"/>, so the
+    /// hairline on the face and a mark on anything standing beside it cannot end up naming
+    /// two different readings.
+    /// </remarks>
+    public static readonly DirectProperty<Dial, DialReading?> MarkedProperty =
+        AvaloniaProperty.RegisterDirect<Dial, DialReading?>(nameof(Marked), o => o.Marked);
+
     private bool _isAboveThreshold;
     private bool _isUnavailable = true;
 
@@ -246,6 +267,9 @@ public sealed class Dial : Control
 
     private int? _hovered;
     private int? _keyboard;
+    private int? _named;
+    private int? _at;
+    private DialReading? _marked;
     private string? _captioned;
 
     static Dial()
@@ -392,8 +416,9 @@ public sealed class Dial : Control
     public string Reading => string.Join(". ", _arcs.Select(static arc => arc.Words));
 
     /// <summary>
-    /// What a pointer and the keyboard reveal: the ring being read, when its window rolls
-    /// over, and what the bands mean, or every ring at once when no one ring is being read.
+    /// What a pointer, the keyboard and a legend row reveal: the ring being read, when its
+    /// window rolls over, and what the bands mean, or every ring at once when no one ring is
+    /// being read.
     /// </summary>
     /// <remarks>
     /// Deliberately more than <see cref="Reading"/>. The extra sentence explains a colour
@@ -401,13 +426,28 @@ public sealed class Dial : Control
     /// has to be told once; putting it in the accessible name would read it out on every
     /// announcement to the one audience it cannot help.
     /// </remarks>
-    public string? Detail => RevealsDetail ? DetailFor(_hovered ?? _keyboard) : null;
+    public string? Detail => RevealsDetail ? DetailFor(_at) : null;
 
     /// <summary>Which ring a pointer is over, or null when it is over none.</summary>
     public int? HoveredRing => _hovered;
 
     /// <summary>Which ring the keyboard is on, or null when the dial is not focused.</summary>
     public int? FocusedRing => _keyboard;
+
+    /// <inheritdoc cref="MarkedProperty" />
+    public DialReading? Marked
+    {
+        get => _marked;
+        private set => SetAndRaise(MarkedProperty, ref _marked, value);
+    }
+
+    /// <summary>Which ring is marked, or null when none is.</summary>
+    /// <remarks>
+    /// The list position, not <see cref="DialReading.Ring"/>: the face draws the list in the
+    /// order it was handed, and a reading numbered differently from where it stands would
+    /// send the mark to the wrong band.
+    /// </remarks>
+    public int? MarkedRing => _at;
 
     /// <summary>
     /// The outermost ring's path as it was last drawn, or null before the first render.
@@ -527,6 +567,47 @@ public sealed class Dial : Control
     public static string ReadingFor(double? value, double? threshold) =>
         UsageFormat.InstrumentReading(value, threshold);
 
+    /// <summary>
+    /// Names one of this face's readings from somewhere off the face - a legend row being
+    /// pointed at or arrived on - or stops naming one.
+    /// </summary>
+    /// <param name="reading">
+    /// The reading to name, which has to be one this face carries, or null to stop.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// The mark is still <em>resolved</em> rather than assigned: this is one of the three
+    /// ways a reading can be asked for, and <see cref="Settle"/> decides between them. That
+    /// is what stops a legend and the face disagreeing - there is one answer, and the legend
+    /// reads it back out of <see cref="Marked"/> rather than keeping its own.
+    /// </para>
+    /// <para>
+    /// A reading this face does not carry is ignored rather than clearing the mark. A legend
+    /// holding a different list cannot speak for this face, and blanking the face on its word
+    /// would hide that mistake instead of leaving it where somebody can see it.
+    /// </para>
+    /// </remarks>
+    public void Mark(DialReading? reading)
+    {
+        int? at = null;
+        if (reading is not null)
+        {
+            at = IndexOf(reading);
+            if (at is null)
+            {
+                return;
+            }
+        }
+
+        if (_named == at)
+        {
+            return;
+        }
+
+        _named = at;
+        Settle();
+    }
+
     /// <inheritdoc />
     public override void Render(DrawingContext context)
     {
@@ -575,7 +656,7 @@ public sealed class Dial : Control
             }
         }
 
-        if ((_hovered ?? _keyboard) is { } read && ThresholdBrush is { } marker)
+        if (_at is { } read && ThresholdBrush is { } marker)
         {
             RenderRead(context, read, scale, marker);
         }
@@ -818,9 +899,11 @@ public sealed class Dial : Control
     /// </summary>
     private void RebuildArcs()
     {
-        _arcs = Readings is { Count: > 0 } supplied
+        IReadOnlyList<DialReading> arcs = Readings is { Count: > 0 } supplied
             ? supplied
             : [new DialReading(0, string.Empty, Value, Threshold)];
+
+        SetAndRaise(ArcsProperty, ref _arcs, arcs);
 
         if (_hovered >= _arcs.Count)
         {
@@ -832,9 +915,18 @@ public sealed class Dial : Control
             _keyboard = null;
         }
 
+        if (_named >= _arcs.Count)
+        {
+            _named = null;
+        }
+
         IsUnavailable = !AnyReported;
         PseudoClasses.Set(UnavailablePseudoClass, IsUnavailable);
         UpdateAboveThreshold();
+
+        // The readings themselves have been replaced, so the mark is resolved again against
+        // the list that is actually on the face rather than left pointing into the last one.
+        Settle();
         UpdateReading();
     }
 
@@ -1064,7 +1156,9 @@ public sealed class Dial : Control
     /// Static, because it says <em>which</em> rather than how much, and because the surface
     /// this control heads goes on repainting while nobody is watching it. It is drawn round
     /// the ring rather than over the reading so it does not touch the sweep's own length, and
-    /// it is the same mark whether a pointer or the keyboard asked for it.
+    /// it is the same mark whether a pointer, the keyboard or a legend row asked for it - a
+    /// <see cref="DialLegend"/> traces the row it names with the same hairline in the same
+    /// ink, so the two ends of the pairing light up as one gesture.
     /// </remarks>
     private void RenderRead(DrawingContext context, int read, double scale, IBrush brush)
     {
@@ -1147,7 +1241,7 @@ public sealed class Dial : Control
         }
 
         _hovered = ring;
-        Caption();
+        Settle();
     }
 
     /// <summary>Takes note of which ring the keyboard is on, and says what it reads.</summary>
@@ -1159,7 +1253,48 @@ public sealed class Dial : Control
         }
 
         _keyboard = ring;
-        Caption();
+        Settle();
+    }
+
+    /// <summary>
+    /// Resolves the three ways a reading can be asked for into the one answer everything
+    /// draws from.
+    /// </summary>
+    /// <remarks>
+    /// A pointer on a ring wins, because it is the most direct thing anybody can do to this
+    /// face; a legend row being pointed at or arrived on comes next; and the keyboard's own
+    /// ring is what is left, so letting go of a legend row falls back to the ring the
+    /// keyboard is still standing on rather than to nothing. Written once, here: the face's
+    /// hairline and a legend's mark both read <see cref="Marked"/>, so there is no second
+    /// copy of the answer to drift out of step with this one.
+    /// </remarks>
+    private void Settle()
+    {
+        int? at = _hovered ?? _named ?? _keyboard;
+        DialReading? reading = at is { } index && index >= 0 && index < _arcs.Count
+            ? _arcs[index]
+            : null;
+
+        _at = reading is null ? null : at;
+
+        if (SetAndRaise(MarkedProperty, ref _marked, reading))
+        {
+            Caption();
+        }
+    }
+
+    /// <summary>Where a reading stands on this face, or null when it is not on it.</summary>
+    private int? IndexOf(DialReading reading)
+    {
+        for (int i = 0; i < _arcs.Count; i++)
+        {
+            if (ReferenceEquals(_arcs[i], reading))
+            {
+                return i;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

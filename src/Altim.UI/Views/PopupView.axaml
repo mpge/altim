@@ -13,6 +13,13 @@
   blocks rather than something the control draws, so they take the type scale's Figure, Lead
   and Caption and the design system's tabular numerals.
 
+  The name under the figure and the legend row for the same window print one string twice, and
+  that is deliberate: they answer two questions. The name says what the big number is; the
+  legend says which arc belongs to whom, and dropping the row that happens to match the hero
+  would leave the other arcs named by a list with a hole in it. Which arc is which is also
+  shown rather than only listed - pointing at a row marks its arc and pointing at an arc marks
+  its row, from one state the dial owns.
+
   Nothing on the face is combined. Two providers' percentages are proportions of two
   different, undisclosed allowances, so there is no single figure to show: the rings share a
   face, a graduation tape and an angular mapping because they share a unit, and the legend is
@@ -65,7 +72,8 @@
                 Spacing="{DynamicResource AltimSpace8}">
 
       <Panel HorizontalAlignment="Center">
-        <controls:Dial Readings="{Binding DialReadings}"
+        <controls:Dial x:Name="Face"
+                       Readings="{Binding DialReadings}"
                        AutomationProperties.Name="{Binding DialLabel}" />
 
         <!-- Inside the face. The dial's band is 14 deep and the clear circle inside it is
@@ -95,8 +103,17 @@
            the convention; the rows stand in the same order as the rings. A provider that
            reported no figure keeps its row and shows an em dash, because unknown is not
            zero and a ring missing from the legend would be a provider missing from the
-           panel. -->
-      <ItemsControl ItemsSource="{Binding DialReadings}">
+           panel.
+
+           It is handed the face rather than the same list the face was handed: the rows are
+           the face's own arcs, so the legend cannot end up naming a different set. Pointing
+           at a row, or arriving on it with the keyboard, marks that row's band on the face,
+           and reading a band on the face marks its row here. One state decides both - the
+           dial's - so the two can never name different readings. The row's circle is still
+           not coloured: two rings are often in the same band, and a size survives the colour
+           being taken away. -->
+      <controls:DialLegend Face="{Binding #Face}"
+                           AutomationProperties.Name="{Binding LegendLabel}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>
             <StackPanel Spacing="{DynamicResource AltimSpace4}" />
@@ -104,30 +121,36 @@
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="controls:DialReading">
-            <Grid ColumnDefinitions="Auto,*,Auto">
-              <Panel Grid.Column="0"
-                     Width="{DynamicResource AltimDialLegendMarkSize}"
-                     Height="{DynamicResource AltimDialLegendMarkSize}"
-                     VerticalAlignment="Center">
-                <Ellipse Classes="dialRing"
-                         Width="{Binding LegendMarkDiameter}"
-                         Height="{Binding LegendMarkDiameter}" />
-              </Panel>
-              <TextBlock Grid.Column="1"
-                         Margin="8,0,8,0"
-                         VerticalAlignment="Center"
-                         TextTrimming="CharacterEllipsis"
-                         Theme="{DynamicResource AltimLabelText}"
-                         Text="{Binding Label}" />
-              <TextBlock Grid.Column="2"
-                         VerticalAlignment="Center"
-                         Theme="{DynamicResource AltimLabelMetricText}"
-                         FontWeight="{DynamicResource AltimFontWeightHeading}"
-                         Text="{Binding PercentText}" />
-            </Grid>
+            <controls:DialLegendRow Reading="{Binding}"
+                                    AutomationProperties.Name="{Binding Words}">
+              <!-- Raw: the row's own name is the whole reading, so a client that also read
+                   the three text blocks inside it would announce the row twice. -->
+              <Grid ColumnDefinitions="Auto,*,Auto"
+                    AutomationProperties.AccessibilityView="Raw">
+                <Panel Grid.Column="0"
+                       Width="{DynamicResource AltimDialLegendMarkSize}"
+                       Height="{DynamicResource AltimDialLegendMarkSize}"
+                       VerticalAlignment="Center">
+                  <Ellipse Classes="dialRing"
+                           Width="{Binding LegendMarkDiameter}"
+                           Height="{Binding LegendMarkDiameter}" />
+                </Panel>
+                <TextBlock Grid.Column="1"
+                           Margin="8,0,8,0"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           Theme="{DynamicResource AltimLabelText}"
+                           Text="{Binding Label}" />
+                <TextBlock Grid.Column="2"
+                           VerticalAlignment="Center"
+                           Theme="{DynamicResource AltimLabelMetricText}"
+                           FontWeight="{DynamicResource AltimFontWeightHeading}"
+                           Text="{Binding PercentText}" />
+              </Grid>
+            </controls:DialLegendRow>
           </DataTemplate>
         </ItemsControl.ItemTemplate>
-      </ItemsControl>
+      </controls:DialLegend>
 
     </StackPanel>
 

@@ -115,6 +115,12 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     /// </summary>
     public string DialLabel => "Usage by provider";
 
+    /// <summary>
+    /// The accessible name of the legend beside the dial. Its rows carry their own readings,
+    /// so this only has to say what the list is: the names of the arcs on the face.
+    /// </summary>
+    public string LegendLabel => "Rings on the dial";
+
     /// <summary>Whether the status icon reads as operational.</summary>
     public bool StatusIsOk => !StatusIsError;
 

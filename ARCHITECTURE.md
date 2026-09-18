@@ -380,6 +380,11 @@ spam, no notifications during the first refresh after start.
   one sweep on a dial. A dial carries one reading per provider on concentric rings and **never
   combines two providers' percentages**: they are proportions of two different, undisclosed
   allowances. See `docs/DESIGN.md`.
+- `Controls/DialLegend.cs`, `Controls/DialLegendRow.cs` — the words beside a dial. The legend is
+  handed the **dial**, not the list the dial was handed, so its rows are the face's own arcs and
+  the two cannot name different sets. Pointing at a row or arriving on it tells the dial, which
+  resolves one answer in `Dial.Marked`; the face traces that band and the row traces itself from
+  the same answer, so the two ends of the pairing cannot disagree.
 
 Two windows:
 

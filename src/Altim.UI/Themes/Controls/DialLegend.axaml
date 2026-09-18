@@ -1,0 +1,43 @@
+<!--
+  Dial legend.
+
+  The words beside a dial, one row per ring. The legend itself is a plain items control: it
+  takes its rows from the face it was handed, so the theme has nothing to hand it.
+
+  The row carries the mark. It is the dial's own: a hairline in the engraving's ink,
+  AltimMeterScaleBrush, traced round the row the way the face traces the band it is reading.
+  One gesture in two places reads as one thing, which is the whole point of the pairing; a
+  second treatment invented for the legend would read as two. Two rings are often in the same
+  band, so the mark cannot be the band's colour, and the row's circle is deliberately left
+  uncoloured for the same reason.
+
+  The row is a focus stop, because hovering it marks a band and an affordance a pointer has
+  and a keyboard does not is the one shape DESIGN.md rules out. The focus ring is handed over
+  as a brush, a weight, an offset and a radius rather than hosted as a template part, because
+  there is no template - the row draws both marks itself, outside its own bounds, which is why
+  ClipToBounds is off and FocusAdorner is nulled. The offset and the radius are shared by the
+  mark and the ring: they are two weights drawn round one rectangle. The radius is the
+  system smallest, 4, rather than the 8 a row usually takes: a legend line is 16 tall, so
+  the rectangle being marked is 21, and at 8 that is a pill whose ends sweep back across
+  the 14 wide circle the row draws its own mark as.
+
+  Background is Transparent rather than unset so the whole row answers a pointer. Without it
+  only the ink answers, and the gaps between the mark, the name and the figure would take the
+  mark away as the pointer crossed them.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:controls="using:Altim.UI.Controls">
+
+  <ControlTheme x:Key="{x:Type controls:DialLegendRow}" TargetType="controls:DialLegendRow">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="MarkBrush" Value="{DynamicResource AltimMeterScaleBrush}" />
+    <Setter Property="FocusRingBrush" Value="{DynamicResource AltimFocusRingBrush}" />
+    <Setter Property="FocusRingWidth" Value="{DynamicResource AltimFocusRingWidth}" />
+    <Setter Property="FocusRingOffset" Value="{DynamicResource AltimFocusRingOffset}" />
+    <Setter Property="FocusRingRadius" Value="{DynamicResource AltimRadius4}" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+    <Setter Property="ClipToBounds" Value="False" />
+  </ControlTheme>
+
+</ResourceDictionary>

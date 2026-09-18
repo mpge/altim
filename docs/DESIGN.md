@@ -162,8 +162,10 @@ reads as an em dash — never as a zero, and never as a blank.
 ## Space, shape, line
 
 - Spacing scale: 2, 4, 6, 8, 12, 16, 20, 24, 32, 48. Nothing in between.
-- Radius: `4` for chips and meter ends, `6` for controls, `8` for rows, buttons' focus rings
-  and drop downs, `12` for cards, panels and the popup **(reference)**. Nothing else.
+- Radius: `4` for chips, meter ends and a dial legend row's mark, `6` for controls, `8` for rows,
+  buttons' focus rings and drop downs, `12` for cards, panels and the popup **(reference)**.
+  Nothing else. The legend row takes the `4` rather than the `8` its height would suggest,
+  because the rectangle being marked is only 21 tall and an `8` on that is a pill; see **Dial**.
 - Borders: exactly 1px, `Border`. Separators are 1px `Border` with no margin tricks.
 - Shadow: one only, on the popup — `0 8 24 rgba(0,0,0,0.12)` light, `0 8 24 rgba(0,0,0,0.5)` dark.
 - Focus: 2px `TextPrimary` ring offset 2px. Always visible, never removed. The one place
@@ -331,7 +333,26 @@ circle the size of the ring it names - 14, then 10, then 6 - so "the big circle"
 ring" are the same thing with nobody being told the convention, and it is a size rather than a
 colour because two rings are often in the same band and because a size survives the colour being
 taken away. A provider that reported nothing keeps its row and shows an em dash: a ring missing
-from the legend would be a provider missing from the panel.
+from the legend would be a provider missing from the panel. A face carrying **one** reading has
+no legend: the words under the figure have already named it, and with no second arc there is
+nothing for a key to tell it apart from.
+
+**The legend and the face are joined, not merely ordered.** Pointing at a legend row traces that
+row's band on the face; reading a band on the face traces that band's row. It is one mark in two
+places - the same hairline, in the same ink, appearing and going in the same frame - because two
+identical marks read as one thing and two different ones have to be learned. There is exactly one
+piece of state behind it, owned by the dial: a pointer on a band wins, a legend row being pointed
+at or arrived on comes next, and the ring the keyboard is on is what is left, so letting go of a
+row falls back to the ring rather than to nothing. The row's circle is still not coloured, for
+the reason it never was.
+
+The legend rows are **focus stops**. Pointing at one marks a band, so the keyboard has to reach
+them too; the ring is the design system's, drawn outside the row, and it covers the row's own
+hairline rather than standing beside it. Both take the system's smallest radius, 4, rather than
+the 8 a row usually takes: a legend line is 16 tall, so the rectangle being marked is 21, and at 8
+that is a pill whose ends sweep back across the 14 wide circle the row draws its own mark as. The
+rows are not brought up to the 28 a hit target takes, because nothing here is actuated: the whole
+cost of missing one is a mark that does not appear.
 
 A dial with nothing to report draws the rail as a hairline outline and nothing else: no track, no
 sweep, no engraving, no index, and the figure inside it is an em dash. **There is never a sweep
@@ -357,7 +378,8 @@ already say everything the bands mark.
 
 The ring being read is marked on the face by a hairline traced round its own band, in the
 engraving's ink. It is static - nothing on this control moves - and it is the same mark whether a
-pointer or the keyboard asked for it, so **focus reveals exactly what hover reveals**. The arrows
+pointer, the keyboard or a legend row asked for it, so **focus reveals exactly what hover
+reveals**. The arrows
 step between rings, outward and inward, stopping at the ends rather than wrapping; a dial carrying
 one reading leaves the arrow keys alone, because it stands inside the Overview's scrolling area
 and one that swallowed them would stop the page scrolling to say nothing. The dial is a tab stop
@@ -553,7 +575,10 @@ Six sections split by 1px rules: header, reading, providers, resets, status, act
   figure belongs to in `Lead` and when it resets in `Caption`, and 8 under that the legend naming
   every ring. The figure is the reading nearest its ceiling out of the rings, because that is the
   one that decides whether work can continue; the legend is what turns every other ring back into
-  a provider. Nothing is combined: see **Dial bands** and the rings above. The name always carries its provider in parentheses —
+  a provider, and pointing at either end of a pairing marks the other. The window on the dial is
+  therefore named twice on this panel, under the face and again in the legend, and that is
+  deliberate: they answer two questions - "what is the big number" and "which arc is whose" - and
+  dropping either leaves one of them unanswered. Nothing is combined: see **Dial bands** and the rings above. The name always carries its provider in parentheses —
   `Session (Claude Code)`, the form the resets section already uses — because the panel reports
   several windows and a figure that does not say which one it measures is a figure nobody can
   act on. The reset reads `Resets in 2h 14m`, or `Resets in —` when the provider reports no
@@ -620,8 +645,8 @@ the build if it does not.
 The dial is the one instrument that does not move, and the reason is above: its surface goes on
 taking readings while it is hidden, so a transition there would animate a picture nobody can see
 and rebuild a path for every frame of it. That includes its hover treatment: the mark round the
-ring being read appears and disappears in one frame, which is why there is nothing here for the
-reduce-motion setting to suppress.
+ring being read, and the matching one round the legend row that names it, appear and disappear in
+one frame, which is why there is nothing here for the reduce-motion setting to suppress.
 
 ### Reduced motion
 

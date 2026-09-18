@@ -18,6 +18,7 @@
     <ResourceInclude Source="avares://Altim.UI/Themes/Controls/Button.axaml" />
     <ResourceInclude Source="avares://Altim.UI/Themes/Controls/ComboBox.axaml" />
     <ResourceInclude Source="avares://Altim.UI/Themes/Controls/Dial.axaml" />
+    <ResourceInclude Source="avares://Altim.UI/Themes/Controls/DialLegend.axaml" />
     <ResourceInclude Source="avares://Altim.UI/Themes/Controls/ListBox.axaml" />
     <ResourceInclude Source="avares://Altim.UI/Themes/Controls/Meter.axaml" />
     <ResourceInclude Source="avares://Altim.UI/Themes/Controls/ScrollViewer.axaml" />
