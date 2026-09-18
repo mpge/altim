@@ -11,8 +11,8 @@ using CommunityToolkit.Mvvm.Input;
 namespace Altim.UI.ViewModels;
 
 /// <summary>
-/// The tray panel: a header, a line per provider, the next reset each of them has, one
-/// status line and one action.
+/// The tray panel: a header, the one reading it leads with on a dial, a line per provider,
+/// the next reset each of them has, one status line and one action.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -39,6 +39,10 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private bool _hasProviders;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasHeadline))]
+    private HeadlineReadingViewModel? _headline;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StatusIsOk))]
@@ -81,6 +85,9 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
 
     /// <summary>Every reset instant any provider reports, soonest first.</summary>
     public ObservableCollection<ResetRowViewModel> Resets { get; } = [];
+
+    /// <summary>Whether there is a window for the dial to show.</summary>
+    public bool HasHeadline => Headline is not null;
 
     /// <summary>The wordmark in the panel's header.</summary>
     public string Title => "Altim";
@@ -179,6 +186,7 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     private void Rebuild()
     {
         RebuildStatusLine();
+        RebuildHeadline();
         RebuildResets();
     }
 
@@ -206,6 +214,89 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
         }
 
         return providerId;
+    }
+
+    /// <summary>
+    /// Picks the one window the dial shows: <b>the highest level any provider reports</b> -
+    /// the window nearest its ceiling.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The panel already prints every window's figure on its provider's own line, so the dial
+    /// is not there to add a number. It is there to say which of those numbers decides
+    /// whether you can keep working, and to be the one place the panel shows the configured
+    /// threshold at all.
+    /// </para>
+    /// <para>
+    /// Ranking by the raw level rather than by how near each window is to its own threshold
+    /// is deliberate. Every window is drawn against one shared scale, which is the whole
+    /// reason two readings can be compared by eye; ranking them by a ratio to a per-window
+    /// alert level would order them by something nobody can see on that scale. A tie goes to
+    /// the window that rolls over first, because that is the one reached first, and then to
+    /// the order the providers were registered in, so the same readings always pick the same
+    /// window.
+    /// </para>
+    /// <para>
+    /// A window with no percentage is never picked over one that has a figure, but when no
+    /// window anywhere reports one the panel still leads with the first window it has: the
+    /// dial draws its unavailable face and the figure is an em dash, which says "nothing was
+    /// reported for this" rather than leaving the panel headed by nothing. A panel with no
+    /// windows at all has no headline and the section is not drawn - there would be no window
+    /// to name, and an unnamed dial is furniture.
+    /// </para>
+    /// </remarks>
+    private void RebuildHeadline()
+    {
+        MetricViewModel? best = null;
+        string? provider = null;
+
+        foreach (ProviderViewModel row in Providers)
+        {
+            foreach (MetricViewModel metric in row.Metrics)
+            {
+                if (best is null || Beats(metric, best))
+                {
+                    best = metric;
+                    provider = row.DisplayName;
+                }
+            }
+        }
+
+        Headline = best is not null && provider is not null
+            ? new HeadlineReadingViewModel(best, provider)
+            : null;
+    }
+
+    /// <summary>Whether one metric should be on the dial ahead of another.</summary>
+    /// <param name="candidate">The metric being considered.</param>
+    /// <param name="holder">The metric currently holding the dial.</param>
+    /// <returns>True when the candidate takes it.</returns>
+    private static bool Beats(MetricViewModel candidate, MetricViewModel holder)
+    {
+        if (candidate.Value is not { } level)
+        {
+            return false;
+        }
+
+        if (holder.Value is not { } held)
+        {
+            return true;
+        }
+
+        if (level > held)
+        {
+            return true;
+        }
+
+        if (level < held)
+        {
+            return false;
+        }
+
+        // Level for level, the window that rolls over first is the one reached first. A
+        // window reporting no instant never displaces one that does.
+        return candidate.ResetsAt is { } instant
+            && (holder.ResetsAt is not { } best || instant < best);
     }
 
     /// <summary>

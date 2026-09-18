@@ -95,6 +95,7 @@ public sealed class TokenTests
         "AltimIconSize", "AltimIconStrokeThickness",
         "AltimMeterHeight", "AltimMeterRailHeight", "AltimMeterScaleGap",
         "AltimMeterScaleHeight", "AltimMeterMinWidth",
+        "AltimDialSize", "AltimDialSweep",
         "AltimTapeMinHeight", "AltimTapeLineThickness", "AltimTapeDotDiameter",
         "AltimScrollBarThickness", "AltimToggleTrackWidth", "AltimToggleTrackHeight",
         "AltimToggleKnobSize", "AltimToggleKnobInset", "AltimToggleTrackRadius",

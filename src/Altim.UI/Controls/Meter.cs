@@ -65,16 +65,16 @@ namespace Altim.UI.Controls;
 public sealed class Meter : Control
 {
     /// <summary>The height of the rail in device independent pixels.</summary>
-    public const double RailHeight = 8d;
+    public const double RailHeight = InstrumentScale.RailThickness;
 
     /// <summary>The gap between the rail and the graduations under it.</summary>
-    public const double ScaleGap = 2d;
+    public const double ScaleGap = InstrumentScale.ScaleGap;
 
     /// <summary>The height of the scale: the length of a major graduation.</summary>
-    public const double ScaleHeight = 4d;
+    public const double ScaleHeight = InstrumentScale.ScaleDepth;
 
     /// <summary>The whole control: the rail, the gap and the scale under it.</summary>
-    public const double TotalHeight = RailHeight + ScaleGap + ScaleHeight;
+    public const double TotalHeight = InstrumentScale.TotalDepth;
 
     /// <summary>
     /// The narrowest a meter will measure to. It matches the <c>AltimMeterMinWidth</c>
@@ -82,16 +82,11 @@ public sealed class Meter : Control
     /// </summary>
     public const double MinimumWidth = 48d;
 
-    /// <summary>
-    /// The closest two graduations are ever drawn, in device independent pixels. A hairline
-    /// is one of those four, so three are clear between one graduation and the next; any
-    /// tighter and the scale stops reading as marks and starts reading as a smear, which
-    /// would report a solid block where the tape is finest.
-    /// </summary>
-    public const double MinimumGraduationPitch = 4d;
+    /// <inheritdoc cref="InstrumentScale.MinimumGraduationPitch" />
+    public const double MinimumGraduationPitch = InstrumentScale.MinimumGraduationPitch;
 
-    /// <summary>The threshold index's weight, in hairlines.</summary>
-    public const double IndexWeight = 2d;
+    /// <inheritdoc cref="InstrumentScale.IndexWeight" />
+    public const double IndexWeight = InstrumentScale.IndexWeight;
 
     /// <summary>How long the fill takes to travel to a new value.</summary>
     public static readonly TimeSpan FillDuration = TimeSpan.FromMilliseconds(180);
@@ -168,25 +163,13 @@ public sealed class Meter : Control
             nameof(IsUnavailable),
             o => o.IsUnavailable);
 
-    /// <summary>
-    /// The levels the scale is graduated at, from 0 to 100, in order.
-    /// </summary>
+    /// <inheritdoc cref="InstrumentScale.Graduations" />
     /// <remarks>
-    /// <para>
-    /// The interval halves twice on the way up: every 10 to half way, every 5 from there to
-    /// 80, every 2.5 over the last fifth. Altim exists to say how close a level is to a
-    /// ceiling, so the tape is coarse where the answer is "nowhere near" and fine where the
-    /// difference between two readings is the difference between carrying on and stopping.
-    /// </para>
-    /// <para>
-    /// The two boundaries are the two levels the product already treats as meaningful: 50 is
-    /// the half way rule the history tape draws, and 80 is the session threshold Altim ships
-    /// with. Neither moves with the configured threshold. A scale that reshaped itself per
-    /// metric would leave the meters in one column measuring against different tapes, and a
-    /// card's metrics are a set to be read against one another.
-    /// </para>
+    /// The meter does not own this scheme. <see cref="InstrumentScale"/> does, and the dial
+    /// reads against the same one, because a card's meters and the panel's dial are a set to
+    /// be read against one another.
     /// </remarks>
-    public static IReadOnlyList<double> Graduations { get; } = BuildGraduations();
+    public static IReadOnlyList<double> Graduations => InstrumentScale.Graduations;
 
     private bool _isAboveThreshold;
     private bool _isUnavailable = true;
@@ -320,88 +303,27 @@ public sealed class Meter : Control
         FillWidthFor(IsUnavailable ? null : DisplayValue, Bounds.Width);
 
     /// <summary>
-    /// Maps a level to a fill width. The mapping is linear and has no minimum: one
-    /// percent of a 200px rail is two pixels, not a token gesture toward visibility.
+    /// Maps a level to a fill width: <see cref="InstrumentScale.PositionFor"/> with the
+    /// rail's width as the span. The mapping is linear and has no minimum - one percent of a
+    /// 200px rail is two pixels, not a token gesture toward visibility.
     /// </summary>
     /// <param name="value">The level from 0 to 100, or null when unavailable.</param>
     /// <param name="width">The full width of the rail.</param>
     /// <returns>The fill width, which is zero for a null or non-positive width.</returns>
-    public static double FillWidthFor(double? value, double width)
-    {
-        if (width <= 0d || double.IsNaN(width) || value is not { } level || double.IsNaN(level))
-        {
-            return 0d;
-        }
+    public static double FillWidthFor(double? value, double width) =>
+        InstrumentScale.PositionFor(value, width);
 
-        return width * (Math.Clamp(level, 0d, 100d) / 100d);
-    }
-
-    /// <summary>
-    /// Whether a level is one of the scale's major graduations, drawn the full height of
-    /// the scale while the rest are drawn half of it.
-    /// </summary>
+    /// <inheritdoc cref="InstrumentScale.IsMajorGraduation" />
     /// <param name="level">The level from 0 to 100.</param>
     /// <returns>True at nothing used, half way and the ceiling.</returns>
-    /// <remarks>
-    /// The same three levels the history tape rules at. Two readings on one page should be
-    /// read against the same three landmarks whichever control is carrying them.
-    /// </remarks>
-    public static bool IsMajorGraduation(double level) => level is 0d or 50d or 100d;
+    public static bool IsMajorGraduation(double level) => InstrumentScale.IsMajorGraduation(level);
 
-    /// <summary>
-    /// The graduations a rail of a given width can carry, in order.
-    /// </summary>
-    /// <param name="width">The rail width in device independent pixels.</param>
+    /// <inheritdoc cref="InstrumentScale.GraduationsFor" />
+    /// <param name="width">The rail width in device independent pixels, which is the span
+    /// the scale is fitted to.</param>
     /// <returns>The levels to draw, which is empty for a width of nothing.</returns>
-    /// <remarks>
-    /// <para>
-    /// A graduation is drawn only when it stands <see cref="MinimumGraduationPitch"/> clear
-    /// of the one before it, and where a minor graduation and a major one compete the major
-    /// wins - so the tape thins from the fine end as the rail narrows and lands on the three
-    /// landmarks rather than on an arbitrary subset. Nothing about the level a graduation
-    /// stands at changes; the scale only ever loses marks it has no room to separate.
-    /// </para>
-    /// <para>
-    /// This is the whole of the arithmetic. The renderer positions what it is given here and
-    /// decides nothing, which is what lets a test assert the tightening without reading
-    /// pixels off a bitmap.
-    /// </para>
-    /// </remarks>
-    public static IReadOnlyList<double> GraduationsFor(double width)
-    {
-        if (double.IsNaN(width) || width <= 0d)
-        {
-            return [];
-        }
-
-        List<double> kept = [];
-        foreach (double level in Graduations)
-        {
-            double position = FillWidthFor(level, width);
-
-            // A major graduation displaces the minor ones crowding it from behind, and
-            // stands down only for another major: that keeps 0, 50 and 100 the last marks
-            // left as a rail narrows, rather than whichever minor happened to be first.
-            if (IsMajorGraduation(level))
-            {
-                while (kept.Count > 0
-                    && !IsMajorGraduation(kept[^1])
-                    && position - FillWidthFor(kept[^1], width) < MinimumGraduationPitch)
-                {
-                    kept.RemoveAt(kept.Count - 1);
-                }
-            }
-
-            if (kept.Count > 0 && position - FillWidthFor(kept[^1], width) < MinimumGraduationPitch)
-            {
-                continue;
-            }
-
-            kept.Add(level);
-        }
-
-        return kept;
-    }
+    public static IReadOnlyList<double> GraduationsFor(double width) =>
+        InstrumentScale.GraduationsFor(width);
 
     /// <summary>
     /// What a reading says in words.
@@ -413,20 +335,12 @@ public sealed class Meter : Control
     /// An unreported metric says so, and never reads as a zero - the same distinction the
     /// drawn states keep. The threshold is named in words because the index marking it is a
     /// mark on a scale: a reader who cannot see it, and a reader who can see it but cannot
-    /// tell which level it stands at, both need the number said.
+    /// tell which level it stands at, both need the number said. The wording is
+    /// <see cref="UsageFormat.InstrumentReading"/> so the meter and the dial say the same
+    /// thing about the same reading.
     /// </remarks>
-    public static string ReadingFor(double? value, double? threshold)
-    {
-        if (UsageFormat.Percent(value) is not { } level)
-        {
-            return UsageFormat.MetricUnavailable;
-        }
-
-        string used = string.Concat(level, " used");
-        return UsageFormat.Percent(threshold) is { } limit
-            ? string.Concat(used, ", threshold ", limit)
-            : used;
-    }
+    public static string ReadingFor(double? value, double? threshold) =>
+        UsageFormat.InstrumentReading(value, threshold);
 
     /// <inheritdoc />
     public override void Render(DrawingContext context)
@@ -572,34 +486,6 @@ public sealed class Meter : Control
         }
 
         return Math.Clamp(level, 0d, 100d);
-    }
-
-    private static double[] BuildGraduations()
-    {
-        List<double> levels = [];
-        AddBand(levels, 0d, 50d, 10d);
-        AddBand(levels, 50d, 80d, 5d);
-        AddBand(levels, 80d, 100d, 2.5d);
-        return [.. levels];
-    }
-
-    private static void AddBand(List<double> levels, double from, double to, double step)
-    {
-        // Stepped by index rather than by accumulation: an accumulated 2.5 would drift off
-        // the band's own boundary and put a graduation at 99.999 instead of at the ceiling.
-        for (int i = 0; ; i++)
-        {
-            double level = from + (i * step);
-            if (level > to)
-            {
-                return;
-            }
-
-            if (levels.Count == 0 || levels[^1] < level)
-            {
-                levels.Add(level);
-            }
-        }
     }
 
     /// <summary>Whether there is anything to reveal that the row around it does not print.</summary>

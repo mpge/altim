@@ -125,6 +125,19 @@
        theme; this token is the design system's copy of that number, and MeterTests fails
        if the two disagree. -->
   <x:Double x:Key="AltimMeterMinWidth">48</x:Double>
+
+  <!-- The dial is the meter's cross section bent round a swept arc: the same 8 rail, 2 gap
+       and 4 graduations, rail innermost and engraving outermost, so the whole band is 14 deep
+       from the face's edge inward. The face is sized from the figure inside it: "100%" is 95
+       wide at Figure and its ink stands 12 either side of the middle, so a 144 face leaves a
+       clear circle 116 across and 9 between the figure and the rail at its widest. The sweep
+       is 240 degrees centred on the top, so nothing used and the ceiling are two
+       distinguishable ends and the 120 degrees left open at the foot carry the words under
+       the figure. The control owns these numbers - Dial.Size and Dial.Sweep - so a view
+       cannot lose them by not applying a theme; these tokens are the design system's copy,
+       and DialTests fails if the two disagree. -->
+  <x:Double x:Key="AltimDialSize">144</x:Double>
+  <x:Double x:Key="AltimDialSweep">240</x:Double>
   <x:Double x:Key="AltimTapeMinHeight">96</x:Double>
   <x:Double x:Key="AltimTapeLineThickness">2</x:Double>
   <x:Double x:Key="AltimTapeDotDiameter">4</x:Double>

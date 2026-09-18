@@ -1,0 +1,40 @@
+<!--
+  Dial.
+
+  The control draws itself; the theme only hands it brushes and measurements, and it is handed
+  the meter's, key for key. The sweep is TextPrimary in both variants and stays TextPrimary
+  above the threshold - the dial never turns red. It is the words beside it that move to
+  StatusWarn, which a view does by binding to the dial's IsAboveThreshold.
+
+  The engraving and the threshold index are the same ink, TextSecondary, and are told apart by
+  geometry rather than by colour: the index is twice the weight of a graduation and is the
+  only mark that crosses the rail. Two keys carry the one value because they are two roles.
+
+  The focus ring is handed over as a brush, a weight and an offset rather than hosted as a
+  template part, because there is no template. It carries no radius: the dial's ring is a
+  circle concentric with the face, so the radius is the face's own. FocusAdorner is nulled for
+  the reason every other focusable theme nulls it - the framework's dashed rectangle would be
+  a second focus indicator drawn on top of this one - and ClipToBounds is off because the ring
+  is drawn outside the control.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:controls="using:Altim.UI.Controls">
+
+  <ControlTheme x:Key="{x:Type controls:Dial}" TargetType="controls:Dial">
+    <Setter Property="TrackBrush" Value="{DynamicResource AltimMeterTrackBrush}" />
+    <Setter Property="FillBrush" Value="{DynamicResource AltimMeterFillBrush}" />
+    <Setter Property="ScaleBrush" Value="{DynamicResource AltimMeterScaleBrush}" />
+    <Setter Property="ThresholdBrush" Value="{DynamicResource AltimMeterThresholdBrush}" />
+    <Setter Property="FocusRingBrush" Value="{DynamicResource AltimFocusRingBrush}" />
+    <Setter Property="FocusRingWidth" Value="{DynamicResource AltimFocusRingWidth}" />
+    <Setter Property="FocusRingOffset" Value="{DynamicResource AltimFocusRingOffset}" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+    <Setter Property="ClipToBounds" Value="False" />
+    <Setter Property="Width" Value="{DynamicResource AltimDialSize}" />
+    <Setter Property="Height" Value="{DynamicResource AltimDialSize}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </ControlTheme>
+
+</ResourceDictionary>

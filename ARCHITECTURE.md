@@ -355,7 +355,9 @@ spam, no notifications during the first refresh after start.
 - `Themes/Tokens.axaml` — colours per theme variant, consumed with `DynamicResource`
 - `Themes/Primitives.axaml` — radii, spacing, durations, type scale (variant-invariant)
 - `Themes/Controls/*.axaml` — one `ControlTheme` per control we restyle
-- `Controls/Meter.cs`, `Controls/UsageTape.cs`, `Controls/UsageMap.cs` — custom render controls, no dependency
+- `Controls/Meter.cs`, `Controls/Dial.cs`, `Controls/UsageTape.cs`, `Controls/UsageMap.cs` — custom render
+  controls, no dependency
+- `Controls/InstrumentScale.cs` — the one graduated scale the meter and the dial are both read against
 
 Two windows:
 

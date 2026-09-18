@@ -102,6 +102,35 @@ public static class UsageFormat
             ? null
             : string.Concat(value.ToString("0", CultureInfo.CurrentCulture), "%");
 
+    /// <summary>
+    /// What an instrument reads, in words: the level, and the threshold it is measured
+    /// against.
+    /// </summary>
+    /// <param name="value">The level from 0 to 100, or null when unavailable.</param>
+    /// <param name="threshold">The configured threshold, or null when there is none.</param>
+    /// <returns>A sentence naming the level and what it is measured against.</returns>
+    /// <remarks>
+    /// The meter and the dial both read this out, as their accessible name and as the tip a
+    /// pointer and the keyboard open. One sentence, because two controls showing the same
+    /// reading must not describe it in two ways. An unreported metric says so and never
+    /// reads as a zero, which is the distinction the drawn states also keep; the threshold
+    /// is named in words because the index marking it is a mark on a scale, and a reader who
+    /// cannot see it, or can see it but cannot tell which level it stands at, both need the
+    /// number said.
+    /// </remarks>
+    public static string InstrumentReading(double? value, double? threshold)
+    {
+        if (Percent(value) is not { } level)
+        {
+            return MetricUnavailable;
+        }
+
+        string used = string.Concat(level, " used");
+        return Percent(threshold) is { } limit
+            ? string.Concat(used, ", threshold ", limit)
+            : used;
+    }
+
     /// <summary>Formats a count compactly: 842, 56.2K, 1.3M.</summary>
     /// <param name="value">The count. Negative counts are not meaningful and read as zero.</param>
     public static string Count(long value)

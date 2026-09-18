@@ -136,8 +136,8 @@ public sealed partial class SourceShapeTests
             }
         }
 
-        // Meter and UsageMap: the two controls that draw themselves and take focus.
-        Assert.Equal(2, checkedThemes);
+        // Meter, Dial and UsageMap: the controls that draw themselves and take focus.
+        Assert.Equal(3, checkedThemes);
     }
 
     /// <summary>

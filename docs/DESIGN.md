@@ -18,8 +18,14 @@ the way. Two ideas carry the identity:
 2. **The altitude tape.** The logo is an ascending mark, the name reads as altimeter. A
    reading measured against a limit is drawn as an instrument reads it: meters are flat rails
    with a graduated scale that tightens toward the ceiling and a hairline index at the limit,
-   history is a tape with hairline level lines at 0/50/100. No rounded candy bars, no gradient
-   fills, no shadowed cards stacked on cards.
+   the dial is that same cross section bent round a swept arc, history is a tape with hairline
+   level lines at 0/50/100. No rounded candy bars, no gradient fills, no shadowed cards stacked
+   on cards.
+
+   **One scale, every instrument.** The meter and the dial are graduated at the same levels, at
+   the same two depths, with the same minimum pitch and the same index. That is what lets a
+   figure on a card and the figure on the panel be compared by eye, and it is why the scheme
+   lives in one place rather than being restated per control.
 
 Restraint rules: separators and whitespace instead of nesting cards; one accent per surface;
 colour carries provider identity and status only, never decoration.
@@ -151,7 +157,10 @@ reads as an em dash — never as a zero, and never as a blank.
   the 2px *offset* is dropped is the usage map, where a focusable thing is a square from 8px
   up with 2px between it and the next day: a ring held 2px clear would be painted over the
   neighbouring days. There the ring hugs the square and fills the gap that is already
-  there — same weight, same colour, drawn where there is room for it.
+  there — same weight, same colour, drawn where there is room for it. The ring takes the
+  *shape* of what it marks: round on the dial, whose face is a circle. A rounded rectangle held
+  2px clear of a 144px circle stands 2px off it at the sides and nearly 30 at the corners, which
+  reads as a box somebody drew round the dial rather than as the dial being focused.
 - Hit targets: 28px minimum height for rows, 32px for buttons, 40px for a sidebar row.
 - Hairlines are snapped to whole device pixels. A 1px rule is one device independent pixel,
   which is 1.25 or 1.5 device pixels at 125% or 150%: unsnapped it is spread over two rows
@@ -202,6 +211,65 @@ print, and **focus opens the same tip a pointer opens**. A meter with nothing to
 stop on the way to the next control.
 
 Fill animates 180ms ease-out only when the value changes. Nothing else in the control moves.
+
+**Dial.** The meter's cross section bent round a swept arc, used where one reading is the
+subject of a whole surface rather than one of several in a column. Same 8px rail with fully
+round ends, same 2px gap, same 4px engraving, 14 in all — but with the rail innermost and the
+engraving on the face's outer edge, so the scale stands on the far side of the rail from the
+figure, the way a metric row puts the figure above the rail and the scale below it. Track
+`Border`, sweep `TextPrimary`, engraving and index `TextSecondary`: the meter's tokens,
+unchanged.
+
+The face is 144 across and the arc is swept 240°, centred on the top. A full circle would put
+nothing used and the ceiling at the same place; 240 leaves them symmetrically below the middle
+and leaves 120° open at the foot, which is where the words under the figure go. 144 is not a
+round number picked for looks: the figure sits *inside* the face, `100%` is 95 wide at `Figure`
+with its ink standing 12 either side of the middle, and the clear circle inside the band at 144
+is 116 — so at the widest reading the figure stands 9 clear of the rail. At 128 it stands 1,
+which reads as the figure touching the instrument.
+
+The scale is the meter's, not a second one: the same levels, **the interval halving twice on the
+way up**, 0/50/100 at the full 4px depth and the rest at 2px, and no two marks drawn closer than
+4px. The pitch is measured along the arc at the radius the graduations reach furthest in, which
+is where two of them stand closest together; measuring at the face's outer edge instead would
+keep marks 4px apart out there and closer than that where they actually meet. At 144 across that
+arc is 285px, so the whole tape is carried. **The mapping from a level to an angle stays
+linear.** Nothing used is at the start of the sweep and the ceiling at its end, and the rail's
+round ends fall exactly on those two points — the same arrangement as the meter's rounded rail,
+whose leftmost pixel is level 0 rather than level 0 less a corner radius.
+
+The threshold is the same **index**: `TextSecondary`, two hairlines, crossing the rail and
+carrying on to the face's edge. It is the only mark that touches both and the only one at that
+weight, so position, extent and weight tell it apart from a graduation with no help from colour,
+and it is drawn over the sweep rather than under it so it is still there at 100%. Above the
+threshold the sweep stays `TextPrimary`; the *name* under the dial turns `StatusWarn`. The dial
+never turns red.
+
+The engraving is radial, so its marks cannot be snapped to the pixel grid the way the meter's
+vertical rules are: a mark at 37° lands where it lands. Their weight is still resolved to a whole
+number of device pixels and the radii they run between are snapped, so the engraving is one
+weight throughout rather than a different grey per mark.
+
+A dial with nothing to report draws the rail as a hairline outline and nothing else: no track, no
+sweep, no engraving, no index, and the figure inside it is an em dash. **There is never a sweep
+sitting at the bottom of the scale**, which is the one picture that would read as a reported
+zero. Nothing used draws the rail filled with its track and no sweep either — a sweep of no
+length is not a reading of nothing — so the two states are told apart by the rail behind them,
+which is exactly how the meter tells them apart.
+
+The reading is named in words by the dial's tip, which is also its accessible name, and the
+words are the meter's: `62% used, threshold 80%`, or "Not reported by this provider". A view that
+names the dial has that name read first — "Session (Claude Code), 62% used, threshold 80%" —
+which matters more here than on the meter, because the dial shows one window out of several and
+the name is what says which. It is a tab stop exactly when it has both a level and a threshold,
+and **focus opens the same tip a pointer opens**.
+
+**The dial does not animate.** The meter's fill travels 180ms because it lives on a window
+somebody already has open. The dial's surface is the tray panel, which is laid out once at
+start-up, hidden rather than closed, and goes on taking readings while nobody is looking at it: a
+transition there would rebuild a path per frame for a panel nobody can see, and the panel's whole
+budget is that opening it is a show rather than a build. Its two paths are built once and rebuilt
+only when the face's size or the level moves.
 
 **Metric row.** Label left (`Label`, `TextSecondary`), figure right (`Figure` or `FigureSmall`),
 meter beneath spanning full width, optional sub-caption (`Caption`) under the label. Token
@@ -329,9 +397,31 @@ same ground. Three things stacked:
   heading weight, then the tagline in `Label`.
 
 **Popup panel.** 320px wide, radius 12 **(reference)**, 1px border, `SurfaceMuted`, one shadow.
-Five sections split by 1px rules: header, providers, resets, status, action.
+Six sections split by 1px rules: header, reading, providers, resets, status, action.
 
 - **Header**: the 22px mark and the wordmark in `Heading`, with the gear at the far end.
+- **Reading**: the panel's hero. One dial, centred, carrying the window nearest its ceiling,
+  with the figure in `Figure` inside its face and, 8 under it, the window's name in `Lead` and
+  when that window resets in `Caption`. The name always carries its provider in parentheses —
+  `Session (Claude Code)`, the form the resets section already uses — because the panel reports
+  several windows and a figure that does not say which one it measures is a figure nobody can
+  act on. The reset reads `Resets in 2h 14m`, or `Resets in —` when the provider reports no
+  instant.
+
+  **The window is the highest level any provider reports**: the one nearest its ceiling. The
+  panel already prints every window's figure on its provider's own line, so the dial is not
+  there to add a number — it is there to say which of those numbers decides whether you can keep
+  working, and it is the only place the panel shows the configured threshold at all. Ranking by
+  the raw level rather than by how near each window is to its own threshold is deliberate: every
+  window is drawn against one shared scale, which is the whole reason two readings can be
+  compared by eye, and ranking them by a ratio to a per-window alert level would order them by
+  something nobody can see on that scale. A tie goes to the window that rolls over first, then
+  to the order the providers were registered in, so the same readings always pick the same
+  window. A window with no figure never displaces one that has one; when nothing anywhere
+  reports a figure the dial still names a window and draws its unavailable face with an em dash,
+  rather than leaving the panel headed by nothing. A panel with no window at all — every
+  provider unreachable, or none configured — has no reading section and no rule where one would
+  be, because there would be no window to name and an unnamed dial is furniture.
 - **Provider**: a 28px glyph, the name in `Heading` with a disclosure beside it, and one compact
   line — `5h 42% · 7d 68%`, the windows named by their length in `Label` and the figures in the
   ink. **No meters.** A meter reports a level by its width, and at this width three of them
@@ -360,6 +450,10 @@ keep the whole inset.
 Only in response to something changing: meter fill 180ms ease-out, popup fade+4px rise 120ms,
 theme change crossfade 120ms. No entrance animations, no hover lifts, no spinners longer than
 a second — refreshes show a 12px inline `Caption`, not a modal.
+
+The dial is the one instrument that does not move, and the reason is above: its surface goes on
+taking readings while it is hidden, so a transition there would animate a picture nobody can see
+and rebuild a path for every frame of it.
 
 ## Words
 

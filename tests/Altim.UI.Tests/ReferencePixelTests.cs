@@ -206,14 +206,23 @@ public sealed class ReferencePixelTests
     {
         using PopupViewModel panel = Panel();
         var view = new PopupView { DataContext = panel };
-        using PixelHost host = PixelHost.Show(view, width: 320d, height: 420d);
+        // Tall enough to carry the dial heading the panel as well as the provider rows.
+        using PixelHost host = PixelHost.Show(view, width: 320d, height: 640d);
 
         Frame frame = host.Capture();
 
         Assert.Empty(host.Window.GetVisualDescendants().OfType<Meter>());
 
+        // Scoped to the provider rows. The panel's own section rules are border colour too,
+        // and full bleed, so a scan of the whole panel would report every rule as a meter -
+        // and the dial heading the panel carries the same figure as the row below it, so an
+        // unscoped search for the text finds that as well.
+        ItemsControl rows = host.Window.GetVisualDescendants()
+            .OfType<ItemsControl>()
+            .First(c => ReferenceEquals(c.ItemsSource, panel.Providers));
+
         // Every figure on the row shares one baseline: the compact line is one line.
-        IReadOnlyList<TextBlock> figures = host.Window.GetVisualDescendants()
+        IReadOnlyList<TextBlock> figures = rows.GetVisualDescendants()
             .OfType<TextBlock>()
             .Where(t => t.Text is "62%" or "38%")
             .ToList();
@@ -223,13 +232,6 @@ public sealed class ReferencePixelTests
             host.BoundsOf(figures[0]).Center.Y,
             host.BoundsOf(figures[1]).Center.Y,
             1);
-
-        // No rail inside the provider rows. The scan is scoped to them because the panel's
-        // own section rules are border colour too, and full bleed: a scan of the whole
-        // panel would report every rule as a meter.
-        ItemsControl rows = host.Window.GetVisualDescendants()
-            .OfType<ItemsControl>()
-            .First(c => ReferenceEquals(c.ItemsSource, panel.Providers));
 
         Rect area = host.BoundsOf(rows);
         Assert.True(area.Height < 72d, $"The provider row is {area.Height} tall, not one line.");

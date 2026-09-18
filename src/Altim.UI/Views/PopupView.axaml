@@ -1,9 +1,16 @@
 <!--
   The tray panel's contents.
 
-  Five sections split by 1px rules: the header, the providers, the resets, the status and the
-  one action. The rules are full bleed, so the padding belongs to each section rather than to
-  the panel.
+  Six sections split by 1px rules: the header, the reading, the providers, the resets, the
+  status and the one action. The rules are full bleed, so the padding belongs to each section
+  rather than to the panel.
+
+  The reading heads the panel: one dial carrying the window nearest its ceiling, the figure
+  inside its face, and under it the window's name with its provider and when that window
+  resets. The dial is the only place the panel shows the configured threshold, which is why
+  the hero is a dial rather than a bigger number. The figure and the name are the view's own
+  text blocks rather than something the control draws, so they take the type scale's Figure,
+  Lead and Caption and the design system's tabular numerals.
 
   A provider is one line here, not a stack of metric rows: the mark, the name, and every window
   it reports as "5h 42% . 7d 68%" with the figures in the ink and the windows in grey. There
@@ -15,6 +22,7 @@
 -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Altim.UI.Controls"
              xmlns:design="using:Altim.UI.ViewModels.Design"
              xmlns:vm="using:Altim.UI.ViewModels"
              x:Class="Altim.UI.Views.PopupView"
@@ -44,6 +52,38 @@
     </Grid>
 
     <Separator />
+
+    <!-- Reading: the window nearest its ceiling, on the dial. -->
+    <StackPanel IsVisible="{Binding HasHeadline}"
+                Margin="{DynamicResource AltimInset16}"
+                Spacing="{DynamicResource AltimSpace8}">
+
+      <Panel HorizontalAlignment="Center">
+        <controls:Dial Value="{Binding Headline.Value}"
+                       Threshold="{Binding Headline.Threshold}"
+                       AutomationProperties.Name="{Binding Headline.SourceLabel}" />
+
+        <!-- Inside the face. The dial's band is 14 deep and the clear circle inside it is
+             116 across, which is what the face was sized against. -->
+        <TextBlock HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   Theme="{DynamicResource AltimFigureText}"
+                   Text="{Binding Headline.PercentText}" />
+      </Panel>
+
+      <StackPanel Spacing="{DynamicResource AltimSpace2}">
+        <TextBlock HorizontalAlignment="Center"
+                   Theme="{DynamicResource AltimLeadText}"
+                   Classes.warn="{Binding Headline.IsAboveThreshold}"
+                   Text="{Binding Headline.SourceLabel}" />
+        <TextBlock HorizontalAlignment="Center"
+                   Theme="{DynamicResource AltimCaptionMetricText}"
+                   Text="{Binding Headline.ResetText}" />
+      </StackPanel>
+
+    </StackPanel>
+
+    <Separator IsVisible="{Binding HasHeadline}" />
 
     <!-- Providers -->
     <TextBlock IsVisible="{Binding !HasProviders}"
