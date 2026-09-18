@@ -220,6 +220,14 @@ public sealed class UsageMapPixelTests
     /// older than another's is a fact about backfill reach, and filling the difference with
     /// zeroes would hide it.
     /// </summary>
+    /// <remarks>
+    /// The window is tall enough for both blocks at the largest square the map will draw. Two
+    /// days is one week column, so the grid fills a 200px window by taking the ceiling, and a
+    /// block seven of those tall is most of 130px: at the height this used to be hosted at the
+    /// second provider's row fell off the bottom of the frame, where every assertion counting
+    /// pixels that should not be there passes without reading a single one. Hence the
+    /// containment check as well as the height.
+    /// </remarks>
     [AvaloniaFact]
     public void AProviderWithNoKnownDaysKeepsARowOfOutlines()
     {
@@ -232,7 +240,7 @@ public sealed class UsageMapPixelTests
             ],
         };
 
-        using PixelHost host = PixelHost.Show(map, ThemeVariant.Light, width: 200d, height: 160d);
+        using PixelHost host = PixelHost.Show(map, ThemeVariant.Light, width: 200d, height: 400d);
         Frame frame = host.Capture();
 
         Color ground = Token(ThemeVariant.Light, "AltimSurfaceBrush");
@@ -241,6 +249,9 @@ public sealed class UsageMapPixelTests
         Rect cell = Cell(host, map, row: 1, Day);
         Rect middle = Inside(cell);
 
+        Assert.True(
+            new Rect(0d, 0d, frame.Width, frame.Height).Contains(cell),
+            $"The empty provider's day is outside the captured frame at {cell}.");
         Assert.True(
             frame.Count(middle, colour => !Ink.Near(colour, ground, 2)) == 0,
             $"The empty provider's day was filled: {frame.Describe(middle)}");

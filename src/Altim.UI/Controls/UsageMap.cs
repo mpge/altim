@@ -112,6 +112,15 @@ public readonly record struct UsageMapHit(int RowIndex, UsageMapCell Cell, Rect 
 /// some squares are 8 wide and others 9.
 /// </para>
 /// <para>
+/// The grid fills the width it is given rather than standing at a fixed size in whatever
+/// room it has: the week columns share that width, and a day grows with the panel between
+/// <see cref="MinCellSize"/> and <see cref="MaxCellSize"/>. <b>How big a day is, is worked
+/// out once</b>, in the measure pass, and the render, <see cref="HitTest"/>,
+/// <see cref="CellBounds"/> and the focus ring all read that one answer. Two copies of it
+/// would agree until one of them was edited, and then the map would look right while the
+/// tooltip, the accessible name and the ring all pointed at the day next door.
+/// </para>
+/// <para>
 /// <see cref="Rows"/> is not frozen into a private copy, which is the one place this
 /// deliberately differs from <see cref="UsageTape"/>. The tape freezes because it is handed
 /// observable collections that are mutated in place. A map is rebuilt and assigned whole,
@@ -188,9 +197,25 @@ public sealed class UsageMap : Control, ICustomHitTest
             nameof(EmptyText),
             "No daily usage recorded yet. The map fills in as agents run.");
 
-    /// <summary>One day's square, in device independent pixels.</summary>
-    public static readonly StyledProperty<double> CellSizeProperty =
-        AvaloniaProperty.Register<UsageMap, double>(nameof(CellSize), 8d);
+    /// <summary>The smallest a day's square is ever drawn, in device independent pixels.</summary>
+    /// <remarks>
+    /// The square is not a constant: the grid is fitted to the width the map is given, so a
+    /// day grows with the panel it is in. This is the floor that fit is clamped to. Below it a
+    /// day is not worth drawing and not worth aiming at, and it is the size
+    /// <c>docs/DESIGN.md</c> writes the map's focus ring exception around.
+    /// </remarks>
+    public static readonly StyledProperty<double> MinCellSizeProperty =
+        AvaloniaProperty.Register<UsageMap, double>(nameof(MinCellSize), 8d);
+
+    /// <summary>The largest a day's square is ever drawn, in device independent pixels.</summary>
+    /// <remarks>
+    /// A block is seven squares tall as well as fifty three wide, so a day that went on
+    /// growing with a maximised window would grow downwards with it and push the rest of the
+    /// page off the bottom of the screen long before it ran out of width. The ceiling is where
+    /// the grid stops filling and starts sitting in the room it has.
+    /// </remarks>
+    public static readonly StyledProperty<double> MaxCellSizeProperty =
+        AvaloniaProperty.Register<UsageMap, double>(nameof(MaxCellSize), 16d);
 
     /// <summary>The room between two squares.</summary>
     public static readonly StyledProperty<double> CellGapProperty =
@@ -225,10 +250,20 @@ public sealed class UsageMap : Control, ICustomHitTest
     /// <summary>The room between a label and whatever it labels. One spacing step.</summary>
     private const double LabelGap = 4d;
 
-    /// <summary>What a map with nothing to draw asks for, so it does not collapse.</summary>
+    /// <summary>
+    /// What a map asks for when nobody has told it how wide it is: the room the empty
+    /// sentence takes, and the width the grid falls back to being fitted to.
+    /// </summary>
     private const double DefaultWidth = 320d;
 
     private MapLayout? _layout;
+
+    /// <summary>
+    /// The width the grid was last fitted to, or NaN before the first measure - the one value
+    /// that is never a width the map was offered.
+    /// </summary>
+    private double _fitWidth = double.NaN;
+
     private UsageMapCell? _hovered;
     private UsageMapCell? _captioned;
     private Selection? _focused;
@@ -253,7 +288,8 @@ public sealed class UsageMap : Control, ICustomHitTest
         AffectsMeasure<UsageMap>(
             RowsProperty,
             EmptyTextProperty,
-            CellSizeProperty,
+            MinCellSizeProperty,
+            MaxCellSizeProperty,
             CellGapProperty,
             RowGapProperty,
             CaptionFontSizeProperty,
@@ -340,11 +376,18 @@ public sealed class UsageMap : Control, ICustomHitTest
         set => SetValue(EmptyTextProperty, value);
     }
 
-    /// <inheritdoc cref="CellSizeProperty" />
-    public double CellSize
+    /// <inheritdoc cref="MinCellSizeProperty" />
+    public double MinCellSize
     {
-        get => GetValue(CellSizeProperty);
-        set => SetValue(CellSizeProperty, value);
+        get => GetValue(MinCellSizeProperty);
+        set => SetValue(MinCellSizeProperty, value);
+    }
+
+    /// <inheritdoc cref="MaxCellSizeProperty" />
+    public double MaxCellSize
+    {
+        get => GetValue(MaxCellSizeProperty);
+        set => SetValue(MaxCellSizeProperty, value);
     }
 
     /// <inheritdoc cref="CellGapProperty" />
@@ -466,7 +509,7 @@ public sealed class UsageMap : Control, ICustomHitTest
         }
 
         int column = (int)Math.Floor(x / layout.Pitch);
-        if (column < 0 || column >= layout.Weeks || x - (column * layout.Pitch) >= CellSize)
+        if (column < 0 || column >= layout.Weeks || x - (column * layout.Pitch) >= layout.Cell)
         {
             return null;
         }
@@ -480,7 +523,7 @@ public sealed class UsageMap : Control, ICustomHitTest
             }
 
             int weekday = (int)Math.Floor(inside / layout.Pitch);
-            if (inside - (weekday * layout.Pitch) >= CellSize)
+            if (inside - (weekday * layout.Pitch) >= layout.Cell)
             {
                 return null;
             }
@@ -574,8 +617,15 @@ public sealed class UsageMap : Control, ICustomHitTest
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// This is where the width the grid is fitted to is settled, because the measure pass is
+    /// the only one that is told a width at all. Everything after it reads the square out of
+    /// the layout built here.
+    /// </remarks>
     protected override Size MeasureOverride(Size availableSize)
     {
+        Refit(WidthToFill(availableSize.Width));
+
         if (EnsureLayout() is { } layout)
         {
             return layout.Size;
@@ -729,7 +779,8 @@ public sealed class UsageMap : Control, ICustomHitTest
         base.OnPropertyChanged(change);
 
         if (change.Property == RowsProperty
-            || change.Property == CellSizeProperty
+            || change.Property == MinCellSizeProperty
+            || change.Property == MaxCellSizeProperty
             || change.Property == CellGapProperty
             || change.Property == RowGapProperty
             || change.Property == CaptionFontSizeProperty
@@ -975,8 +1026,8 @@ public sealed class UsageMap : Control, ICustomHitTest
         return new Rect(
             left,
             top,
-            Math.Max(1d, Hairline.SnapEdge(rawX + CellSize, scale) - left),
-            Math.Max(1d, Hairline.SnapEdge(rawY + CellSize, scale) - top));
+            Math.Max(1d, Hairline.SnapEdge(rawX + layout.Cell, scale) - left),
+            Math.Max(1d, Hairline.SnapEdge(rawY + layout.Cell, scale) - top));
     }
 
     /// <summary>
@@ -1018,11 +1069,12 @@ public sealed class UsageMap : Control, ICustomHitTest
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The design system's ring is 2px offset 2px outside the control. A day is 8px with 2px
-    /// between it and the next one, so a ring held 2px clear would be painted on top of the
-    /// neighbouring days and the focused square would read as a three by three block. The
-    /// ring therefore hugs the square and fills the gap that is already there, which is the
-    /// same weight of line in the same colour, sitting where there is room for it.
+    /// The design system's ring is 2px offset 2px outside the control. A day is 8px at its
+    /// smallest and 2px from the next one at every width the grid is fitted to, so a ring held
+    /// 2px clear would be painted on top of the neighbouring days and the focused square would
+    /// read as a three by three block. The ring therefore hugs the square and fills the gap
+    /// that is already there, which is the same weight of line in the same colour, sitting
+    /// where there is room for it.
     /// </para>
     /// <para>
     /// Both edges are snapped through <see cref="Hairline"/> against the square's own snapped
@@ -1108,6 +1160,101 @@ public sealed class UsageMap : Control, ICustomHitTest
     /// </summary>
     private MapLayout? EnsureLayout() => _layout ??= BuildLayout();
 
+    /// <summary>
+    /// The width the grid is fitted to.
+    /// </summary>
+    /// <param name="available">The width the map was offered.</param>
+    /// <returns>A width that is finite and above zero, whatever it was offered.</returns>
+    /// <remarks>
+    /// A map inside a horizontally scrolling parent is offered infinity, because letting its
+    /// content be wider than itself is that parent's whole job. Infinity shared between fifty
+    /// three columns is not a square, so the map falls back the way the empty state already
+    /// does. First to <see cref="Layoutable.MinWidth"/>, which is how a scrolling parent
+    /// states the width of its viewport and is the only width such a parent ever states - the
+    /// History page sets it - and then to <see cref="DefaultWidth"/> when there is not even
+    /// that. Either way the floor means a map nobody has told anything draws exactly the grid
+    /// it drew before there was a fit at all.
+    /// </remarks>
+    private double WidthToFill(double available)
+    {
+        if (double.IsFinite(available) && available > 0d)
+        {
+            return available;
+        }
+
+        double stated = MinWidth;
+        return double.IsFinite(stated) && stated > 0d ? stated : DefaultWidth;
+    }
+
+    /// <summary>
+    /// Takes note of the width the grid is to be fitted to, and drops the layout when it has
+    /// moved.
+    /// </summary>
+    /// <param name="width">The width from <see cref="WidthToFill"/>.</param>
+    /// <remarks>
+    /// The keyboard's square and the open tip are deliberately left alone, which is the one
+    /// way this differs from a change of rows. A resize draws the same days somewhere else:
+    /// the cells are the very records the selection is holding, and everything that reports
+    /// where one of them is reads it back from the layout rather than remembering it. A change
+    /// of rows replaces the days themselves, and that is when a held square stops meaning
+    /// anything.
+    /// </remarks>
+    private void Refit(double width)
+    {
+        if (width == _fitWidth)
+        {
+            return;
+        }
+
+        _fitWidth = width;
+        _layout = null;
+    }
+
+    /// <summary>
+    /// The side of one day's square: the width the map has to fill, shared out between the
+    /// week columns, and never outside what the theme allows.
+    /// </summary>
+    /// <param name="weeks">How many week columns the grid has.</param>
+    /// <param name="cellGap">The room between two squares.</param>
+    /// <param name="inset">The room kept clear at either end for a focus ring.</param>
+    /// <returns>The square's side, in device independent pixels.</returns>
+    /// <remarks>
+    /// <para>
+    /// The columns share what is left of the width once the two insets and the gaps between
+    /// the columns are taken out of it, so the grid ends where the width does rather than
+    /// stopping a third of the way across a panel.
+    /// </para>
+    /// <para>
+    /// Both ends are clamped. <see cref="MinCellSizeProperty"/> is the floor, because a square
+    /// below it is neither worth drawing nor worth aiming at and it is the size the design
+    /// system's focus ring exception is written around. <see cref="MaxCellSizeProperty"/> is
+    /// the ceiling, because a block is seven squares tall as well as fifty three wide and a
+    /// year that kept growing sideways would grow downwards with it.
+    /// </para>
+    /// <para>
+    /// The answer is a whole number of device pixels, rounded down. A square carried at a
+    /// fraction puts every column a little further out than the last until some of them are a
+    /// pixel wider than others, and rounding up rather than down would ask for a column more
+    /// than the width it was measured against actually has.
+    /// </para>
+    /// </remarks>
+    private double FitCell(int weeks, double cellGap, double inset)
+    {
+        double scale = Hairline.ScaleOf(this);
+
+        // The floor is rounded the other way, because a minimum that rounded down would not
+        // be one.
+        double smallest = Math.Ceiling(Math.Max(1d, MinCellSize) * scale) / scale;
+        double largest = Math.Max(smallest, Hairline.SnapDown(Math.Max(1d, MaxCellSize), scale));
+
+        double shared = _fitWidth - (inset * 2d) - ((weeks - 1) * cellGap);
+        double wanted = weeks > 0 ? shared / weeks : smallest;
+
+        return double.IsFinite(wanted)
+            ? Math.Clamp(Hairline.SnapDown(wanted, scale), smallest, largest)
+            : smallest;
+    }
+
     private MapLayout? BuildLayout()
     {
         IReadOnlyList<UsageMapRow>? rows = Rows;
@@ -1158,22 +1305,25 @@ public sealed class UsageMap : Control, ICustomHitTest
         DateOnly start = first.AddDays(-back);
         int weeks = ((last.DayNumber - start.DayNumber) / DaysInWeek) + 1;
 
-        double cellSize = Math.Max(1d, CellSize);
-        double pitch = cellSize + Math.Max(0d, CellGap);
+        double cellGap = Math.Max(0d, CellGap);
         double gap = Math.Max(0d, RowGap);
 
         // Room for the focus ring on the squares at the edges of the grid. The grid otherwise
         // begins and ends exactly on a square, so a ring round the first column, the last
         // column or the bottom row would be drawn outside the control's own rectangle - where
         // a parent is free to clip it away, which is a ring that exists everywhere except at
-        // the four places a reader arrives first.
+        // the four places a reader arrives first. It is settled before the square is, because
+        // it comes off the width the columns have to share.
         double inset = Math.Max(0d, FocusRingWidth);
+
+        double cellSize = FitCell(weeks, cellGap, inset);
+        double pitch = cellSize + cellGap;
 
         var typeface = new Typeface(TextElement.GetFontFamily(this));
         double captionSize = Math.Max(1d, CaptionFontSize);
         double captionHeight = Text("0", typeface, captionSize, LabelBrush).Height;
 
-        double widest = (weeks * pitch) - Math.Max(0d, CellGap);
+        double widest = (weeks * pitch) - cellGap;
         double y = captionHeight + LabelGap;
         double monthBand = y;
 
@@ -1237,7 +1387,7 @@ public sealed class UsageMap : Control, ICustomHitTest
                 Cells = cells,
             });
 
-            y += (DaysInWeek * pitch) - Math.Max(0d, CellGap);
+            y += (DaysInWeek * pitch) - cellGap;
             widest = Math.Max(widest, Text(row.Name, typeface, captionSize, LabelBrush).Width);
         }
 
@@ -1247,6 +1397,7 @@ public sealed class UsageMap : Control, ICustomHitTest
             {
                 Start = start,
                 Weeks = weeks,
+                Cell = cellSize,
                 Pitch = pitch,
                 Inset = inset,
                 MonthBandHeight = monthBand,
@@ -1264,6 +1415,16 @@ public sealed class UsageMap : Control, ICustomHitTest
 
         /// <summary>How many week columns the grid has.</summary>
         public required int Weeks { get; init; }
+
+        /// <summary>The side of one day's square, from the width the map was fitted to.</summary>
+        /// <remarks>
+        /// <b>The one statement of how big a day is.</b> The render, the hit test, the
+        /// rectangle an assistive technology is handed and the ring the keyboard leaves behind
+        /// all read it from here. A second copy anywhere would agree with this one right up
+        /// until somebody changed one of them, and then the map would look right while the
+        /// tooltip, the accessible name and the focus ring all pointed at the day next door.
+        /// </remarks>
+        public required double Cell { get; init; }
 
         /// <summary>One square plus one gap.</summary>
         public required double Pitch { get; init; }

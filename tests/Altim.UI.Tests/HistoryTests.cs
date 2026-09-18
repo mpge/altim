@@ -6,7 +6,10 @@ using Altim.UI.History;
 using Altim.UI.Tests.Fakes;
 using Altim.UI.ViewModels;
 using Altim.UI.Views;
+using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.VisualTree;
 using Xunit;
 
 namespace Altim.UI.Tests;
@@ -351,6 +354,90 @@ public sealed class HistoryTests
             Assert.Equal("Claude Code", series.Name);
             Assert.All(series.Values, value => Assert.Equal(44d, value));
         }, width: 720d, height: 480d);
+    }
+
+    /// <summary>
+    /// On screen, the map fills the panel it is in rather than standing at a fixed width in a
+    /// wider card.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the page level half of the fit, and the half a control test cannot reach. The
+    /// map sits in a horizontally scrolling <c>ScrollViewer</c>, and such a parent offers its
+    /// content infinity rather than a width - that is exactly what lets the content be wider
+    /// than the viewport. A year of week columns cannot be shared out of infinity, so the page
+    /// states the viewport as the map's <c>MinWidth</c>, which bounds the fit without capping
+    /// what the map may ask for.
+    /// </para>
+    /// <para>
+    /// Without that statement the map falls back to its smallest square and leaves a third of
+    /// the panel empty, which is the defect this was written for. The assertion is that no
+    /// larger square would have fitted, rather than that the square is any particular size:
+    /// the square is the theme's business and filling the panel is the page's.
+    /// </para>
+    /// </remarks>
+    [AvaloniaFact]
+    public async Task TheMapFillsThePanelItIsIn()
+    {
+        var history = new FakeHistoryService();
+        for (int back = 0; back < 40; back++)
+        {
+            history.AddDays(new UsageDay(
+                ProviderId,
+                new DateOnly(2026, 9, 15).AddDays(-back),
+                new TokenTotals((back + 1) * 1_000L, null, null, null),
+                null,
+                UsageDaySource.Observed,
+                DateTimeOffset.UnixEpoch));
+        }
+
+        using ProviderViewModel row = Row(new FakeUsageProvider(ProviderId, "Claude Code"));
+        HistoryViewModel page = Page(history, row);
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        var view = new HistoryView { DataContext = page };
+
+        Surface.Show(view, window =>
+        {
+            UsageMap map = Assert.Single(Surface.Visible<UsageMap>(window));
+            ScrollViewer scroller = Assert.IsType<ScrollViewer>(
+                map.FindAncestorOfType<ScrollViewer>(),
+                exactMatch: false);
+
+            Assert.True(scroller.Viewport.Width > 0d, "The panel has no width to fill.");
+            Assert.Equal(scroller.Viewport.Width, map.MinWidth, 6);
+
+            double cell = 0d;
+            double drawnTo = 0d;
+            int columns = 0;
+            HashSet<double> lefts = [];
+
+            foreach (UsageMapCell day in map.Rows![0].Cells)
+            {
+                if (map.CellBounds(0, day.Day) is not { } square)
+                {
+                    continue;
+                }
+
+                cell = square.Width;
+                drawnTo = Math.Max(drawnTo, square.Right);
+                lefts.Add(square.X);
+            }
+
+            columns = lefts.Count;
+            Assert.True(columns > 50, $"A year should be fifty three columns and drew {columns}.");
+
+            drawnTo += map.FocusRingWidth;
+            double oneMore = drawnTo + 1d + map.CellGap;
+
+            Assert.True(
+                drawnTo <= scroller.Viewport.Width,
+                $"The grid ran {drawnTo} past a {scroller.Viewport.Width} panel.");
+            Assert.True(
+                oneMore > scroller.Viewport.Width,
+                $"The grid stopped at {drawnTo} of {scroller.Viewport.Width} with a {cell} square, "
+                    + "which leaves room for a larger one.");
+        }, width: 860d, height: 900d);
     }
 
     /// <summary>On screen, a range with samples hands the tape a line to draw.</summary>

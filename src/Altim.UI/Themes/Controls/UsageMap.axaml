@@ -13,9 +13,13 @@
   not data: no square is ever tinted by whose row it is in, so neither accent brush appears
   here.
 
-  Squares and gaps come off the spacing scale rather than being chosen for the map: 8 for a
-  day, 2 between days, 12 between one provider's block and the next. The map draws its own
-  labels, so it is handed the family the same way a TextBlock inherits it.
+  Squares and gaps come off the spacing scale rather than being chosen for the map: 2 between
+  days, 12 between one provider's block and the next, and a day between 8 and 16. A day is a
+  range rather than a figure because the grid fills the width it is given: 8 is the smallest
+  square worth drawing and aiming at, and the one DESIGN.md writes the focus ring exception
+  around, while 16 is where a block seven squares tall stops fitting on the page beside the
+  tape. The map draws its own labels, so it is handed the family the same way a TextBlock
+  inherits it.
 
   The focus ring is handed over as a brush and a width rather than hosted as a template part,
   because there is no template: the map draws itself, and it draws the ring round one square
@@ -39,7 +43,8 @@
     <Setter Property="FocusRingBrush" Value="{DynamicResource AltimFocusRingBrush}" />
     <Setter Property="FocusRingWidth" Value="{DynamicResource AltimFocusRingWidth}" />
     <Setter Property="FocusAdorner" Value="{x:Null}" />
-    <Setter Property="CellSize" Value="{DynamicResource AltimSpace8}" />
+    <Setter Property="MinCellSize" Value="{DynamicResource AltimSpace8}" />
+    <Setter Property="MaxCellSize" Value="{DynamicResource AltimSpace16}" />
     <Setter Property="CellGap" Value="{DynamicResource AltimSpace2}" />
     <Setter Property="RowGap" Value="{DynamicResource AltimSpace12}" />
     <Setter Property="CaptionFontSize" Value="{DynamicResource AltimFontSizeCaption}" />

@@ -79,6 +79,44 @@ public sealed class HairlineTests
         Assert.Equal(Math.Round(snapped * scale), snapped * scale, 9);
     }
 
+    /// <summary>
+    /// A length rounds down to whole device pixels, and never up.
+    /// </summary>
+    /// <param name="length">The wanted length.</param>
+    /// <param name="scale">The render scaling.</param>
+    /// <param name="expected">The snapped length.</param>
+    /// <remarks>
+    /// Down is the whole point of it. The usage map divides a width between fifty three week
+    /// columns, and a square rounded up by half a device pixel is half a pixel per column and
+    /// twenty six more than the map was measured against by the end of the year.
+    /// </remarks>
+    [Theory]
+    [InlineData(10d, 1d, 10d)]
+    [InlineData(10.4d, 1d, 10d)]
+    [InlineData(10.9d, 1d, 10d)]
+    [InlineData(14.19d, 1d, 14d)]
+    [InlineData(10.9d, 1.25d, 10.4d)]
+    [InlineData(10.9d, 1.5d, 10d + (2d / 3d))]
+    [InlineData(8d, 1.25d, 8d)]
+    [InlineData(8d, 1.5d, 8d)]
+    public void ALengthRoundsDownToWholeDevicePixels(double length, double scale, double expected)
+    {
+        double snapped = Hairline.SnapDown(length, scale);
+
+        Assert.Equal(expected, snapped, 9);
+        Assert.Equal(Math.Round(snapped * scale), snapped * scale, 9);
+        Assert.True(snapped <= length + 1e-9d, $"{length} rounded up to {snapped}.");
+    }
+
+    /// <summary>A broken scale still answers a whole number rather than a fraction.</summary>
+    /// <param name="scale">The broken scale.</param>
+    [Theory]
+    [InlineData(0d)]
+    [InlineData(-2d)]
+    [InlineData(double.NaN)]
+    public void ALengthAtABrokenScaleRoundsDownToAWholeNumber(double scale) =>
+        Assert.Equal(10d, Hairline.SnapDown(10.9d, scale));
+
     /// <summary>A centred rule is placed by its leading edge, still on the grid.</summary>
     [Fact]
     public void ACentredRuleIsPlacedByItsLeadingEdge()

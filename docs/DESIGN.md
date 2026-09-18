@@ -144,8 +144,8 @@ reads as an em dash — never as a zero, and never as a blank.
 - Borders: exactly 1px, `Border`. Separators are 1px `Border` with no margin tricks.
 - Shadow: one only, on the popup — `0 8 24 rgba(0,0,0,0.12)` light, `0 8 24 rgba(0,0,0,0.5)` dark.
 - Focus: 2px `TextPrimary` ring offset 2px. Always visible, never removed. The one place
-  the 2px *offset* is dropped is the usage map, where a focusable thing is an 8px square
-  with 2px between it and the next day: a ring held 2px clear would be painted over the
+  the 2px *offset* is dropped is the usage map, where a focusable thing is a square from 8px
+  up with 2px between it and the next day: a ring held 2px clear would be painted over the
   neighbouring days. There the ring hugs the square and fills the gap that is already
   there — same weight, same colour, drawn where there is room for it.
 - Hit targets: 28px minimum height for rows, 32px for buttons, 40px for a sidebar row.

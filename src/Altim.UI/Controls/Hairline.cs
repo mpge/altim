@@ -82,6 +82,33 @@ public static class Hairline
     }
 
     /// <summary>
+    /// Rounds a length down to a whole number of device pixels.
+    /// </summary>
+    /// <param name="length">The length, in device independent pixels.</param>
+    /// <param name="scale">The render scaling.</param>
+    /// <returns>The longest whole pixel length that is no longer than the one asked for.</returns>
+    /// <remarks>
+    /// <see cref="SnapEdge"/> rounds to the nearest boundary, which is what a position wants
+    /// and the opposite of what a size divided out of the room it has to fit in wants. A
+    /// square rounded up is a fraction of a pixel per column, and across a year of columns
+    /// that is a column more than the grid was given room for. Down, and it always fits.
+    /// </remarks>
+    public static double SnapDown(double length, double scale)
+    {
+        if (double.IsNaN(length) || double.IsInfinity(length))
+        {
+            return length;
+        }
+
+        if (double.IsNaN(scale) || scale <= 0d)
+        {
+            return Math.Floor(length);
+        }
+
+        return Math.Floor(length * scale) / scale;
+    }
+
+    /// <summary>
     /// Places a hairline of a given weight so that it lands on whole device pixels, from a
     /// position describing where the middle of the line wants to be.
     /// </summary>

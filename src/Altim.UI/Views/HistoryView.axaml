@@ -7,9 +7,17 @@
   day or a month, and keeps its range picker. The picker moves the tape only - the map's span
   is always the year behind today.
 
-  The map is scrolled sideways rather than squeezed. A year is fifty three week columns, and a
-  column that had to shrink to fit a narrow window would take the squares with it until a day
-  was a smudge.
+  The map fills the panel and is scrolled sideways rather than squeezed. A year is fifty three
+  week columns: given room they share it out and a day grows with the panel, and given less
+  than they need they stop at the smallest square worth drawing and the panel scrolls, because
+  a column that shrank to fit a narrow window would take the squares with it until a day was a
+  smudge.
+
+  The map is told how wide the panel is through MinWidth, because a horizontally scrolling
+  parent offers its content infinity rather than a width - that is what lets the content be
+  wider than the viewport - and a year of columns cannot be shared out of infinity. MinWidth
+  states the viewport without capping it, so the grid fills the panel when there is room and
+  still overflows into a scrollbar when there is not.
 -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -45,11 +53,13 @@
         <!-- The map is handed the one scale the whole page is ranked on. Left to rank itself
              it would rank each map it is given on its own, and a square in one row would stop
              meaning the same thing as a square in another. -->
-        <ScrollViewer HorizontalScrollBarVisibility="Auto"
+        <ScrollViewer x:Name="MapScroller"
+                      HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Disabled">
           <controls:UsageMap Rows="{Binding Map.Rows}"
                              Scale="{Binding Map.Scale}"
-                             EmptyText="{Binding Map.EmptyText}" />
+                             EmptyText="{Binding Map.EmptyText}"
+                             MinWidth="{Binding #MapScroller.Viewport.Width}" />
         </ScrollViewer>
       </StackPanel>
     </Border>
