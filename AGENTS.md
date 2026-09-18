@@ -53,7 +53,7 @@ live in `docs/superpowers/`.
 
 ```
 dotnet build Altim.sln -c Release      # 0 warnings; warnings are errors
-dotnet test Altim.sln -c Release       # ~1240 passing, 2 skipped (non-Windows tests)
+dotnet test Altim.sln -c Release       # 2 skipped: the non-Windows tests
 ```
 
 - **A running Altim locks `Altim.App`'s output.** `dotnet build Altim.sln` then fails with MSB3027.
@@ -84,6 +84,12 @@ Tests here are expected to *discriminate*, not merely pass.
   read them before changing what they watch.
 - Platform-specific tests use `WindowsFact` / `UnixFact`. xUnit v3 requires `[CallerFilePath]` and
   `[CallerLineNumber]` forwarded to the base attribute, or you get xUnit3003.
+- **Measure the baseline yourself before you start.** The suite grows most days, so any count
+  quoted in a brief is stale; report what you actually saw before and after.
+- Do not assert on the state of asynchronous work at the moment you happen to look. "This task
+  has not finished yet" is a bet on the thread pool being slow, and "the save has landed" is a
+  bet that it was fast. Hold something the work provably needs, or await the signal the fake
+  offers. Three tests here went red on CI and green everywhere else for exactly this.
 - Budgets in tests are deadlock guards, not assertions. Make them generous: a tight one turns other
   people's CPU load into red builds here.
 
