@@ -77,6 +77,19 @@ internal sealed class Frame
         Assert.InRange(x, 0, Width - 1);
         Assert.InRange(y, 0, Height - 1);
 
+        return Read(x, y);
+    }
+
+    /// <summary>
+    /// Reads one pixel that is already known to be inside the frame. The bounds assertions
+    /// in <see cref="At(int, int)"/> box their arguments, which is nothing on a handful of
+    /// samples and noticeable over every pixel of a window sized frame.
+    /// </summary>
+    /// <param name="x">The device pixel column.</param>
+    /// <param name="y">The device pixel row.</param>
+    /// <returns>The colour, alpha included.</returns>
+    private Color Read(int x, int y)
+    {
         int offset = (y * _stride) + (x * 4);
         byte first = _pixels[offset];
         byte green = _pixels[offset + 1];
@@ -181,6 +194,36 @@ internal sealed class Frame
     /// <param name="match">The predicate.</param>
     /// <returns>True when at least one pixel matches.</returns>
     public bool Any(Rect area, Func<Color, bool> match) => Count(area, match) > 0;
+
+    /// <summary>
+    /// Whether every pixel inside an area is the same colour. A window that drew nothing is
+    /// its own ground and nothing else, which is the one thing a frame's size cannot say.
+    /// </summary>
+    /// <param name="area">The area, clamped to the frame.</param>
+    /// <returns>True when no two pixels inside the area differ.</returns>
+    public bool IsFlat(Rect area)
+    {
+        bool seen = false;
+        Color first = default;
+
+        foreach ((int x, int y) in Positions(area))
+        {
+            Color colour = Read(x, y);
+            if (!seen)
+            {
+                first = colour;
+                seen = true;
+                continue;
+            }
+
+            if (colour != first)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>The distinct colours inside an area, most common first.</summary>
     /// <param name="area">The area, clamped to the frame.</param>

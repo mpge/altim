@@ -4,7 +4,9 @@ using Altim.UI.Tests.Fakes;
 using Altim.UI.ViewModels;
 using Altim.UI.Views;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
+using Avalonia.VisualTree;
 using Xunit;
 
 namespace Altim.UI.Tests;
@@ -15,6 +17,12 @@ namespace Altim.UI.Tests;
 /// </summary>
 public sealed class SettingsTests
 {
+    /// <summary>
+    /// The window height every on screen test here hosts at: the application's own
+    /// <c>MinHeight</c>, which is the smallest window a reader can put this page in.
+    /// </summary>
+    private const double WindowHeight = 600d;
+
     private static SettingsViewModel Page(
         FakeSettingsStore store,
         FakeHistoryService history,
@@ -665,10 +673,20 @@ public sealed class SettingsTests
             {
                 Assert.False(picker.IsEffectivelyEnabled);
             }
-        }, width: 760d, height: 1600d);
+        }, width: 760d, height: WindowHeight);
     }
 
-    /// <summary>On screen, the five sections are all there.</summary>
+    /// <summary>On screen, the five sections are all there and every one can be read.</summary>
+    /// <remarks>
+    /// The page used to be hosted 1600 tall, which no reader has: the application's window
+    /// will not go below 600, and the settings page sits under a brand header inside that.
+    /// Height alone could not make this fail either way, because
+    /// <see cref="Surface.Shows"/> walks <c>IsEffectivelyVisible</c>, which stays true for a
+    /// section arranged past the window's lower edge - so a page that had lost its scroll
+    /// viewer, which is a defect this repository has already shipped once, passed here.
+    /// Hosted at the smallest window the application allows, the page is proved to overflow
+    /// and every section is then proved to be somewhere the page can actually scroll to.
+    /// </remarks>
     [AvaloniaFact]
     public void RendersEverySection()
     {
@@ -678,15 +696,26 @@ public sealed class SettingsTests
 
         Surface.Show(view, window =>
         {
-            Assert.True(Surface.Shows(window, "General"));
-            Assert.True(Surface.Shows(window, "Notifications"));
-            Assert.True(Surface.Shows(window, "Providers"));
-            Assert.True(Surface.Shows(window, "Privacy"));
-            Assert.True(Surface.Shows(window, "About"));
-            Assert.True(Surface.Shows(window, "Clear usage history"));
-            Assert.True(Surface.Shows(window, "altim.dev"));
-            Assert.True(Surface.Shows(window, "Claude Code"));
-            Assert.True(Surface.Shows(window, "Add Altim's status line to Claude Code"));
-        }, width: 760d, height: 1600d);
+            ScrollViewer scroller = Assert.Single(
+                window.GetVisualDescendants().OfType<ScrollViewer>(),
+                v => v.VerticalScrollBarVisibility != ScrollBarVisibility.Disabled);
+
+            Assert.True(
+                scroller.Extent.Height > scroller.Viewport.Height,
+                $"The page is {scroller.Extent.Height} tall in a {scroller.Viewport.Height} "
+                    + "viewport, so this window does not exercise reaching anything at all.");
+
+            Surface.AssertReachable(
+                window,
+                "General",
+                "Notifications",
+                "Providers",
+                "Privacy",
+                "About",
+                "Clear usage history",
+                "altim.dev",
+                "Claude Code",
+                "Add Altim's status line to Claude Code");
+        }, width: 760d, height: WindowHeight);
     }
 }

@@ -10,6 +10,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 using Xunit;
 
@@ -355,6 +356,15 @@ public sealed class HistoryTests
     }
 
     /// <summary>On screen, an empty range is the sentence and no chart.</summary>
+    /// <remarks>
+    /// The tape draws its own text, so the sentence never becomes a <c>TextBlock</c> and
+    /// <see cref="Surface.Shows"/> cannot see it. This used to assert <c>Series</c> and
+    /// <c>EmptyText</c> - two CLR properties - while the sentence above it claimed something
+    /// about the picture. A tape that read an empty series and drew a flat line at zero
+    /// anyway satisfied every one of those assertions. The picture is read here instead:
+    /// nothing anywhere near the line colour, and ink in the label colour where the sentence
+    /// is set.
+    /// </remarks>
     [AvaloniaFact]
     public void EmptyRangeRendersTheSentence()
     {
@@ -368,6 +378,20 @@ public sealed class HistoryTests
             Assert.Empty(tape.Series!);
             Assert.Equal(UsageFormat.HistoryEmpty, tape.EmptyText);
             Assert.DoesNotContain("0%", Surface.Lines(window));
+
+            Frame frame = Frame.Capture(window);
+            Rect plot = BoundsIn(tape, window);
+
+            // No chart. The line is the darkest thing the tape ever draws and the sentence
+            // is set in the label colour, so a tolerance this wide still separates them.
+            Assert.Equal(
+                0,
+                frame.Count(plot, colour => Ink.Near(colour, Token(window, LinePrimary), 24)));
+
+            // And the sentence is genuinely on the screen, not merely on the control.
+            Assert.True(
+                frame.Count(plot, colour => Ink.Near(colour, Token(window, Label), 24)) > 0,
+                $"Nothing in the label colour was drawn in {plot}: {frame.Describe(plot, 8)}.");
         }, width: 720d, height: 480d);
     }
 
@@ -396,6 +420,8 @@ public sealed class HistoryTests
             UsageTapeSeries series = Assert.Single(tape.Series!);
             Assert.Equal("Claude Code", series.Name);
             Assert.All(series.Values, value => Assert.Equal(44d, value));
+
+            AssertDrewALine(window, tape);
         }, width: 720d, height: 480d);
     }
 
@@ -503,6 +529,56 @@ public sealed class HistoryTests
             UsageTape tape = Assert.Single(Surface.Visible<UsageTape>(window));
             UsageTapeSeries series = Assert.Single(tape.Series!);
             Assert.Equal("Claude Code", series.Name);
+
+            AssertDrewALine(window, tape);
         }, width: 720d, height: 480d);
+    }
+
+    /// <summary>The tape's line colour, which nothing else on the tape is drawn in.</summary>
+    private const string LinePrimary = "AltimChartLinePrimaryBrush";
+
+    /// <summary>The colour the tape sets its own text in, the empty sentence included.</summary>
+    private const string Label = "AltimChartLabelBrush";
+
+    /// <summary>
+    /// Asserts the tape drew a line rather than falling back to its empty sentence, which is
+    /// the one thing a <c>Series</c> that holds values cannot say on its own: the values can
+    /// be right and the picture still be the sentence.
+    /// </summary>
+    /// <param name="window">The window the page is hosted in.</param>
+    /// <param name="tape">The tape on the page.</param>
+    private static void AssertDrewALine(Window window, UsageTape tape)
+    {
+        Frame frame = Frame.Capture(window);
+        Rect plot = BoundsIn(tape, window);
+
+        int drawn = frame.Count(plot, colour => Ink.Near(colour, Token(window, LinePrimary), 4));
+        Assert.True(
+            drawn > 0,
+            $"No line was drawn in {plot}, so the tape is showing its empty sentence: "
+                + $"{frame.Describe(plot, 8)}.");
+    }
+
+    /// <summary>A visual's bounds in the coordinates of the window holding it.</summary>
+    /// <param name="visual">The visual to locate.</param>
+    /// <param name="window">The window it is hosted in.</param>
+    /// <returns>The bounds.</returns>
+    private static Rect BoundsIn(Visual visual, Window window)
+    {
+        Point? origin = visual.TranslatePoint(default, window);
+        Assert.True(origin is not null, "The visual is not in this window.");
+        return new Rect(origin!.Value, visual.Bounds.Size);
+    }
+
+    /// <summary>A design system colour, as the renderer produces it under this window.</summary>
+    /// <param name="window">The window whose variant to resolve under.</param>
+    /// <param name="key">The resource key.</param>
+    /// <returns>The colour.</returns>
+    private static Color Token(Window window, string key)
+    {
+        Assert.True(
+            DesignSystem.Ensure().TryGetResource(key, window.ActualThemeVariant, out object? value),
+            $"{key} does not resolve under {window.ActualThemeVariant}.");
+        return Assert.IsAssignableFrom<ISolidColorBrush>(value).Color;
     }
 }

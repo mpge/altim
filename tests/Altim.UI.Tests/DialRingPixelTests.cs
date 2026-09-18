@@ -195,10 +195,26 @@ public sealed class DialRingPixelTests
         }
 
         // Its outline is still there, so the ring has not simply vanished: the provider is on
-        // the face, saying it reported nothing.
+        // the face, saying it reported nothing. An outline is two hairlines with clear face
+        // between them, so that is what is read: ink on the inner edge of this ring's band,
+        // ink on its outer edge, and nothing in between.
+        double thickness = Dial.RingThicknessFor(2);
+        double middle = RingCentre(2, 1);
+        double innerEdge = middle - (thickness / 2d);
+        double outerEdge = middle + (thickness / 2d);
+        IReadOnlyList<double> outline = BandInk(frame, centre, 2, 1, ground, 0d);
+
         Assert.True(
-            OutlinePixels(frame, centre, 2, 1, ground) >= 2,
-            "The unreported ring was not outlined, so the provider is missing from the face.");
+            outline.Any(radius => radius <= innerEdge + 1d),
+            $"The unreported ring's inner edge at {innerEdge} was not outlined, so the "
+                + $"provider is missing from the face. Painted at: {Radii(outline)}.");
+        Assert.True(
+            outline.Any(radius => radius >= outerEdge - 1d),
+            $"The unreported ring's outer edge at {outerEdge} was not outlined, so the "
+                + $"provider is missing from the face. Painted at: {Radii(outline)}.");
+        Assert.DoesNotContain(
+            outline,
+            radius => radius > innerEdge + 1d && radius < outerEdge - 1d);
     }
 
     /// <summary>
@@ -288,23 +304,53 @@ public sealed class DialRingPixelTests
         return outer - (thickness / 2d);
     }
 
-    /// <summary>How many pixels of a radial cut across one ring's band are not the page.</summary>
-    private static int OutlinePixels(Frame frame, Point centre, int count, int ring, Color ground)
+    /// <summary>
+    /// The radii of a radial cut across one ring's own band that are not the page.
+    /// </summary>
+    /// <param name="frame">The captured face.</param>
+    /// <param name="centre">The middle of the dial, in window coordinates.</param>
+    /// <param name="count">How many readings the face carries.</param>
+    /// <param name="ring">Which ring to cut across, outermost first.</param>
+    /// <param name="ground">The page colour behind the face.</param>
+    /// <param name="degrees">Where on the face to cut.</param>
+    /// <returns>Every sampled radius that carries ink, inner edge first.</returns>
+    /// <remarks>
+    /// The band is the ring's middle plus or minus half its thickness. This scanned the
+    /// middle plus or minus the WHOLE thickness - twice as wide as the thing it was
+    /// measuring - which on a two ring face reached into the ring outside and counted the
+    /// neighbouring provider's swept arc. The caller asked for two painted pixels and could
+    /// reach two from that arc alone, so a ring drawn with no outline at all satisfied it.
+    /// Half steps, because the hairline either side of the band is thinner than a sample
+    /// stride and a whole step can walk straight over one.
+    /// </remarks>
+    private static IReadOnlyList<double> BandInk(
+        Frame frame,
+        Point centre,
+        int count,
+        int ring,
+        Color ground,
+        double degrees)
     {
         double thickness = Dial.RingThicknessFor(count);
         double middle = RingCentre(count, ring);
-        int painted = 0;
+        List<double> painted = [];
 
-        for (double radius = middle - thickness; radius <= middle + thickness; radius += 1d)
+        for (double radius = middle - (thickness / 2d);
+            radius <= middle + (thickness / 2d);
+            radius += 0.5d)
         {
-            if (!Ink.Near(frame.At(Polar(centre, radius, 0d)), ground, 4))
+            if (!Ink.Near(frame.At(Polar(centre, radius, degrees)), ground, 4))
             {
-                painted++;
+                painted.Add(radius);
             }
         }
 
         return painted;
     }
+
+    /// <summary>A readable list of radii, for a failure message.</summary>
+    private static string Radii(IReadOnlyList<double> radii) =>
+        radii.Count == 0 ? "nothing" : string.Join(", ", radii);
 
     private static PixelHost Show(Dial dial, ThemeVariant variant) =>
         PixelHost.Show(

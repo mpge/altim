@@ -6,7 +6,9 @@ using Altim.UI.Tests.Fakes;
 using Altim.UI.ViewModels;
 using Altim.UI.Views;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
+using Avalonia.VisualTree;
 using Xunit;
 
 namespace Altim.UI.Tests;
@@ -20,6 +22,19 @@ public sealed class ProviderPageTests
 {
     private const string ProviderId = "claude";
     private const string ProviderName = "Claude Code";
+
+    /// <summary>
+    /// The window height every on screen test here hosts at: the application's own
+    /// <c>MinHeight</c>, which is the smallest window a reader can put this page in.
+    /// </summary>
+    /// <remarks>
+    /// These hosted at 1200 to 1600, which no reader has, and which could not make any of
+    /// them fail: <see cref="Surface.Shows"/> walks <c>IsEffectivelyVisible</c>, and that
+    /// stays true for a row arranged well past the window's lower edge. What the page claims
+    /// is that a reader can read these things, so the claims that say "on screen" are made
+    /// with <see cref="Surface.AssertReachable"/>, at a window a reader might really have.
+    /// </remarks>
+    private const double WindowHeight = 600d;
 
     private static ProviderViewModel Row(FakeUsageProvider provider) =>
         new(provider, new TestClock(Readings.Now), AltimSettings.Default);
@@ -124,33 +139,37 @@ public sealed class ProviderPageTests
 
         Surface.Show(view, window =>
         {
-            Assert.True(Surface.Shows(window, ProviderName));
-            Assert.True(Surface.Shows(window, "Active"));
+            // The page is taller than the window, so every line below is a line the page has
+            // to be scrolled to. Without this the reach assertions could be satisfied by a
+            // page that happened to fit, which is the state the old 1600 tall host was in.
+            ScrollViewer scroller = Assert.Single(
+                window.GetVisualDescendants().OfType<ScrollViewer>(),
+                v => v.VerticalScrollBarVisibility != ScrollBarVisibility.Disabled);
 
-            Assert.True(Surface.Shows(window, "Usage"));
-            Assert.True(Surface.Shows(window, "62%"));
-            Assert.True(Surface.Shows(window, "38%"));
-            Assert.True(Surface.Shows(window, "Session"));
-            Assert.True(Surface.Shows(window, "Weekly"));
+            Assert.True(
+                scroller.Extent.Height > scroller.Viewport.Height,
+                $"The page is {scroller.Extent.Height} tall in a {scroller.Viewport.Height} "
+                    + "viewport, so this window does not exercise reaching anything at all.");
+
+            Surface.AssertReachable(window, ProviderName, "Active");
+
+            Surface.AssertReachable(window, "Usage", "62%", "38%", "Session", "Weekly");
             Assert.Equal(2, Surface.Visible<Meter>(window).Count);
 
-            Assert.True(Surface.Shows(window, "Tokens"));
-            Assert.True(Surface.Shows(window, "Input"));
-            Assert.True(Surface.Shows(window, "Cache write"));
-            Assert.True(Surface.Shows(window, "56.2K"));
+            Surface.AssertReachable(window, "Tokens", "Input", "Cache write", "56.2K");
 
-            Assert.True(Surface.Shows(window, "Activity"));
-            Assert.True(Surface.Shows(window, "claude-opus-5"));
-            Assert.True(Surface.Shows(window, "claude-sonnet-5"));
+            Surface.AssertReachable(window, "Activity", "claude-opus-5", "claude-sonnet-5");
             Assert.False(Surface.Shows(window, UsageFormat.NoActivity));
 
-            Assert.True(Surface.Shows(window, "Integration"));
-            Assert.True(Surface.Shows(window, UsageFormat.IntegrationSentence(ProviderStatus.Active)));
+            Surface.AssertReachable(
+                window,
+                "Integration",
+                UsageFormat.IntegrationSentence(ProviderStatus.Active));
 
             // Nothing on the page names a session, a project or a path.
             Assert.DoesNotContain("session-a", Surface.Lines(window));
             Assert.False(Surface.Shows(window, UsageFormat.ProviderUnavailable));
-        }, width: 760d, height: 1600d);
+        }, width: 760d, height: WindowHeight);
     }
 
     /// <summary>On screen, a provider that could not be read is the sentence and an enabled retry.</summary>
@@ -166,8 +185,11 @@ public sealed class ProviderPageTests
 
         Surface.Show(view, window =>
         {
-            Assert.True(Surface.Shows(window, UsageFormat.ProviderUnavailable));
-            Assert.True(Surface.Shows(window, "Unavailable"));
+            Surface.AssertReachable(
+                window,
+                UsageFormat.ProviderUnavailable,
+                "Unavailable",
+                UsageFormat.RetryLabel);
 
             // A failed reading carries no metric, so there is no rail to read a level off.
             Assert.Empty(Surface.Visible<Meter>(window));
@@ -176,7 +198,7 @@ public sealed class ProviderPageTests
             Button retry = Surface.Visible<Button>(window)
                 .Single(button => string.Equals(button.Content as string, UsageFormat.RetryLabel, StringComparison.Ordinal));
             Assert.True(retry.IsEffectivelyEnabled);
-        }, width: 760d, height: 1200d);
+        }, width: 760d, height: WindowHeight);
     }
 
     /// <summary>Retrying from the page refreshes the provider and shows what comes back.</summary>
@@ -212,8 +234,8 @@ public sealed class ProviderPageTests
         Surface.Show(view, window =>
         {
             Assert.False(page.Provider.HasSessions);
-            Assert.True(Surface.Shows(window, UsageFormat.NoActivity));
-        }, width: 760d, height: 1400d);
+            Surface.AssertReachable(window, UsageFormat.NoActivity);
+        }, width: 760d, height: WindowHeight);
     }
 
     /// <summary>
@@ -236,7 +258,7 @@ public sealed class ProviderPageTests
 
         Surface.Show(view, window =>
         {
-            Assert.True(Surface.Shows(window, UsageFormat.MetricUnavailable));
+            Surface.AssertReachable(window, UsageFormat.MetricUnavailable);
             Assert.False(Surface.Shows(window, "62%"));
             Assert.DoesNotContain("0%", Surface.Lines(window));
 
@@ -258,9 +280,9 @@ public sealed class ProviderPageTests
                 meters[1].RenderedFillWidth > 0d,
                 "The reported rail is drawn with no fill, which reads as a zero.");
 
-            Assert.True(Surface.Shows(window, "38%"));
+            Surface.AssertReachable(window, "38%");
             Assert.False(Surface.Shows(window, UsageFormat.ProviderUnavailable));
-        }, width: 760d, height: 1400d);
+        }, width: 760d, height: WindowHeight);
     }
 
     /// <summary>
@@ -279,10 +301,10 @@ public sealed class ProviderPageTests
 
         Surface.Show(view, window =>
         {
-            Assert.True(Surface.Shows(window, UsageFormat.MetricUnavailable));
+            Surface.AssertReachable(window, UsageFormat.MetricUnavailable);
             Assert.False(Surface.Shows(window, UsageFormat.ProviderUnavailable));
             Assert.Empty(Surface.Visible<Meter>(window));
             Assert.Empty(Surface.Visible<Button>(window));
-        }, width: 760d, height: 1200d);
+        }, width: 760d, height: WindowHeight);
     }
 }

@@ -52,8 +52,18 @@ public sealed class ControlThemeTests
         "LegendDot",
     ];
 
-    /// <summary>Every restyled control renders a frame in Light and in Dark.</summary>
+    /// <summary>
+    /// Every restyled control is on screen in Light and in Dark: arranged to a real size the
+    /// frame covers, and painting something of its own inside it.
+    /// </summary>
     /// <param name="name">The control to build and render.</param>
+    /// <remarks>
+    /// The captured frame's size used to be the whole assertion, and that size is the
+    /// window's, which this test passes in. It reduced to 320 being more than nothing, so a
+    /// control that measured to zero and painted nothing passed here twenty times over.
+    /// <see cref="DesignSystem.AssertRenders"/> reads the control's own arranged bounds and
+    /// the pixels inside them instead.
+    /// </remarks>
     [AvaloniaTheory]
     [MemberData(nameof(ControlNames))]
     public void EveryControlRendersInBothVariants(string name)
@@ -74,10 +84,7 @@ public sealed class ControlThemeTests
     {
         var button = new Button { Content = "Retry" };
 
-        using (WriteableBitmap frame = DesignSystem.Render(button))
-        {
-            Assert.True(frame.PixelSize.Width > 0);
-        }
+        DesignSystem.AssertRenders(button);
 
         Assert.Equal(32d, button.MinHeight);
         Assert.NotNull(Part<Border>(button, "PART_FocusRing"));
@@ -103,8 +110,7 @@ public sealed class ControlThemeTests
         stack.Children.Add(row);
         stack.Children.Add(toggle);
 
-        using WriteableBitmap frame = DesignSystem.Render(stack, width: 320d, height: 240d);
-        Assert.True(frame.PixelSize.Width > 0);
+        DesignSystem.AssertRenders(stack, width: 320d, height: 240d);
 
         Assert.True(button.Bounds.Height >= 32d, $"Button is {button.Bounds.Height} tall.");
         Assert.True(input.Bounds.Height >= 32d, $"TextBox is {input.Bounds.Height} tall.");
@@ -133,8 +139,7 @@ public sealed class ControlThemeTests
         stack.Children.Add(row);
         stack.Children.Add(toggle);
 
-        using WriteableBitmap frame = DesignSystem.Render(stack, width: 320d, height: 240d);
-        Assert.True(frame.PixelSize.Width > 0);
+        DesignSystem.AssertRenders(stack, width: 320d, height: 240d);
 
         foreach (Control control in stack.Children.Cast<Control>())
         {
@@ -159,8 +164,7 @@ public sealed class ControlThemeTests
             Content = new Border { Height = 1000d, Width = 100d },
         };
 
-        using WriteableBitmap frame = DesignSystem.Render(viewer, width: 200d, height: 120d);
-        Assert.True(frame.PixelSize.Width > 0);
+        DesignSystem.AssertRenders(viewer, width: 200d, height: 120d);
 
         Assert.True(viewer.Extent.Height > viewer.Viewport.Height, "The content did not overflow.");
 
@@ -181,8 +185,7 @@ public sealed class ControlThemeTests
             IsDropDownOpen = true,
         };
 
-        using WriteableBitmap frame = DesignSystem.Render(combo, width: 240d, height: 160d);
-        Assert.True(frame.PixelSize.Width > 0);
+        DesignSystem.AssertRenders(combo, width: 240d, height: 160d);
 
         Popup popup = Assert.IsType<Popup>(Part<Popup>(combo, "PART_Popup"));
         Border body = Assert.IsType<Border>(popup.Child);
@@ -207,8 +210,7 @@ public sealed class ControlThemeTests
     {
         var toggle = new ToggleSwitch { Content = "Start with the system" };
 
-        using WriteableBitmap frame = DesignSystem.Render(toggle, width: 240d, height: 48d);
-        Assert.True(frame.PixelSize.Width > 0);
+        DesignSystem.AssertRenders(toggle, width: 240d, height: 48d);
 
         Border track = Assert.IsType<Border>(Part<Border>(toggle, "PART_Track"));
         Panel knobs = Assert.IsType<Panel>(Part<Panel>(toggle, "PART_MovingKnobs"));
@@ -235,8 +237,7 @@ public sealed class ControlThemeTests
     {
         var toggle = new ToggleSwitch { Content = "Start with the system", IsChecked = true };
 
-        using WriteableBitmap frame = DesignSystem.Render(toggle, width: 240d, height: 48d);
-        Assert.True(frame.PixelSize.Width > 0);
+        DesignSystem.AssertRenders(toggle, width: 240d, height: 48d);
 
         Panel knobs = Assert.IsType<Panel>(Part<Panel>(toggle, "PART_MovingKnobs"));
         Assert.Equal(Avalonia.Layout.HorizontalAlignment.Right, knobs.HorizontalAlignment);

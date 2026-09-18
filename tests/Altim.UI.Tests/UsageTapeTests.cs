@@ -68,49 +68,49 @@ public sealed class UsageTapeTests
         double expected) =>
         Assert.Equal(expected, UsageTape.XFor(index, count, width), 6);
 
-    /// <summary>A tape with no series renders the empty state instead of an empty plot.</summary>
+    /// <summary>A tape with no series draws the empty state instead of an empty plot.</summary>
     [AvaloniaFact]
-    public void RendersWithNoSeries() => RenderBothVariants(() => new UsageTape());
+    public void RendersWithNoSeries() => DrawsSomething(() => new UsageTape());
 
-    /// <summary>An empty series list is the same as no series.</summary>
+    /// <summary>An empty series list draws the same picture as no series.</summary>
     [AvaloniaFact]
     public void RendersWithAnEmptySeriesList() =>
-        RenderBothVariants(() => new UsageTape { Series = [] });
+        DrawsTheEmptyState(() => new UsageTape { Series = [] });
 
-    /// <summary>A series with no samples in it is the same as no series.</summary>
+    /// <summary>A series with no samples in it draws the same picture as no series.</summary>
     [AvaloniaFact]
     public void RendersWithASeriesThatHasNoSamples() =>
-        RenderBothVariants(() => new UsageTape { Series = [new UsageTapeSeries("Claude", [])] });
+        DrawsTheEmptyState(() => new UsageTape { Series = [new UsageTapeSeries("Claude", [])] });
 
     /// <summary>
     /// A series where every sample is unreported draws nothing rather than a flat line at
-    /// zero. A null is a null.
+    /// zero. A null is a null, so the picture is the empty state's, to the pixel.
     /// </summary>
     [AvaloniaFact]
     public void RendersWithASeriesOfOnlyUnreportedSamples() =>
-        RenderBothVariants(
+        DrawsTheEmptyState(
             () => new UsageTape { Series = [new UsageTapeSeries("Claude", [null, null, null])] });
 
-    /// <summary>One sample is a dot and a name, not a crash and not a line.</summary>
+    /// <summary>One sample is a picture, not a crash and not the empty sentence.</summary>
     [AvaloniaFact]
     public void RendersASinglePointSeries() =>
-        RenderBothVariants(() => new UsageTape { Series = [new UsageTapeSeries("Claude", [42d])] });
+        DrawsAPlot(() => new UsageTape { Series = [new UsageTapeSeries("Claude", [42d])] });
 
     /// <summary>Two samples are the shortest thing that is actually a line.</summary>
     [AvaloniaFact]
     public void RendersATwoPointSeries() =>
-        RenderBothVariants(() => new UsageTape { Series = [new UsageTapeSeries("Claude", [10d, 90d])] });
+        DrawsAPlot(() => new UsageTape { Series = [new UsageTapeSeries("Claude", [10d, 90d])] });
 
     /// <summary>A gap breaks the line rather than dropping it to zero.</summary>
     [AvaloniaFact]
     public void RendersASeriesWithGaps() =>
-        RenderBothVariants(
+        DrawsAPlot(
             () => new UsageTape
             {
                 Series = [new UsageTapeSeries("Claude", [10d, null, 40d, null, null, 80d])],
             });
 
-    /// <summary>Sample counts on both sides of the dot limit render.</summary>
+    /// <summary>Sample counts on both sides of the dot limit draw a plot.</summary>
     /// <param name="count">The number of samples.</param>
     [AvaloniaTheory]
     [InlineData(3)]
@@ -119,12 +119,12 @@ public sealed class UsageTapeTests
     [InlineData(33)]
     [InlineData(256)]
     public void RendersAcrossTheDotLimit(int count) =>
-        RenderBothVariants(() => new UsageTape { Series = [Ramp("Claude", count)] });
+        DrawsAPlot(() => new UsageTape { Series = [Ramp("Claude", count)] });
 
     /// <summary>Two providers, one primary and one secondary, named at the end of each line.</summary>
     [AvaloniaFact]
     public void RendersTwoSeries() =>
-        RenderBothVariants(
+        DrawsAPlot(
             () => new UsageTape
             {
                 Series =
@@ -134,24 +134,42 @@ public sealed class UsageTapeTests
                 ],
             });
 
-    /// <summary>A tape squeezed to nothing does not throw.</summary>
+    /// <summary>
+    /// A tape squeezed to nothing does not throw, and draws nothing rather than a blot.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The one case here that may legitimately paint no pixels at all, which is why it takes
+    /// <see cref="DesignSystem.AssertRendersNothing"/> rather than the blanket "it must paint
+    /// ink" every other case takes. Two columns leave the plot a negative width, and a tape
+    /// that drew a reading into that would be reporting a level nobody can read off it.
+    /// </para>
+    /// <para>
+    /// The window is two wide and a tape tall, not two by two. The tape's theme sets a 96
+    /// minimum height, so a two by two window does not squeeze the tape: it arranges a 2 by
+    /// 96 tape centred on a 2 tall window, which leaves 47 of it above the top edge and 47
+    /// below the bottom. Nothing could be read off that frame either way, and the assertion
+    /// this replaced - that a 2 by 2 frame was more than 0 wide - could not tell the
+    /// difference.
+    /// </para>
+    /// </remarks>
     [AvaloniaFact]
     public void RendersWithNoRoomToDrawIn() =>
-        DesignSystem.AssertRenders(
+        DesignSystem.AssertRendersNothing(
             new UsageTape { Series = [Ramp("Claude", 8)] },
             width: 2d,
-            height: 2d);
+            height: 140d);
 
     /// <summary>Level labels can be turned off without the plot losing its gutters.</summary>
     [AvaloniaFact]
     public void RendersWithoutLevelLabels() =>
-        RenderBothVariants(
+        DrawsAPlot(
             () => new UsageTape { ShowLevelLabels = false, Series = [Ramp("Claude", 8)] });
 
     /// <summary>Out of range samples are clamped into the plot rather than drawn outside it.</summary>
     [AvaloniaFact]
     public void RendersOutOfRangeSamples() =>
-        RenderBothVariants(
+        DrawsAPlot(
             () => new UsageTape { Series = [new UsageTapeSeries("Claude", [-40d, 240d, double.NaN, 50d])] });
 
     /// <summary>
@@ -217,7 +235,7 @@ public sealed class UsageTapeTests
     /// </summary>
     [AvaloniaFact]
     public void RendersTwoSeriesEndingAtTheSameLevel() =>
-        RenderBothVariants(
+        DrawsAPlot(
             () => new UsageTape
             {
                 Series =
@@ -288,13 +306,62 @@ public sealed class UsageTapeTests
         return new UsageTapeSeries(name, values);
     }
 
-    // A fresh tape per variant: a control cannot be hosted by two windows at once, and a
+    // A fresh tape per call: a control cannot be hosted by two windows at once, and a
     // control that has already rendered is not the control a view would hand the window.
-    private static void RenderBothVariants(Func<UsageTape> tape)
+    // Both variants every time, because Dark is a designed palette rather than an inversion.
+
+    /// <summary>The tape paints something of its own, in both variants.</summary>
+    /// <param name="tape">Builds the tape under test.</param>
+    private static void DrawsSomething(Func<UsageTape> tape)
     {
         foreach (ThemeVariant variant in new[] { ThemeVariant.Light, ThemeVariant.Dark })
         {
             DesignSystem.AssertRenders(tape(), variant, width: 360d, height: 140d);
+        }
+    }
+
+    /// <summary>
+    /// The tape paints the empty state's picture, pixel for pixel, in both variants.
+    /// </summary>
+    /// <param name="tape">Builds the tape under test.</param>
+    /// <remarks>
+    /// "The same as no series" is a claim about the picture, so it is read off the picture: a
+    /// tape that drew a flat line at zero for a series of nulls differs from a tape holding
+    /// no series at all, and fails here. The comparison is anchored on both sides - neither
+    /// tape may paint an empty frame - so two controls that drew nothing cannot satisfy it.
+    /// </remarks>
+    private static void DrawsTheEmptyState(Func<UsageTape> tape)
+    {
+        foreach (ThemeVariant variant in new[] { ThemeVariant.Light, ThemeVariant.Dark })
+        {
+            DesignSystem.AssertRendersAlike(
+                tape(),
+                new UsageTape(),
+                variant,
+                width: 360d,
+                height: 140d);
+        }
+    }
+
+    /// <summary>
+    /// The tape paints a plot rather than the empty state, in both variants.
+    /// </summary>
+    /// <param name="tape">Builds the tape under test.</param>
+    /// <remarks>
+    /// A tape that quietly fell back to the empty sentence would paint plenty of ink, so
+    /// "it painted something" does not hold this claim. Being a different picture from the
+    /// tape with nothing in it does.
+    /// </remarks>
+    private static void DrawsAPlot(Func<UsageTape> tape)
+    {
+        foreach (ThemeVariant variant in new[] { ThemeVariant.Light, ThemeVariant.Dark })
+        {
+            DesignSystem.AssertRendersUnlike(
+                tape(),
+                new UsageTape(),
+                variant,
+                width: 360d,
+                height: 140d);
         }
     }
 }
