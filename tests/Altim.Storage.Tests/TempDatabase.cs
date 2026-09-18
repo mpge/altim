@@ -162,13 +162,24 @@ internal sealed class TempDatabase : IDisposable
     /// retry loop that ends in a throw still fails on a genuine leak.
     /// </summary>
     /// <remarks>
-    /// The budget is around five seconds rather than the half-second it started as. A
-    /// handle that is merely slow to be released is what a busy machine produces — every
-    /// test here creates a database, and a parallel build on the same box delays the
-    /// release well past 500ms — while a handle that was genuinely leaked is never
-    /// released at all. Waiting longer therefore costs nothing in detection: the leak
-    /// still fails the test that leaked it, just later. A tight budget buys no rigour and
-    /// turns other people's load into red builds here.
+    /// <para>
+    /// The budget is around thirty seconds. It began at half a second, was raised to five
+    /// when that turned other people's CPU load into red builds here, and was raised again
+    /// when five was still not enough: a CI runner failed
+    /// <c>DisposingWaitsForAWriteThatIsAlreadyInFlight</c> after 5.4 seconds, which is this
+    /// loop exhausting itself rather than anything the test asserts.
+    /// </para>
+    /// <para>
+    /// Waiting longer costs nothing in detection. A handle that is merely slow to be
+    /// released is what a loaded machine produces — every test here creates a database —
+    /// while a handle that was genuinely leaked is never released at all, so the leak still
+    /// fails the test that leaked it, just later. A tight budget buys no rigour.
+    /// </para>
+    /// <para>
+    /// The throw names the files still present, because "could not delete the directory"
+    /// sends the next reader looking at the wrong thing: which file is still open is the
+    /// whole diagnosis.
+    /// </para>
     /// </remarks>
     private static void Delete(string directory)
     {
@@ -179,10 +190,19 @@ internal sealed class TempDatabase : IDisposable
                 Directory.Delete(directory, recursive: true);
                 return;
             }
-            catch (Exception error) when (attempt < 25 && error is IOException
+            catch (Exception error) when (attempt < 200 && error is IOException
                                           or UnauthorizedAccessException)
             {
-                Thread.Sleep(Math.Min(25 * attempt, 250));
+                Thread.Sleep(Math.Min(25 * attempt, 150));
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                string held = string.Join(", ", Directory.EnumerateFiles(directory).Select(Path.GetFileName));
+                throw new IOException(
+                    $"The temporary database directory could not be removed after 30 seconds, so something "
+                    + $"still holds a handle to it. Still present: {held}. That is a leaked connection in the "
+                    + "code under test, not a slow machine.",
+                    error);
             }
         }
     }
