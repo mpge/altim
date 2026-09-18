@@ -32,6 +32,13 @@ namespace Altim.UI.Tests;
 /// platform bitmap before returning: an undisposed frame takes the renderer down.
 /// </para>
 /// </remarks>
+/// <remarks>
+/// In the motion collection: <c>Motion.Preference</c> is one ambient value for the whole
+/// interface, and xUnit runs test classes in parallel, so a class that sets it decides what
+/// a class running beside it sees. Restoring it afterwards is not enough. This failed on a
+/// macOS runner and passed on Windows, which is scheduling choosing the outcome.
+/// </remarks>
+[Collection("Motion")]
 public sealed class MeterPixelTests
 {
     /// <summary>The rail width every test here lays a meter out at.</summary>

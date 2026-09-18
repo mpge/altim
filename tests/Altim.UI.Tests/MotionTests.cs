@@ -20,6 +20,13 @@ namespace Altim.UI.Tests;
 /// <summary>
 /// The ambient reduce-motion value the interface reads.
 /// </summary>
+/// <remarks>
+/// In the motion collection: <c>Motion.Preference</c> is one ambient value for the whole
+/// interface, and xUnit runs test classes in parallel, so a class that sets it decides what
+/// a class running beside it sees. Restoring it afterwards is not enough. This failed on a
+/// macOS runner and passed on Windows, which is scheduling choosing the outcome.
+/// </remarks>
+[Collection("Motion")]
 public sealed class MotionValueTests
 {
     /// <summary>
@@ -97,6 +104,13 @@ public sealed class MotionValueTests
 /// catches an animation Altim did not write and <c>docs/DESIGN.md</c> does not mention.
 /// </para>
 /// </remarks>
+/// <remarks>
+/// In the motion collection: <c>Motion.Preference</c> is one ambient value for the whole
+/// interface, and xUnit runs test classes in parallel, so a class that sets it decides what
+/// a class running beside it sees. Restoring it afterwards is not enough. This failed on a
+/// macOS runner and passed on Windows, which is scheduling choosing the outcome.
+/// </remarks>
+[Collection("Motion")]
 public sealed class MotionSuppressionTests
 {
     /// <summary>

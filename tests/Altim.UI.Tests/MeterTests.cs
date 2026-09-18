@@ -27,6 +27,13 @@ namespace Altim.UI.Tests;
 /// fill width is a stated function of the level and the rail width rather than something
 /// only the renderer knows.
 /// </summary>
+/// <remarks>
+/// In the motion collection: <c>Motion.Preference</c> is one ambient value for the whole
+/// interface, and xUnit runs test classes in parallel, so a class that sets it decides what
+/// a class running beside it sees. Restoring it afterwards is not enough. This failed on a
+/// macOS runner and passed on Windows, which is scheduling choosing the outcome.
+/// </remarks>
+[Collection("Motion")]
 public sealed class MeterTests
 {
     /// <summary>A level above 100 is clamped rather than overflowing the rail.</summary>
