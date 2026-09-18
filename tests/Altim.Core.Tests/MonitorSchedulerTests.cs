@@ -499,18 +499,39 @@ public sealed class MonitorSchedulerTests
         wedge.SetResult();
     }
 
-    [Fact]
+    /// <summary>
+    /// A request that arrives while a refresh is in flight is served once that refresh
+    /// leaves, rather than waiting for the next tick.
+    /// </summary>
     /// <remarks>
-    /// Seen failing once with three refreshes where two were expected, on a machine running
-    /// several builds at once, and not reproduced in 35 runs since — 25 of this test alone
-    /// and 10 of the whole suite under four parallel builds. Recorded rather than patched,
-    /// because the count is not where a bug would hide: <c>ProviderRegistration</c> records a
-    /// request in a single bool, so any number of requests arriving during one refresh serve
-    /// exactly one more, and no sequence of hints can queue two. A third refresh therefore
-    /// comes from somewhere else, a scheduled tick landing inside the window being the
-    /// candidate. If this fails again, that is the thread to pull, and loosening the count
-    /// would only hide it.
+    /// <para>
+    /// Every request this makes is one it can wait on, which is what makes the count on the
+    /// far side exact: one refresh for the tick, one for the record it served. The explicit
+    /// path returns a task, so the record is provably in place before the wedge is let go.
+    /// </para>
+    /// <para>
+    /// It used to make that request through a hint as well, and that is what flaked: seen
+    /// once as three refreshes where two were expected, on a machine running several builds
+    /// at once. A hint's refresh is queued with <c>Task.Run</c> and nothing can await it, so
+    /// a loaded runner is free to run it after the refresh it was meant to join has already
+    /// left, and it then takes a turn of its own. That is three requests, three refreshes,
+    /// none overlapping and none lost, which is the scheduler working rather than a defect;
+    /// the exact count is simply not something the design promises once a request that
+    /// cannot be awaited is in play. Reproduced by deferring that queued work by 50ms, which
+    /// fails 2 against 3 every time. The scheduled tick the note here used to blame is not a
+    /// candidate at all: the clock is manual, this advances it by sixty seconds in total,
+    /// and the second tick is due at a hundred and twenty.
+    /// </para>
+    /// <para>
+    /// The count stays exact rather than becoming a floor. A dropped record leaves one
+    /// refresh, so "at least two" would pass against the defect this test is for the moment
+    /// anything else refreshed at all. Keeping it exact costs the hint, which is covered by
+    /// the tests that can wait on it: a burst of hints producing one refresh, a hint after
+    /// the window closes opening a new one, and a push from inside a refresh not announcing
+    /// twice.
+    /// </para>
     /// </remarks>
+    [Fact]
     public async Task ARefreshRequestedWhileOneIsInFlightRunsOnceMoreOnExit()
     {
         var time = new TestTimeProvider();
@@ -530,18 +551,17 @@ public sealed class MonitorSchedulerTests
         time.Advance(TimeSpan.FromSeconds(60));
         await provider.RefreshEntered.Task.WithCeiling();
 
-        // A hint lands while the refresh is in flight. Dropping it hides the change until
-        // the next relaxed tick, which is up to a minute of staleness for a file that has
-        // already been written.
+        // A request lands while the refresh is in flight. Dropping it hides the change
+        // until the next relaxed tick, which is up to a minute of staleness for a file that
+        // has already been written. This one is the explicit refresh: it goes down the same
+        // per-provider path as a hint or a tick, and it returns a task, so by the time it
+        // has been awaited the request is recorded rather than queued somewhere.
         provider.RefreshGate = null;
-        scheduler.Hint("claude");
-        time.Advance(TimeSpan.FromMilliseconds(750));
-
-        // The hinted refresh is queued, so it is proven dropped by an explicit refresh
-        // down the same path, which returns a task and can be awaited.
         await scheduler.RefreshAsync("claude", TestContext.Current.CancellationToken);
         Assert.Equal(1, provider.RefreshCount);
 
+        // Exactly one more on the way out, and it is the record that produced it: nothing
+        // else here can refresh this provider.
         wedge.SetResult();
         await collector.WaitForAsync(2).WithCeiling();
         Assert.Equal(2, provider.RefreshCount);

@@ -431,25 +431,73 @@ public sealed class SqliteUsageHistoryServiceTests
         Assert.Equal(1_000L, Assert.IsType<TokenTotals>(carriedIn.Tokens).Input);
     }
 
+    /// <summary>
+    /// Neither read runs on the thread that asked for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A month of history on the dashboard is the case that matters, and the dashboard asks
+    /// from the UI thread. Microsoft.Data.Sqlite runs every statement inline, so whichever
+    /// thread asks is the one that would wear the scan.
+    /// </para>
+    /// <para>
+    /// This used to assert that the returned task had not completed yet, which proves
+    /// nothing: it is a bet that the thread pool has not finished the read before the next
+    /// line runs, and an idle runner wins that bet. It failed on CI for no defect at all.
+    /// </para>
+    /// <para>
+    /// Nothing below depends on how long anything takes. A read in write-ahead log mode is
+    /// never blocked, which is what the mode is for, so the file is put back on a rollback
+    /// journal and an exclusive transaction is held on the writer: while it is held, no read
+    /// of this database can finish, on any thread. The calls are then made on a thread of
+    /// this test's own, which parks on their results under a
+    /// <see cref="SynchronizationContext"/> that runs nothing posted to it. Three things
+    /// follow, and each of them fails as a timeout rather than as a hang:
+    /// </para>
+    /// <para>
+    /// The calls come back while no read can finish, so neither of them did its reading on
+    /// that thread. The results do not arrive while the transaction is held, which is what
+    /// says the hold is real and the first point means something. And the results do arrive
+    /// once it is released, although the thread that asked is parked and its context is
+    /// running nothing, so the work needed neither of them.
+    /// </para>
+    /// </remarks>
     [Fact]
     public async Task ReadingHistoryDoesNotRunOnTheCallingThread()
     {
         using var temp = new TempDatabase();
-        var history = new SqliteUsageHistoryService(temp.Open());
+        AltimDatabase database = temp.Open();
+        var history = new SqliteUsageHistoryService(database);
 
         await history.RecordAsync(Usage(Origin, Metric("five_hour", 41.5)), Ct);
 
-        // A month of history on the dashboard is the case that matters, and the dashboard
-        // asks from the UI thread.
-        ValueTask<IReadOnlyList<UsageSample>> range =
-            history.GetRangeAsync("claude", Origin.AddDays(-30), Origin.AddDays(1), Ct);
-        Assert.False(range.IsCompleted);
-        _ = Assert.Single(await range);
+        // Captured here and handed over: the calls below are made on a thread of this
+        // test's own, which is no place to go looking for the ambient test context.
+        CancellationToken ct = Ct;
+        var caller = new ParkedCaller();
+        Task<IReadOnlyList<UsageSample>[]> reads;
 
-        ValueTask<IReadOnlyList<UsageSample>> carryIn =
-            history.GetLatestBeforeAsync("claude", Origin.AddDays(1), Ct);
-        Assert.False(carryIn.IsCompleted);
-        _ = Assert.Single(await carryIn);
+        using (WriteLease lease = await database.LeaseWriterAsync(ct))
+        using (HoldEveryRead(lease.Connection))
+        {
+            reads = caller.Run(
+                () => history.GetRangeAsync("claude", Origin.AddDays(-30), Origin.AddDays(1), ct),
+                () => history.GetLatestBeforeAsync("claude", Origin.AddDays(1), ct));
+
+            // Throws a TimeoutException if the calls did not come back, which is the failure
+            // this test is for: a read that occupied the thread it was asked from would
+            // still be inside the first call. The budget is a deadlock guard rather than
+            // part of the assertion, so it is generous enough to survive a loaded machine.
+            await caller.Called.WaitAsync(TimeSpan.FromSeconds(30), ct);
+
+            // And the hold has to be real, or the line above proves nothing at all.
+            Assert.False(reads.IsCompleted);
+        }
+
+        IReadOnlyList<UsageSample>[] read = await reads.WaitAsync(TimeSpan.FromSeconds(30), ct);
+
+        _ = Assert.Single(read[0]);
+        _ = Assert.Single(read[1]);
     }
 
     private static ValueTask<IReadOnlyList<UsageSample>> Range(
@@ -516,6 +564,30 @@ public sealed class SqliteUsageHistoryServiceTests
         Assert.Equal(42.0, samples[1].UsedPercent);
     }
 
+    /// <summary>
+    /// Stops any read of this database finishing until the returned handle is disposed.
+    /// </summary>
+    /// <param name="writer">
+    /// The write connection, which the caller holds the lease on: the journal mode is
+    /// changed underneath it, so nothing else in the process may be using it.
+    /// </param>
+    /// <remarks>
+    /// A read in write-ahead log mode is never blocked by a writer, so a write transaction
+    /// would hold nothing up. The file goes back on a rollback journal, where an exclusive
+    /// transaction does lock every other connection out, including the short-lived ones the
+    /// read path opens for itself. They wait rather than fail: the read connections carry a
+    /// busy timeout and a command timeout measured in seconds, and this is released in
+    /// microseconds.
+    /// </remarks>
+    private static IDisposable HoldEveryRead(SqliteConnection writer) => new HeldReads(writer);
+
+    private static void Execute(SqliteConnection connection, string sql)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        _ = command.ExecuteNonQuery();
+    }
+
     private static ProviderUsage Usage(DateTimeOffset at, params UsageMetric[] metrics)
         => Usage(at, tokens: null, metrics);
 
@@ -532,5 +604,98 @@ public sealed class SqliteUsageHistoryServiceTests
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    private sealed class HeldReads : IDisposable
+    {
+        private readonly SqliteConnection _writer;
+
+        public HeldReads(SqliteConnection writer)
+        {
+            _writer = writer;
+            Execute(writer, "PRAGMA journal_mode = DELETE");
+            Execute(writer, "BEGIN EXCLUSIVE");
+        }
+
+        // Left on a rollback journal deliberately: switching back needs the file to itself,
+        // and the reads this just let go of are still finishing.
+        public void Dispose() => Execute(_writer, "COMMIT");
+    }
+
+    /// <summary>
+    /// A thread standing in for the one a dashboard asks from. It makes the calls, says when
+    /// they came back, and then parks on their results with a context that runs nothing
+    /// posted to it, so work that needed this thread or its context could never finish.
+    /// </summary>
+    /// <remarks>
+    /// Parking is a plain blocking wait, and deliberately on a thread of its own: the thread
+    /// pool can hand a task back to a waiter that is one of its own threads and run it
+    /// there, which would put the work on the caller after all and prove the opposite of
+    /// what this is for.
+    /// </remarks>
+    private sealed class ParkedCaller
+    {
+        private readonly TaskCompletionSource _called =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Completes once every call has returned, before anything is waited on.</summary>
+        public Task Called => _called.Task;
+
+        public Task<IReadOnlyList<UsageSample>[]> Run(
+            params Func<ValueTask<IReadOnlyList<UsageSample>>>[] calls)
+        {
+            var finished = new TaskCompletionSource<IReadOnlyList<UsageSample>[]>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    SynchronizationContext.SetSynchronizationContext(new ParkedContext());
+
+                    var pending = new Task<IReadOnlyList<UsageSample>>[calls.Length];
+                    for (int i = 0; i < calls.Length; i++)
+                    {
+                        pending[i] = calls[i]().AsTask();
+                    }
+
+                    _ = _called.TrySetResult();
+
+                    var read = new IReadOnlyList<UsageSample>[pending.Length];
+                    for (int i = 0; i < pending.Length; i++)
+                    {
+                        read[i] = pending[i].GetAwaiter().GetResult();
+                    }
+
+                    finished.SetResult(read);
+                }
+                catch (Exception error)
+                {
+                    // Whichever of the two the test is waiting on, it learns what happened
+                    // instead of timing out on it.
+                    _ = _called.TrySetException(error);
+                    finished.SetException(error);
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "altim-history-caller",
+            };
+
+            thread.Start();
+            return finished.Task;
+        }
+    }
+
+    private sealed class ParkedContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            // Dropped. A continuation that has to come back to a parked thread never runs,
+            // which is the deadlock this stands in for.
+        }
+
+        public override void Send(SendOrPostCallback d, object? state)
+            => throw new InvalidOperationException("Nothing runs on the parked thread.");
     }
 }
