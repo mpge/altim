@@ -327,6 +327,53 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Re-measures every countdown this provider shows against the clock.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when any of them now reads differently, so a surface built out
+    /// of these rows knows whether it has anything to rebuild.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// A reading is announced only when its value changed, so on a quiet machine no reading
+    /// arrives for hours and every countdown on screen stands still while the time it
+    /// describes runs out. This is the one thing on a row that moves without the provider
+    /// saying anything, and it is called by whoever knows a window is on screen.
+    /// </para>
+    /// <para>
+    /// The headline is rebuilt with them, because it is a snapshot of one metric taken when
+    /// the reading landed and carries that metric's reset caption. It is rebuilt from the
+    /// same rule rather than from a remembered row, and only when something moved: replacing
+    /// it hands every dial bound to it a new object, which is not work to do four times a
+    /// minute for nothing.
+    /// </para>
+    /// </remarks>
+    public bool RefreshCountdowns()
+    {
+        bool moved = false;
+        foreach (MetricViewModel metric in Metrics)
+        {
+            // Not short-circuiting: every row is re-measured, and the flag only records
+            // whether any of them had anything new to say.
+            moved |= metric.RefreshCountdown();
+        }
+
+        if (!moved)
+        {
+            return false;
+        }
+
+        RebuildReset();
+
+        if (HeadlineReadingViewModel.Nearest(Metrics) is { } head)
+        {
+            Headline = new HeadlineReadingViewModel(head, DisplayName);
+        }
+
+        return true;
+    }
+
     /// <summary>Applies a reading taken elsewhere, such as by the monitor scheduler.</summary>
     /// <param name="usage">The reading to show.</param>
     public void Apply(ProviderUsage usage)
@@ -599,13 +646,28 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         ResetRemainingText = soonest?.RemainingText ?? UsageFormat.Unknown;
     }
 
+    /// <summary>
+    /// Rebuilds the token figures, and drops them when the reading failed.
+    /// </summary>
+    /// <param name="usage">The reading.</param>
+    /// <remarks>
+    /// The same rule as <see cref="RebuildMetrics"/>, for the same reason: a failed reading
+    /// says nothing about how many tokens were spent either, and "56.2K tokens" standing
+    /// beside "Unable to retrieve usage" is a figure nothing can substantiate presented as a
+    /// current one. No shipped provider reports a count with an error today - all three pass
+    /// null with the empty metric list - so this is a guard on the contract rather than a
+    /// fix to something on screen, and the asymmetry with the metrics was the only reason a
+    /// provider that did report one would have got away with it.
+    /// </remarks>
     private void RebuildTokens(ProviderUsage usage)
     {
         TokenRows.Clear();
-        TokensText = UsageFormat.Tokens(usage.Tokens);
+
+        TokenTotals? totals = usage.Status == ProviderStatus.Error ? null : usage.Tokens;
+        TokensText = UsageFormat.Tokens(totals);
         HasTokens = TokensText is not null;
 
-        if (usage.Tokens is not { } tokens)
+        if (totals is not { } tokens)
         {
             return;
         }

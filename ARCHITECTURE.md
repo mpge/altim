@@ -213,6 +213,18 @@ their own timers, so the process has a single wake source and a single place to 
   wake. The asymmetry is deliberate: an extra wake costs one refresh, while a wrong suspend
   stops recording an agent that is working against a dark monitor.
 - While the popup or dashboard is open, the cadence tightens to 10s; on close it relaxes again.
+- **A reading is announced only when its value moved, so the reset countdowns are ticked
+  separately.** How long is left in a window is not a figure any provider reports: it is the
+  reported reset instant measured against the clock, and it runs out whether or not anything is
+  read. Measured once when a row was built, it left the panel reading `Resets in 2h 59m` for
+  eight and a half minutes against a frozen reading while the true figure reached 2h 51m. The
+  composition root therefore re-measures them from a `DispatcherTimer` at **15s**, immediately on
+  the transition to visible and **only while a window is on screen** — the panel is hidden rather
+  than closed, so what it carries when it opens was measured whenever the last reading landed.
+  Fifteen seconds comes from the granularity the text is written to, which is the minute; it is
+  deliberately not the tightened poll interval, because that is a user setting and how current a
+  clock reads is not a polling preference. A tick builds one string per metric and compares it,
+  and the sections are rebuilt only when the words actually moved.
 - **The scheduler's cadences are fixed at construction, so changing Refresh replaces it.**
   Everything that produces work for it therefore holds a `SchedulerHandle` rather than an
   instance: the filesystem watchers, and the first-readings pass, which also follows a rebuild

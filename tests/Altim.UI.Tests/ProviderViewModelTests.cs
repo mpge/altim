@@ -380,4 +380,87 @@ public sealed class ProviderViewModelTests
 
         Assert.False(row.HasMetrics);
     }
+
+    /// <summary>
+    /// The row's reset times follow the clock rather than the reading.
+    /// </summary>
+    /// <remarks>
+    /// A reading is announced only when its value moved, so on a quiet machine none arrives
+    /// for hours. How long is left in a window is not a figure the provider reports: it is
+    /// the reported reset instant measured against the clock, and it was measured once, when
+    /// the row was built. Every surface reads its reset time off this row, so a frozen row is
+    /// a frozen panel, a frozen card and a frozen page.
+    /// </remarks>
+    [Fact]
+    public async Task TheRowsResetTimesFollowTheClockWithoutAReading()
+    {
+        var clock = new TestClock(Readings.Now);
+        var provider = new FakeUsageProvider(ProviderId, ProviderName);
+        using var row = new ProviderViewModel(provider, clock, AltimSettings.Default);
+        await row.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("2h 14m", row.ResetRemainingText);
+        Assert.Equal("Resets in 2h 14m", row.ResetText);
+        Assert.Equal("Resets in 2h 14m", row.Headline?.ResetText);
+
+        clock.UtcNow = Readings.Now.AddMinutes(45).AddSeconds(30);
+
+        Assert.True(row.RefreshCountdowns());
+        Assert.Equal("1h 28m", row.ResetRemainingText);
+        Assert.Equal("Resets in 1h 28m", row.ResetText);
+        Assert.Equal("Resets in 1h 28m", row.Metrics[0].ResetText);
+
+        // The headline is a snapshot of one metric, so the caption under a card's dial does
+        // not follow the row it was built from unless it is rebuilt with it.
+        Assert.Equal("Resets in 1h 28m", row.Headline?.ResetText);
+
+        // The clock moving is not a reason to ask a provider anything. One reading was
+        // taken, at the start.
+        Assert.Equal(1, provider.UsageReads);
+
+        // Fifteen seconds later the words are the same, and a tick that changes nothing
+        // says so rather than making every surface bound to the row redraw.
+        clock.UtcNow = Readings.Now.AddMinutes(45).AddSeconds(45);
+        Assert.False(row.RefreshCountdowns());
+    }
+
+    /// <summary>
+    /// A reading that failed carries no token figure either.
+    /// </summary>
+    /// <remarks>
+    /// The metric rows are dropped on an error because a stale row beside an error reads as
+    /// a current number, and a token count is a number in exactly the same way: it would
+    /// have put "56.2K tokens" on the provider page directly above "Unable to retrieve
+    /// usage", and on the Overview card beside it. No shipped provider reports counts with
+    /// an error today - all three pass null along with the empty metric list - so this is
+    /// the contract being held rather than something on screen, and the asymmetry with the
+    /// metrics was the only reason a provider that did report one would have got away with
+    /// it.
+    /// </remarks>
+    [Fact]
+    public void AFailedReadingCarriesNoTokenFigureEither()
+    {
+        var provider = new FakeUsageProvider(ProviderId, ProviderName);
+        using var row = new ProviderViewModel(provider, new TestClock(Readings.Now), AltimSettings.Default);
+
+        row.Apply(Readings.Healthy(ProviderId));
+
+        Assert.True(row.HasTokens);
+        Assert.Equal(4, row.TokenRows.Count);
+
+        row.Apply(new ProviderUsage(
+            ProviderId,
+            ProviderStatus.Error,
+            [],
+            new TokenTotals(56_200, 12_800, 240_000, 9_000),
+            Readings.Now,
+            ProviderUsage.UnavailableDetail));
+
+        Assert.True(row.HasError);
+        Assert.Empty(row.Metrics);
+
+        Assert.False(row.HasTokens);
+        Assert.Null(row.TokensText);
+        Assert.Empty(row.TokenRows);
+    }
 }

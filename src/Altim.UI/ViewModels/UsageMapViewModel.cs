@@ -39,8 +39,10 @@ namespace Altim.UI.ViewModels;
 /// <para>
 /// <b>Silence and emptiness are different answers.</b> Nothing is read until
 /// <see cref="LoadAsync"/> runs, and a store that could not be read leaves <see cref="Rows"/>
-/// null, which the map draws as nothing at all. Only a store that answered and held no day
-/// produces rows of unknown squares, which is what makes the map say
+/// null, which the map draws as nothing at all. That holds on <i>every</i> load and not only
+/// the first: a read that answered nothing clears whatever was drawn before, because a year
+/// nothing can substantiate any more is not a year to leave on screen. Only a store that
+/// answered and held no day produces rows of unknown squares, which is what makes the map say
 /// <see cref="EmptyText"/>. Announcing an empty history on the strength of a read that failed
 /// would be the same lie as painting an unknown day as a zero.
 /// </para>
@@ -105,8 +107,24 @@ public sealed partial class UsageMapViewModel : ObservableObject
     /// </summary>
     /// <param name="ct">Cancels the load.</param>
     /// <remarks>
+    /// <para>
     /// A generation counter drops the result of a load the page has already asked to redo, so
     /// two overlapping loads cannot leave the older one's picture on screen.
+    /// </para>
+    /// <para>
+    /// <b>A read that answered nothing takes the picture down.</b> Returning early on a null
+    /// left whatever was drawn before standing, which is only harmless on the very first
+    /// load, when there is nothing there yet. On a range change, after the history is
+    /// cleared, or on coming back to the page, it left last year on screen with nothing
+    /// saying so - the product showing usage it can no longer substantiate, which is the one
+    /// thing it is built not to do. Clearing is the honest answer and the documented one:
+    /// null rows draw nothing at all, which says nothing is known, while the empty sentence
+    /// stays reserved for a store that answered and held no day.
+    /// </para>
+    /// <para>
+    /// A cancelled load is not that. Nobody asked it anything, so it leaves the picture
+    /// alone, and so does a load a newer one has already superseded.
+    /// </para>
     /// </remarks>
     public async Task LoadAsync(CancellationToken ct)
     {
@@ -122,8 +140,17 @@ public sealed partial class UsageMapViewModel : ObservableObject
             return;
         }
 
-        if (generation != _generation || built is null)
+        if (generation != _generation)
         {
+            return;
+        }
+
+        if (built is null)
+        {
+            // Rows last here too, for the reason below: it is the one the map watches.
+            Scale = null;
+            CombinedRow = null;
+            Rows = null;
             return;
         }
 

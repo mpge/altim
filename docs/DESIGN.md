@@ -622,7 +622,17 @@ detected", and the status line arrives at the same words over the same set.
   `Session (Claude Code)`, the form the resets section already uses — because the panel reports
   several windows and a figure that does not say which one it measures is a figure nobody can
   act on. The reset reads `Resets in 2h 14m`, or `Resets in —` when the provider reports no
-  instant.
+  instant, and it is measured against the clock rather than fixed when the reading landed: a
+  countdown that stands still while the time it describes runs out is a figure that stops being
+  true without anything having changed.
+
+  **The name wraps.** A window's name can come straight out of a vendor's rate-limit payload —
+  `gpt-5-codex-high priority 5 hour (Codex)` already spans 273 of the 288 the section has — so
+  centred and unwrapped it runs out of *both* sides of a panel with nothing to clip it. It wraps
+  rather than trims, for the reason the compact line does: trimming takes the provider off the
+  end, and a window named without its provider is exactly the figure nobody can act on. The
+  second line arrives only in the case that used to overflow, so the panel's height is unchanged
+  at the lengths names actually are.
 
   **The window is the highest level any provider reports**: the one nearest its ceiling. The
   panel already prints every window's figure on its provider's own line, so the dial is not
@@ -748,7 +758,10 @@ AI agents are doing."
   command line and has taken seven seconds on the verification machine, so it is seconds of a
   wrong sentence rather than one frame of one. It is the same sentence the provider page's
   integration section shows for that state, held as one constant so the two cannot drift.
-- Provider error: "Unable to retrieve usage" with a "Retry" button.
+- Provider error: "Unable to retrieve usage" with a "Retry" button. **The figures go with it** —
+  the metric rows, the dial, the token counts and the session list are all dropped, because a
+  reading that failed says nothing about any of them and a number left standing beside the
+  sentence reads as a current one.
 - Empty history: "No usage recorded yet. Altim starts collecting when an agent runs."
 - No provider installed: "No providers detected" — the provider section's sentence and, over the
   same set, the status line's.

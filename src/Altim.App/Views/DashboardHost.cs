@@ -65,6 +65,12 @@ internal sealed class DashboardHost : IDisposable
     public bool IsOpen => _window is not null;
 
     /// <summary>
+    /// The window's view model while it is up, and null the rest of the time: unlike the
+    /// panel's, it is built with the window and released with it.
+    /// </summary>
+    public DashboardViewModel? ViewModel => _viewModel;
+
+    /// <summary>
     /// Shows the dashboard, building it first if it is not already up, and brings an
     /// existing one to the front rather than opening a second.
     /// </summary>

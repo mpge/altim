@@ -11,6 +11,7 @@ using Avalonia.Automation.Peers;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Headless.XUnit;
+using Avalonia.Styling;
 using Xunit;
 
 namespace Altim.UI.Tests;
@@ -635,6 +636,278 @@ public sealed class PopupTests
             Assert.Empty(Surface.Visible<Dial>(window));
             Assert.DoesNotContain("62%", Surface.Lines(window));
         }, width: 320d);
+    }
+
+    /// <summary>
+    /// The countdowns follow the clock while the panel is open, without a reading.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every figure on the panel comes from a reading, and a provider announces a reading
+    /// only when its value moved - so on a quiet machine nothing arrives for hours. The time
+    /// left in a window is not a figure the provider reports, it is the reported reset
+    /// instant measured against the clock, and it was measured once when the row was built.
+    /// Watched on the running application against a frozen reading, the panel held "Resets in
+    /// 2h 59m" for eight and a half minutes while the true figure reached 2h 51m.
+    /// </para>
+    /// <para>
+    /// Nothing here touches the reading. The clock moves, the provider says nothing, and the
+    /// two places the panel prints a countdown - under the dial and in the resets section -
+    /// have to have moved with it.
+    /// </para>
+    /// </remarks>
+    [AvaloniaFact]
+    public void TheCountdownsFollowTheClockWithoutAReading()
+    {
+        var clock = new TestClock(Readings.Now);
+        FakeUsageProvider claude = Claude();
+
+        using var panel = new PopupViewModel([claude], clock, AltimSettings.Default);
+        panel.Providers[0].Apply(claude.Reading);
+
+        Assert.Equal("Resets in 2h 14m", panel.Headline?.ResetText);
+        Assert.Equal("2h 14m", Assert.Single(panel.Resets).RemainingText);
+        Assert.Equal("Resets in 2h 14m", panel.Providers[0].Metrics[0].ResetText);
+
+        // Twenty minutes of a machine nobody is using: no reading is announced, because
+        // nothing the provider reports has changed.
+        clock.UtcNow = Readings.Now.AddMinutes(20);
+        panel.RefreshCountdowns();
+
+        Assert.Equal(0, claude.UsageReads);
+        Assert.Equal("Resets in 1h 54m", panel.Headline?.ResetText);
+        Assert.Equal("1h 54m", Assert.Single(panel.Resets).RemainingText);
+        Assert.Equal("Resets in 1h 54m", panel.Providers[0].Metrics[0].ResetText);
+
+        // The ring on the face carries its window's reset time in the line a pointer and the
+        // keyboard bring up, and that line is taken from the provider row's own headline
+        // rather than from the panel's.
+        Assert.Equal("Resets in 1h 54m", Assert.Single(panel.DialReadings).Detail);
+
+        Surface.Show(new PopupView { DataContext = panel }, window =>
+        {
+            Assert.True(Surface.Shows(window, "Resets in 1h 54m"));
+            Assert.DoesNotContain("Resets in 2h 14m", Surface.Lines(window));
+        }, width: 320d, height: 1400d);
+    }
+
+    /// <summary>
+    /// A tick that changes none of the words rebuilds none of the panel.
+    /// </summary>
+    /// <remarks>
+    /// The countdowns read to the minute and the tick runs several times a minute, so most
+    /// ticks have nothing to say. Rebuilding anyway would replace the list the dial caches
+    /// its paths against, and the panel's resets, four times a minute for a set of words
+    /// that had not changed. The dial's readings are the thing to watch here because they
+    /// are replaced wholesale rather than edited.
+    /// </remarks>
+    [AvaloniaFact]
+    public void ATickThatChangesNothingRebuildsNothing()
+    {
+        var clock = new TestClock(Readings.Now);
+        FakeUsageProvider claude = Claude();
+
+        using var panel = new PopupViewModel([claude], clock, AltimSettings.Default);
+        panel.Providers[0].Apply(claude.Reading);
+
+        // Thirty seconds inside a minute, so the next quarter minute cannot cross one.
+        clock.UtcNow = Readings.Now.AddSeconds(30);
+        panel.RefreshCountdowns();
+
+        IReadOnlyList<DialReading> rings = panel.DialReadings;
+        ResetRowViewModel reset = panel.Resets[0];
+        Assert.Equal("2h 13m", reset.RemainingText);
+
+        clock.UtcNow = Readings.Now.AddSeconds(45);
+        panel.RefreshCountdowns();
+
+        Assert.Same(rings, panel.DialReadings);
+        Assert.Same(reset, panel.Resets[0]);
+    }
+
+    /// <summary>Both variants, because the name is drawn in both.</summary>
+    public static TheoryData<string> Variants => ["Light", "Dark"];
+
+    /// <summary>
+    /// The name under the dial stays inside the panel however long a vendor makes it.
+    /// </summary>
+    /// <param name="name">The theme variant to render under.</param>
+    /// <remarks>
+    /// The headline is "&lt;window&gt; (&lt;provider&gt;)", and the window's name comes
+    /// straight out of a vendor's rate-limit payload - <c>limit_name</c>, falling back to
+    /// <c>limit_id</c>. The real one measured on this machine,
+    /// "gpt-5-codex-high priority 5 hour (Codex)", already spans 273 of the 288 the section
+    /// has to give. It was centred with no wrapping and no trimming, so a longer name ran out
+    /// of both sides of a panel that does not clip. It wraps rather than trims, for the same
+    /// reason the compact line does: trimming takes the provider off the end, and a window
+    /// named without its provider is a figure nobody can act on.
+    /// </remarks>
+    [AvaloniaTheory]
+    [MemberData(nameof(Variants))]
+    public void TheNameUnderTheDialStaysInsideThePanelHoweverLongTheVendorMakesIt(string name)
+    {
+        var vendor = new ProviderUsage(
+            "codex",
+            ProviderStatus.Active,
+            [
+                Readings.Metric(
+                    "gpt-5-codex-high-priority:300",
+                    "gpt-5-codex-high priority extended reasoning 5 hour",
+                    71d,
+                    TimeSpan.FromHours(5),
+                    Readings.Now.AddHours(2)),
+            ],
+            null,
+            Readings.Now,
+            null);
+
+        using PopupViewModel panel = Panel(new FakeUsageProvider("codex", "Codex", vendor));
+
+        string label = Assert.IsType<HeadlineReadingViewModel>(panel.Headline).SourceLabel;
+
+        Surface.Show(Scoped(panel, name), window =>
+        {
+            TextBlock name = Assert.Single(
+                Surface.Visible<TextBlock>(window),
+                block => string.Equals(block.Text, label, StringComparison.Ordinal));
+
+            // Neither the bounds nor the desired size can see this, and a test resting on
+            // either would be a vacuous one. Avalonia measures and arranges a centred child
+            // at no more than the room it has, so a line too long to fit gets a box that
+            // fits and paints its glyphs out of both sides of it: unwrapped, this label
+            // measured 407.3 wide inside a box of 288, which is sixty device-independent
+            // pixels past each edge of a panel with nothing to clip them. What overflows is
+            // the text, so the text is what has to be measured.
+            Assert.True(
+                name.TextLayout.Width <= name.Bounds.Width + 0.5d,
+                $"\"{label}\" lays out {name.TextLayout.Width:0.#} wide in a box "
+                    + $"{name.Bounds.Width:0.#} wide, so it runs out of both sides of a panel "
+                    + "that does not clip.");
+
+            // And the box is inside the panel, which is what makes the line above a
+            // statement about the panel rather than only about the box.
+            Point? placed = name.TranslatePoint(new Point(0d, 0d), window);
+            Assert.True(placed is not null, "The name under the dial was never arranged.");
+            Assert.True(
+                placed!.Value.X >= 0d && placed.Value.X + name.Bounds.Width <= 320d,
+                $"The name is arranged from {placed.Value.X:0.#} to "
+                    + $"{placed.Value.X + name.Bounds.Width:0.#}, outside the 320 the panel "
+                    + "is wide.");
+        }, width: 320d, height: 1400d);
+    }
+
+    /// <summary>
+    /// Wrapping the name costs the panel no height at the length names actually are.
+    /// </summary>
+    /// <param name="name">The theme variant to render under.</param>
+    /// <remarks>
+    /// The panel's height is already a live concern - 765 device-independent units with
+    /// three providers, against a 1366x768 screen's 728 - so a fix that bought safety at the
+    /// cost of a line under every dial would be a bad trade. Wrapping does not: the longest
+    /// name any vendor has actually shipped here fits the 288 the section has, so it stays on
+    /// one line and the second line arrives only in the case that used to overflow.
+    /// </remarks>
+    [AvaloniaTheory]
+    [MemberData(nameof(Variants))]
+    public void TheNameUnderTheDialStaysOnOneLineAtTheLengthNamesActuallyAre(string name)
+    {
+        var vendor = new ProviderUsage(
+            "codex",
+            ProviderStatus.Active,
+            [
+                // The longest measured on the verification machine: 273 of the 288 on offer.
+                Readings.Metric(
+                    "gpt-5-codex-high-priority:300",
+                    "gpt-5-codex-high priority 5 hour",
+                    71d,
+                    TimeSpan.FromHours(5),
+                    Readings.Now.AddHours(2)),
+            ],
+            null,
+            Readings.Now,
+            null);
+
+        using PopupViewModel panel = Panel(new FakeUsageProvider("codex", "Codex", vendor));
+
+        string label = Assert.IsType<HeadlineReadingViewModel>(panel.Headline).SourceLabel;
+
+        Surface.Show(Scoped(panel, name), window =>
+        {
+            TextBlock heading = Assert.Single(
+                Surface.Visible<TextBlock>(window),
+                block => string.Equals(block.Text, label, StringComparison.Ordinal));
+
+            Assert.Single(heading.TextLayout.TextLines);
+        }, width: 320d, height: 1400d);
+    }
+
+    /// <summary>The panel under one theme variant, so a test can assert in both.</summary>
+    /// <param name="panel">The panel to show.</param>
+    /// <param name="variant">"Light" or "Dark".</param>
+    private static Control Scoped(PopupViewModel panel, string variant) =>
+        new ThemeVariantScope
+        {
+            RequestedThemeVariant = string.Equals(variant, "Dark", StringComparison.Ordinal)
+                ? ThemeVariant.Dark
+                : ThemeVariant.Light,
+            Child = new PopupView { DataContext = panel },
+        };
+
+    /// <summary>
+    /// The composition root drives the countdowns, and only while a window is on screen.
+    /// </summary>
+    /// <remarks>
+    /// The view models above cannot tell whether anybody calls them, and a tick nobody runs
+    /// is the whole defect wearing a green suite. The timing authority is the composition
+    /// root, which is the one place that already knows whether a window is showing, and the
+    /// rule it has to keep is the one the idle budget depends on: nothing ticks while nothing
+    /// is on screen. Read from source, in the spirit of the other rules no behavioural test
+    /// in this project can reach.
+    /// </remarks>
+    [Fact]
+    public void TheCompositionRootTicksTheCountdownsOnlyWhileAWindowIsOnScreen()
+    {
+        string runtime = File.ReadAllText(RuntimeSource());
+
+        Assert.Contains("RefreshCountdowns()", runtime, StringComparison.Ordinal);
+
+        // Driven from the visibility change rather than from a timer of its own that starts
+        // at launch.
+        Assert.Contains("WatchCountdowns(onScreen)", runtime, StringComparison.Ordinal);
+
+        int watcher = runtime.IndexOf("private void WatchCountdowns(", StringComparison.Ordinal);
+        Assert.True(watcher > 0, "AltimRuntime no longer has a countdown watcher.");
+
+        // The first thing it does with "not on screen" is stop.
+        int stop = runtime.IndexOf("_countdowns?.Stop();", watcher, StringComparison.Ordinal);
+        int start = runtime.IndexOf(".Start();", watcher, StringComparison.Ordinal);
+        Assert.True(
+            stop > 0 && start > stop,
+            "The countdown tick must be stopped when no window is on screen.");
+    }
+
+    /// <summary>The composition root's own source file.</summary>
+    /// <remarks>
+    /// Walks up from the test binary rather than off the runner's working directory, which
+    /// is not the repository and would break the moment the suite ran anywhere else.
+    /// </remarks>
+    private static string RuntimeSource()
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            string candidate = System.IO.Path.Combine(
+                directory.FullName, "src", "Altim.App", "AltimRuntime.cs");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        Assert.Fail("Could not find src/Altim.App/AltimRuntime.cs above " + AppContext.BaseDirectory);
+        return string.Empty;
     }
 
     /// <summary>A panel with no provider at all says so.</summary>

@@ -425,6 +425,49 @@ public sealed class UsageMapViewModelTests
     }
 
     /// <summary>
+    /// A read that answers nothing takes down the year already on screen.
+    /// </summary>
+    /// <remarks>
+    /// The silent case was only ever tested on a first load, where there is nothing drawn to
+    /// leave behind. The map is loaded again on a range change, after the history is cleared
+    /// and every time the page is navigated back to, and a null result used to return early
+    /// and leave the previous picture standing: a year of squares nobody could read the store
+    /// for, with nothing on the page saying so. That is the product showing usage it can no
+    /// longer substantiate, which is the rule the whole of it is built on, and it is the same
+    /// rule that drops a provider's metric rows when its reading fails.
+    /// </remarks>
+    [Fact]
+    public async Task AFailedReloadTakesDownTheYearItCanNoLongerSubstantiate()
+    {
+        var history = new FakeHistoryService();
+        history.AddDays(Day(ClaudeId, Today), Day(CodexId, Today));
+
+        using ProviderViewModel claude = Provider(ClaudeId, ClaudeName);
+        using ProviderViewModel codex = Provider(CodexId, CodexName);
+        UsageMapViewModel map = Map(history, claude, codex);
+
+        await map.LoadAsync(Ct);
+
+        Assert.NotNull(map.Rows);
+        Assert.NotNull(map.CombinedRow);
+        Assert.NotNull(map.Scale);
+        Assert.True(CellFor(map.Rows![0], Today).IsKnown);
+
+        // Whatever took the store away - a clear, a reinstall, a locked file - the next read
+        // does not answer for one single provider.
+        history.Failure = new IOException("locked");
+
+        await map.LoadAsync(Ct);
+
+        Assert.Null(map.Rows);
+        Assert.Null(map.CombinedRow);
+
+        // The scale too: it is the ranking every square was coloured against, and it was
+        // built out of the same year.
+        Assert.Null(map.Scale);
+    }
+
+    /// <summary>
     /// One provider's store failing does not take the map down with it. That provider's year
     /// is unknown, which is true, the other provider's is drawn, and the combined row says
     /// plainly that its figure covers only the one that answered.

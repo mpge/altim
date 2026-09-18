@@ -116,6 +116,22 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Re-measures every countdown the window shows against the clock.
+    /// </summary>
+    /// <remarks>
+    /// The same problem the tray panel has, and worse here: a dashboard is a window somebody
+    /// leaves open. Overview's cards, the provider pages and the rows on them all read their
+    /// reset times off these rows, so ticking the rows is the whole of it.
+    /// </remarks>
+    public void RefreshCountdowns()
+    {
+        foreach (ProviderViewModel provider in _providers)
+        {
+            _ = provider.RefreshCountdowns();
+        }
+    }
+
     /// <summary>Releases every provider row.</summary>
     public void Dispose()
     {

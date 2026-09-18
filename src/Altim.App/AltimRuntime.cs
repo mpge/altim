@@ -63,6 +63,31 @@ internal sealed class AltimRuntime : IAsyncDisposable
     /// </summary>
     private static readonly TimeSpan WalCheckpointIdleWindow = TimeSpan.FromMinutes(2);
 
+    /// <summary>
+    /// How often the reset countdowns on screen are re-measured against the clock.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only while a window is on screen.</b> A reading is announced when its value moves,
+    /// which is what a figure needs and not what a countdown needs: the time left in a
+    /// window runs out whether or not anything is read, so on a quiet machine every "Resets
+    /// in" on the panel stood still. Measured on the running application, the panel held
+    /// "Resets in 2h 59m" for eight and a half minutes while the true figure reached 2h 51m.
+    /// </para>
+    /// <para>
+    /// Fifteen seconds, from the granularity the text is written to: the countdowns read to
+    /// the minute, so a quarter of a minute bounds how far behind one can be without asking
+    /// for a wake per second. It is not the scheduler's tightened interval, which the user
+    /// owns and can set to minutes - how current a clock reads is not a polling preference.
+    /// A tick is one string per metric and a comparison, and the sections are rebuilt only
+    /// when the words actually moved; the panel's own foreground watch already runs sixty
+    /// times as often over the same interval. Nothing runs while nothing is on screen, which
+    /// is the state the process is in almost all of the time and the one the idle budget is
+    /// measured in.
+    /// </para>
+    /// </remarks>
+    private static readonly TimeSpan CountdownInterval = TimeSpan.FromSeconds(15);
+
     private readonly IClassicDesktopStyleApplicationLifetime _lifetime;
     private readonly StartupReport _report = new();
     private readonly SchedulerNetworkGate _networkGate = new();
@@ -81,6 +106,7 @@ internal sealed class AltimRuntime : IAsyncDisposable
     private TrayController? _tray;
     private PopupHost? _popup;
     private DashboardHost? _dashboard;
+    private DispatcherTimer? _countdowns;
     private IReadOnlyList<IUsageProvider> _providers = [];
 
     /// <summary>
@@ -528,6 +554,11 @@ internal sealed class AltimRuntime : IAsyncDisposable
 
     private void DisposeWindows()
     {
+        // Before the view models it ticks go away: a DispatcherTimer holds its handler for
+        // as long as it is running, and the handler reaches into both of them.
+        _countdowns?.Stop();
+        _countdowns = null;
+
         if (_popup is not null)
         {
             _popup.Opened -= OnWindowVisibilityChanged;
@@ -1036,6 +1067,40 @@ internal sealed class AltimRuntime : IAsyncDisposable
         bool onScreen = IsAnyWindowOpen();
         _windowOnScreen = onScreen;
         _schedulers.Current?.SetUiVisible(onScreen);
+        WatchCountdowns(onScreen);
+    }
+
+    /// <summary>
+    /// Runs the countdown tick while something is on screen and not otherwise.
+    /// </summary>
+    /// <param name="onScreen">Whether either window is showing.</param>
+    /// <remarks>
+    /// The first tick is immediate rather than an interval away. The panel is built once and
+    /// hidden rather than closed, so what it is carrying when it opens was measured whenever
+    /// the last reading landed - which on a quiet machine can be hours ago. Opening it is
+    /// exactly the moment the figures are read.
+    /// </remarks>
+    private void WatchCountdowns(bool onScreen)
+    {
+        if (!onScreen)
+        {
+            _countdowns?.Stop();
+            return;
+        }
+
+        TickCountdowns();
+
+        _countdowns ??= new DispatcherTimer(
+            CountdownInterval, DispatcherPriority.Background, (_, _) => TickCountdowns());
+
+        _countdowns.Start();
+    }
+
+    /// <summary>Re-measures the reset countdowns on whichever surfaces are up.</summary>
+    private void TickCountdowns()
+    {
+        _popup?.ViewModel.RefreshCountdowns();
+        _dashboard?.ViewModel?.RefreshCountdowns();
     }
 
     /// <summary>

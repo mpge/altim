@@ -87,8 +87,19 @@
                    Text="{Binding Headline.PercentText}" />
       </Panel>
 
+      <!-- The name under the figure wraps, for the reason the line below the provider rows
+           does. It is "<window> (<provider>)", and one vendor's window name comes straight
+           out of its rate-limit payload: "gpt-5-codex-high priority 5 hour (Codex)" already
+           spans 273 of the 288 this section has to give, and the next name that vendor ships
+           can be any length at all. Centred and unwrapped it would have run out of both
+           sides of a panel that does not clip. It wraps rather than trims because trimming
+           takes the provider off the end, and a window named without its provider is a
+           figure nobody can act on. It costs a second line only in the case that would
+           otherwise have overflowed, so the panel's height is where it was. -->
       <StackPanel Spacing="{DynamicResource AltimSpace2}">
         <TextBlock HorizontalAlignment="Center"
+                   TextAlignment="Center"
+                   TextWrapping="Wrap"
                    Theme="{DynamicResource AltimLeadText}"
                    Classes.warn="{Binding Headline.IsAboveThreshold}"
                    Text="{Binding Headline.SourceLabel}" />

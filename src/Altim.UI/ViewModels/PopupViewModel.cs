@@ -176,6 +176,44 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
         Rebuild();
     }
 
+    /// <summary>
+    /// Re-measures every countdown on the panel against the clock.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Called when the panel is shown and while it stays shown, and not otherwise. The
+    /// figures on the panel come from readings, and a reading is announced only when its
+    /// value changed; the time left in a window is the one thing here that moves on its own,
+    /// so it is the one thing that has to be asked for rather than waited on. Watched on the
+    /// running application, the panel held "Resets in 2h 59m" for eight and a half minutes
+    /// against a clock that had taken it to 2h 51m.
+    /// </para>
+    /// <para>
+    /// Every row is re-measured; the sections are rebuilt only when one of them has
+    /// something new to say. The panel is rebuilt from scratch on every reading anyway, so
+    /// the rebuild is the cheap part - what would not be acceptable is doing it four times a
+    /// minute for a set of words that have not changed.
+    /// </para>
+    /// </remarks>
+    public void RefreshCountdowns()
+    {
+        bool moved = false;
+        foreach (ProviderViewModel provider in Providers)
+        {
+            moved |= provider.RefreshCountdowns();
+        }
+
+        if (!moved)
+        {
+            return;
+        }
+
+        // The face carries the head window's reset caption in each ring's tip, and the
+        // resets section is built out of the rows' own countdowns, so both follow.
+        RebuildHeadline();
+        RebuildResets();
+    }
+
     /// <summary>Applies new thresholds to every row.</summary>
     /// <param name="settings">The settings the meters tick against.</param>
     public void ApplySettings(AltimSettings settings)

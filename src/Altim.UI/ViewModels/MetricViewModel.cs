@@ -11,13 +11,31 @@ namespace Altim.UI.ViewModels;
 /// One metric row: a label, a figure, a meter and an optional caption.
 /// </summary>
 /// <remarks>
-/// A row is a snapshot. Its owner rebuilds the collection on every reading rather than mutating
-/// rows in place, which is why nothing here is settable. <see cref="Value"/> stays
-/// <see langword="null"/> when the provider does not report a percentage, so the meter renders
-/// its unavailable outline instead of an empty track that would read as a zero.
+/// <para>
+/// A row is a snapshot of one reading. Its owner rebuilds the collection on every reading
+/// rather than mutating rows in place, which is why nothing the provider reported is
+/// settable. <see cref="Value"/> stays <see langword="null"/> when the provider does not
+/// report a percentage, so the meter renders its unavailable outline instead of an empty
+/// track that would read as a zero.
+/// </para>
+/// <para>
+/// <b>The two countdowns are the exception, because they are not part of the reading.</b>
+/// <see cref="RemainingText"/> and <see cref="ResetText"/> are the reported reset instant
+/// measured against the clock, so they go out of date while the reading itself does not
+/// change at all - and a provider announces a reading only when its value moved, which on a
+/// quiet machine is never. Computed once in the constructor, they left the tray panel
+/// reading "Resets in 2h 14m" for eight and a half minutes on the verification machine, with
+/// the true figure at 2h 51m by the end of it. <see cref="RefreshCountdown"/> recomputes them
+/// against the clock and says whether the words actually moved, so a surface can keep them
+/// current without throwing its rows away and without writing when nothing has changed.
+/// </para>
 /// </remarks>
 public sealed class MetricViewModel : ObservableObject
 {
+    private readonly TimeProvider _timeProvider;
+    private string? _remainingText;
+    private string? _resetText;
+
     /// <summary>Initializes a row from one reported metric.</summary>
     /// <param name="metric">The metric as the provider reported it.</param>
     /// <param name="settings">Supplies the threshold the meter ticks at.</param>
@@ -33,6 +51,8 @@ public sealed class MetricViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(timeProvider);
 
+        _timeProvider = timeProvider;
+
         Key = metric.Key;
         Window = metric.Window;
         Label = string.IsNullOrWhiteSpace(metric.Label)
@@ -45,8 +65,12 @@ public sealed class MetricViewModel : ObservableObject
         Threshold = ThresholdEvaluator.ThresholdFor(settings, metric.Window);
         IsAboveThreshold = Value is { } value && value >= Threshold;
         ResetsAt = metric.Window?.ResetsAt;
-        RemainingText = UsageFormat.Remaining(metric.Window, timeProvider);
-        ResetText = UsageFormat.ResetsIn(metric.Window, timeProvider);
+
+        // Through the fields: a constructor has no listeners, and raising a change from one
+        // is how a half-built object reaches a handler.
+        _remainingText = UsageFormat.Remaining(metric.Window, timeProvider);
+        _resetText = UsageFormat.ResetsIn(metric.Window, timeProvider);
+
         WindowText = LimitWindowClassifier.Label(metric.Window);
         IsBestEffort = metric.Confidence == MetricConfidence.BestEffort;
     }
@@ -85,12 +109,29 @@ public sealed class MetricViewModel : ObservableObject
     public DateTimeOffset? ResetsAt { get; }
 
     /// <summary>The bare time remaining, such as <c>2h 14m</c>, or null when none is reported.</summary>
-    public string? RemainingText { get; }
+    /// <remarks>Measured against the clock by <see cref="RefreshCountdown"/>, not reported.</remarks>
+    public string? RemainingText
+    {
+        get => _remainingText;
+        private set => SetProperty(ref _remainingText, value);
+    }
 
     /// <summary>The reset caption, or null when no reset instant is reported.</summary>
-    public string? ResetText { get; }
+    /// <remarks>Measured against the clock by <see cref="RefreshCountdown"/>, not reported.</remarks>
+    public string? ResetText
+    {
+        get => _resetText;
+        private set => SetProperty(ref _resetText, value);
+    }
 
-    /// <summary>Whether a reset caption exists.</summary>
+    /// <summary>
+    /// Whether a reset caption exists.
+    /// </summary>
+    /// <remarks>
+    /// Fixed for the life of the row, which is why it raises nothing: both countdowns are
+    /// null exactly when the window reports no reset instant, and the window a row was built
+    /// from never changes. Only the words move.
+    /// </remarks>
     public bool HasReset => ResetText is not null;
 
     /// <summary>The window's own name, such as <c>Session</c>, or null when it has none.</summary>
@@ -98,4 +139,32 @@ public sealed class MetricViewModel : ObservableObject
 
     /// <summary>Whether the provider flagged this number as best effort rather than documented.</summary>
     public bool IsBestEffort { get; }
+
+    /// <summary>
+    /// Re-measures the reported reset instant against the clock.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when either countdown now reads differently, so a caller can
+    /// leave the rest of its surface alone the rest of the time.
+    /// </returns>
+    /// <remarks>
+    /// Nothing the provider reported is touched. The reset instant is the provider's; how
+    /// far away it is, is the clock's, and this is the only part of a row that can go stale
+    /// without a new reading.
+    /// </remarks>
+    public bool RefreshCountdown()
+    {
+        string? remaining = UsageFormat.Remaining(Window, _timeProvider);
+        string? reset = UsageFormat.ResetsIn(Window, _timeProvider);
+
+        if (string.Equals(remaining, RemainingText, StringComparison.Ordinal)
+            && string.Equals(reset, ResetText, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        RemainingText = remaining;
+        ResetText = reset;
+        return true;
+    }
 }
