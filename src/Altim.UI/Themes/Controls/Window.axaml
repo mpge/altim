@@ -22,6 +22,15 @@
   erases the one shadow in the system; and since ClipToBounds is a rectangular clip it never
   rounded off the corners it looked like it was there to round off in the first place.
 
+  The panel scrolls. SizeToContent gives it the height its content wants, and the content is
+  one provider taller than it was for every provider this machine has: measured, 529 DIPs for
+  one, 659 for two, 765 for three. A 1366x768 screen has 728 to give and a 1920x1080 screen at
+  175% has 576, so the panel that fits everywhere does not exist and the window has to have a
+  ceiling. PopupPlacement.MaxWindowHeight is that ceiling and the composition root puts it on
+  Window.MaxHeight; this ScrollViewer is what makes the rest of the panel reachable instead of
+  hanging off the bottom of the screen. Where the panel fits - which is most screens, most of
+  the time - there is no scrollbar and nothing about the window changes.
+
   When the compositor gives the window no transparency the inset would render as whatever is
   behind an unpainted surface, which is black. So TransparencyBackgroundFallback is the panel
   ground rather than Transparent: the room reserved for the shadow paints in the panel's own
@@ -95,12 +104,15 @@
                         BorderThickness="{DynamicResource AltimBorderThickness}"
                         CornerRadius="{DynamicResource AltimCornerRadius12}"
                         BoxShadow="{DynamicResource AltimPopupShadow}">
-                  <ContentPresenter Name="PART_ContentPresenter"
-                                    Content="{TemplateBinding Content}"
-                                    ContentTemplate="{TemplateBinding ContentTemplate}"
-                                    Margin="{TemplateBinding Padding}"
-                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                  <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                                VerticalScrollBarVisibility="Auto">
+                    <ContentPresenter Name="PART_ContentPresenter"
+                                      Content="{TemplateBinding Content}"
+                                      ContentTemplate="{TemplateBinding ContentTemplate}"
+                                      Margin="{TemplateBinding Padding}"
+                                      HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                  </ScrollViewer>
                 </Border>
               </VisualLayerManager>
             </Panel>

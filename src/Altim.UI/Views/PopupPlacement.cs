@@ -42,6 +42,16 @@ namespace Altim.UI.Views;
 /// hold it — is pushed off it, because a panel a few pixels out of place is a smaller defect
 /// than a tray icon that does not answer.
 /// </para>
+/// <para>
+/// <b>The top edge.</b> That push has a floor, and there is a height cap above it. A panel
+/// taller than the working area cannot be placed correctly at all, so the two rules that
+/// give way are ranked rather than left to disagree: the panel's bottom goes first, then the
+/// margin, then the tray icon, and its <em>top</em> never goes. The top is the wordmark, the
+/// settings gear and the head of the dial, and a panel that has lost them has lost the
+/// things that say what it is and how to leave it. <see cref="MaxWindowHeight"/> is the
+/// other half of it: the window is capped to what the working area holds and scrolls inside
+/// that, so a panel this tall does not arrive here in the first place.
+/// </para>
 /// </remarks>
 public static class PopupPlacement
 {
@@ -107,7 +117,34 @@ public static class PopupPlacement
             panelWidth + left + Scale(inset.Right, scale),
             panelHeight + top + Scale(inset.Bottom, scale));
 
-        return new PopupPlacementResult(Clear(window, target, facing), inset);
+        return new PopupPlacementResult(Clear(window, target, facing, workingArea, left, top), inset);
+    }
+
+    /// <summary>
+    /// The tallest the popup window may be on a screen, in device-independent units, so that
+    /// the panel inside it fits the working area with the margin DESIGN.md asks for.
+    /// </summary>
+    /// <remarks>
+    /// The panel grows with the number of providers — 529 DIPs for one, 659 for two, 765 for
+    /// three, measured — and small screens at high scalings leave less room than that. The
+    /// window therefore carries a maximum and scrolls what does not fit, rather than opening
+    /// taller than the screen and losing whichever end the arithmetic gives up. Without it
+    /// the panel is placed correctly and is still unreadable, because the part hanging off
+    /// the bottom can be neither seen nor reached.
+    /// </remarks>
+    /// <param name="workingArea">The target screen's working area in physical pixels.</param>
+    /// <param name="scaling">The target screen's scaling factor.</param>
+    /// <param name="shadowInset">
+    /// The inset the window is carrying, in DIPs, which is the placement's trimmed one rather
+    /// than the design's: the cap is on the window and the margin is on the panel inside it.
+    /// </param>
+    /// <returns>The window's maximum height in device-independent units.</returns>
+    public static double MaxWindowHeight(PixelRect workingArea, double scaling, Thickness shadowInset)
+    {
+        double scale = scaling > 0 ? scaling : 1d;
+        double panel = (workingArea.Height / scale) - (2d * EdgeMargin);
+
+        return Math.Max(1d, panel) + shadowInset.Top + shadowInset.Bottom;
     }
 
     /// <summary>
@@ -211,21 +248,44 @@ public static class PopupPlacement
 
     /// <summary>
     /// Pushes the window off the anchor along the anchored axis when the trimmed inset was
-    /// not enough on its own.
+    /// not enough on its own, as far as it can without taking the panel's leading edge off
+    /// the working area.
     /// </summary>
     /// <remarks>
-    /// It is not enough when the clamp above moved the panel: a working area that cannot
-    /// hold the panel with its margins puts the panel's near edge closer to the icon than
-    /// the gap. The push is not clamped back into the working area, because the clamp is
-    /// what caused the overlap and re-applying it would only restore it. A panel a few
-    /// pixels outside its margin is visible; a tray icon that ignores half its clicks is
-    /// not, which is what makes it the worse of the two.
+    /// <para>
+    /// It is not enough when the clamp above moved the panel, and the clamp only moves it
+    /// when the working area cannot hold the panel with its margins: the panel's near edge
+    /// then sits closer to the icon than the gap.
+    /// </para>
+    /// <para>
+    /// The push is bounded, and the bound is the working area's leading edge. It shipped
+    /// unbounded, on the reasoning that the clamp was what caused the overlap so re-applying
+    /// it would only restore it. That is true of the clamp and false of the panel: the clamp
+    /// gives up the panel's <em>bottom</em>, and an unbounded push then moved the whole
+    /// window by the whole overlap and took the panel's <em>top</em> with it. Measured on a
+    /// 1920x1080 display at 150% with three providers, the panel opened 99 DIPs above the
+    /// working area, which is the wordmark, the settings gear and the head of the dial gone
+    /// with it — the second rule silently undoing the first. A tray icon that ignores half
+    /// its clicks is a bad defect; a panel with no header, whose top can be neither seen nor
+    /// scrolled to, is a worse one. So on a panel too tall to place at all, the icon is what
+    /// gets covered, and <see cref="MaxWindowHeight"/> is what keeps that panel from
+    /// arriving.
+    /// </para>
     /// </remarks>
     /// <param name="window">The window rectangle.</param>
     /// <param name="anchor">The anchor rectangle.</param>
     /// <param name="facing">The panel edge that faces the anchor.</param>
-    /// <returns>The window rectangle, clear of the anchor.</returns>
-    private static PixelRect Clear(PixelRect window, PixelRect anchor, PopupAnchorEdge facing)
+    /// <param name="workingArea">The working area the panel's leading edge must stay inside.</param>
+    /// <param name="left">The inset between the window's left edge and the panel's, in pixels.</param>
+    /// <param name="top">The inset between the window's top edge and the panel's, in pixels.</param>
+    /// <returns>The window rectangle, clear of the anchor as far as it can be.</returns>
+    private static PixelRect Clear(
+        PixelRect window,
+        PixelRect anchor,
+        PopupAnchorEdge facing,
+        PixelRect workingArea,
+        int left,
+        int top)
     {
         if (facing is PopupAnchorEdge.None || !Overlaps(window, anchor))
         {
@@ -239,6 +299,12 @@ public static class PopupPlacement
             PopupAnchorEdge.Top => (0, anchor.Bottom - window.Y),
             _ => (0, anchor.Y - window.Bottom),
         };
+
+        // Pushes towards the working area's far edge are free: they give up the panel's
+        // bottom or its right, which is what an over-tall panel is already giving up. A push
+        // the other way stops at the leading edge, whatever is left of the overlap.
+        dx = Math.Max(dx, workingArea.X - (window.X + left));
+        dy = Math.Max(dy, workingArea.Y - (window.Y + top));
 
         return new PixelRect(window.X + dx, window.Y + dy, window.Width, window.Height);
     }
@@ -260,8 +326,9 @@ public static class PopupPlacement
 
     /// <summary>
     /// Clamps, preferring the lower bound when the panel is larger than the space. A panel
-    /// taller than the working area is clipped at the bottom rather than at the top, because
-    /// the top is where the provider names are.
+    /// taller than the working area loses its bottom rather than its top, because the top is
+    /// the header and the head of the dial and the bottom is the last thing the panel says.
+    /// <see cref="Clear"/> is bounded so that it cannot take back what this decides.
     /// </summary>
     private static int Clamp(int value, int min, int max) => max < min ? min : Math.Clamp(value, min, max);
 }

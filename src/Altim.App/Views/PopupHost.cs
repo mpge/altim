@@ -318,8 +318,36 @@ internal sealed class PopupHost : IDisposable
             _lastAnchor, _lastCursor, workingArea, scaling, panel, design);
 
         Reserve(placed.ShadowInset, panel.Width);
+        Limit(workingArea, scaling, placed.ShadowInset);
         _window.Position = placed.Position;
     }
+
+    /// <summary>
+    /// Caps the window at what the screen can hold, so the panel scrolls rather than hanging
+    /// off an edge.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The panel is as tall as its content and its content grows with the number of providers
+    /// — 529 device-independent units for one, 659 for two, 765 for three — while a 1366x768
+    /// screen has 728 to give and a 1920x1080 one at 175% has 576. Placement can only choose
+    /// which end of a panel that does not fit is lost, and this is what stops it having to:
+    /// the window takes a maximum height and the panel's own <c>ScrollViewer</c> makes the
+    /// rest reachable.
+    /// </para>
+    /// <para>
+    /// It is set from the trimmed inset rather than the design's, because that is the inset
+    /// the window is about to carry, and after the placement rather than before it, because
+    /// the trim is not known until the placement has picked an edge. The open runs this twice
+    /// with a layout pass between — the first pass is what makes the second one's measured
+    /// height one that already fits.
+    /// </para>
+    /// </remarks>
+    /// <param name="workingArea">The target screen's working area in physical pixels.</param>
+    /// <param name="scaling">The target screen's scaling.</param>
+    /// <param name="inset">The inset the placement computed with.</param>
+    private void Limit(PixelRect workingArea, double scaling, Thickness inset) =>
+        _window.MaxHeight = PopupPlacement.MaxWindowHeight(workingArea, scaling, inset);
 
     /// <summary>
     /// Gives the window the transparent room the placement assumed it had.
