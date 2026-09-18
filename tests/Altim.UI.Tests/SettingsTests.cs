@@ -496,7 +496,14 @@ public sealed class SettingsTests
         var statusLine = new FakeStatusLineService { State = StatusLineInstallState.NotInstalled };
         SettingsViewModel page = Page(store, statusLine);
 
+        // Nothing is saved here by hand: correcting the flag is the load's own doing, and the
+        // write it queues is not awaited by anything. Every other test on this switch awaits
+        // SaveAsync, so it never had to wait; this one must, or it reads Saved before the
+        // write lands. It passed on a fast machine and failed on a CI runner.
+        store.ExpectWrite();
+
         await page.LoadAsync(TestContext.Current.CancellationToken);
+        await store.Written.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
         Assert.False(page.ClaudeStatusLineEnabled);
         Assert.Empty(statusLine.Changes);
