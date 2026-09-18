@@ -5,6 +5,7 @@ using Altim.Core.Monitoring;
 using Altim.Core.Settings;
 using Altim.Providers.Claude;
 using Altim.Providers.Codex;
+using Altim.Providers.Gemini;
 using Altim.Storage;
 using Altim.UI.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -119,9 +120,10 @@ internal static class ServiceRegistration
         _ = services.AddSingleton(networkPolicy);
         _ = services.AddSingleton<INetworkPolicy>(networkPolicy);
 
-        // Providers. Both are handed the forwarding network gate, which is what rate limits
-        // Claude's headless usage summary and Codex's app-server call; nothing else in the
-        // process supplies one, so without it those calls would run on every refresh.
+        // Providers. Claude and Codex are handed the forwarding network gate, which is what
+        // rate limits Claude's headless usage summary and Codex's app-server call; nothing
+        // else in the process supplies one, so without it those calls would run on every
+        // refresh.
         _ = services.AddSingleton<IUsageProvider>(_ => new ClaudeUsageProvider(
             options: ClaudeOptions.Default,
             processMonitor: platform.Processes,
@@ -135,6 +137,15 @@ internal static class ServiceRegistration
             timeProvider: TimeProvider.System,
             networkGate: networkGate,
             networkPolicy: networkPolicy));
+
+        // Gemini takes neither, and that is the whole point of it: it starts no process and
+        // makes no network call, so there is nothing for a gate to rate limit and nothing for
+        // the network permission to forbid. Handing it either would imply it reaches the
+        // vendor, which it does not.
+        _ = services.AddSingleton<IUsageProvider>(_ => new GeminiUsageProvider(
+            options: GeminiOptions.Default,
+            processMonitor: platform.Processes,
+            timeProvider: TimeProvider.System));
 
         // The scheduler. Its cadences are fixed at construction, so a later change to the
         // refresh interval replaces the instance; see AltimRuntime.RebuildSchedulerAsync,

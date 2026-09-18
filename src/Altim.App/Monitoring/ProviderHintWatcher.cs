@@ -3,6 +3,7 @@ using Altim.Core.Monitoring;
 using Altim.Providers;
 using Altim.Providers.Claude;
 using Altim.Providers.Codex;
+using Altim.Providers.Gemini;
 
 namespace Altim.App.Monitoring;
 
@@ -89,6 +90,17 @@ internal sealed class ProviderHintWatcher : IDisposable
 
             // The rollout files, which carry the rate-limit snapshots.
             watcher.Arm(ProviderIds.Codex, CodexPaths.SessionsDirectory(home), "rollout-*.jsonl", recursive: true);
+        }
+
+        if (providerIds.Contains(ProviderIds.Gemini) && GeminiPaths.ResolveHome() is { } geminiHome)
+        {
+            // The session transcripts, which is the whole of what Altim reads from Gemini.
+            // The watcher is armed on the per-project working directory and never on the
+            // Gemini home itself: the home is where the credential files live, and nothing
+            // in Altim has any business holding a handle to it. A hint carries no path, so
+            // an event from a file under there that is not a transcript costs one debounced
+            // refresh and reveals nothing.
+            watcher.Arm(ProviderIds.Gemini, GeminiPaths.TempDirectory(geminiHome), "*.json*", recursive: true);
         }
 
         AltimLog.Write(

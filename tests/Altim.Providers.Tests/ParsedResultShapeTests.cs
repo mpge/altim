@@ -8,6 +8,7 @@ using Altim.Providers.Codex.AppServer;
 using Altim.Providers.Codex.Limits;
 using Altim.Providers.Codex.Rollout;
 using Altim.Providers.Codex.State;
+using Altim.Providers.Gemini.Sessions;
 using Xunit;
 
 namespace Altim.Providers.Tests;
@@ -55,6 +56,10 @@ public sealed class ParsedResultShapeTests
         typeof(ClaudeTokenHistory),
         typeof(ClaudeAgentEntry),
         typeof(ClaudeUsageSummary),
+        typeof(GeminiSessionLine),
+        typeof(GeminiTokenBucket),
+        typeof(GeminiSessionRecord),
+        typeof(GeminiTokenHistory),
     ];
 
     /// <summary>

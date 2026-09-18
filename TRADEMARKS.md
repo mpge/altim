@@ -1,12 +1,13 @@
 # Trademarks
 
 Altim is an independent open-source project. It is not affiliated with, sponsored by, or endorsed
-by Anthropic or OpenAI, and neither company has reviewed, approved, or supported it.
+by Anthropic, OpenAI or Google, and none of those companies has reviewed, approved, or supported it.
 
 ## Whose marks these are
 
 - **Claude**, **Claude Code** and the Anthropic mark are trademarks of Anthropic PBC.
 - **OpenAI**, **Codex**, **ChatGPT** and the OpenAI mark are trademarks of OpenAI, Inc.
+- **Google**, **Gemini**, **Gemini CLI** and **Gemini Code Assist** are trademarks of Google LLC.
 
 All other trademarks are the property of their respective owners.
 
@@ -15,6 +16,11 @@ All other trademarks are the property of their respective owners.
 Altim monitors usage of those products, so it has to name them and point at them. The vendors' names
 and marks appear for one purpose: to identify which of the user's own tools a number belongs to.
 That is nominative use, and Altim keeps inside its limits.
+
+**Google's marks are used by name only.** Altim reproduces no Google or Gemini logo or mark
+anywhere; the Gemini provider wears the same neutral circle any unrecognised provider does. What
+appears is the product name, in a list of the user's own tools, which is the least of it that
+identification needs.
 
 - Each mark identifies that vendor's product and nothing else. Neither ever stands for Altim, and
   Altim's own mark is the only one used as Altim's identity.
@@ -41,7 +47,7 @@ further you get from identifying their products the less likely it is to.
 The same applies to Altim's own name and mark: the MIT licence covers the code, not the branding. A
 fork is welcome, under its own name.
 
-## If you are Anthropic or OpenAI
+## If you are Anthropic, OpenAI or Google
 
 If you believe any use here oversteps, open an issue or contact the maintainer through
 [matthewpg.com](https://matthewpg.com) and it will be changed or removed. The marks are drawn as

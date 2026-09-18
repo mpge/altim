@@ -28,6 +28,7 @@ Altim.Core                 models, interfaces, aggregation, reset math, threshol
 Altim.Providers           provider contracts + shared JSONL/process helpers
 Altim.Providers.Claude     Claude Code integration
 Altim.Providers.Codex      OpenAI Codex integration
+Altim.Providers.Gemini     Google Gemini CLI integration
 Altim.Storage              SQLite: schema, migrations, history, settings
 Altim.UI                   Avalonia views, view models, design system, custom controls, popup geometry
 Altim.Platform.Windows     Shell_NotifyIcon host, AppNotification, Run key, power events
@@ -43,6 +44,13 @@ on nothing but the BCL, which is what keeps the business logic testable.
 
 Adding a provider means adding one project that implements `IUsageProvider` and registering it. No
 UI change: views render whatever metrics a provider reports.
+
+**Gemini CLI is the case that proves it.** It reports no percentage, no window and no reset instant,
+because nothing it writes to disk carries one, so its metric list is permanently empty and the
+interface renders "not reported by this provider" from the same code path it already had. It still
+reports token history, per-day totals and sessions. A provider that can see less is a provider with
+fewer metrics, not a provider with zeroes and not a special case in a view. `PROVIDERS.md` traces
+what each of the three can and cannot see.
 
 ## The process has two entry points
 
@@ -90,7 +98,7 @@ These signatures are fixed; implementations are written against them.
 ```csharp
 public interface IUsageProvider
 {
-    string Id { get; }                       // "claude", "codex"
+    string Id { get; }                       // "claude", "codex", "gemini"
     string DisplayName { get; }
     ProviderStatus Status { get; }
     ValueTask<ProviderUsage> GetUsageAsync(CancellationToken ct);
@@ -766,7 +774,10 @@ on 2-core hosts.
 2. **Provider formats are internal and disclaimed by their vendors.** Every field is optional at the
    parse boundary; a shape change degrades one metric to unavailable instead of breaking the app.
 3. **The live Codex quota call requires the vendor CLI and the network**, so it is optional, rate
-   limited, and falls back to local files.
+   limited, and falls back to local files. The Gemini reader makes no such call and has no gate: the
+   only source of a Gemini quota figure is an undocumented internal endpoint reachable only with the
+   user's own OAuth credentials, so Altim reports no Gemini quota at all rather than opening a
+   credential file to get one.
 4. **Native AOT for Avalonia is officially supported but rarely shipped.** It is a Release-only
    Windows setting first, behind a verification step, and can be turned off without code changes.
 5. **Status line integration writes to a user configuration file.** It is opt-in behind a settings

@@ -1,6 +1,7 @@
 using Altim.Providers;
 using Altim.Providers.Claude;
 using Altim.Providers.Codex;
+using Altim.Providers.Gemini;
 using Xunit;
 
 namespace Altim.Providers.Tests;
@@ -16,6 +17,7 @@ public sealed class ProviderIdentityTests
     {
         Assert.Equal("claude", ClaudeProviderInfo.Id);
         Assert.Equal("codex", CodexProviderInfo.Id);
+        Assert.Equal("gemini", GeminiProviderInfo.Id);
     }
 
     [Fact]
@@ -23,13 +25,18 @@ public sealed class ProviderIdentityTests
     {
         Assert.Equal(ProviderIds.Claude, ClaudeProviderInfo.Id);
         Assert.Equal(ProviderIds.Codex, CodexProviderInfo.Id);
+        Assert.Equal(ProviderIds.Gemini, GeminiProviderInfo.Id);
     }
 
     [Fact]
     public void IdsAreDistinctAndDisplayNamesAreSet()
     {
-        Assert.NotEqual(ClaudeProviderInfo.Id, CodexProviderInfo.Id);
+        Assert.Equal(3, new HashSet<string>(
+            [ClaudeProviderInfo.Id, CodexProviderInfo.Id, GeminiProviderInfo.Id],
+            StringComparer.Ordinal).Count);
+
         Assert.NotEmpty(ClaudeProviderInfo.DisplayName);
         Assert.NotEmpty(CodexProviderInfo.DisplayName);
+        Assert.NotEmpty(GeminiProviderInfo.DisplayName);
     }
 }

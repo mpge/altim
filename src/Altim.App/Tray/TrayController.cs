@@ -11,6 +11,7 @@ using Altim.Platform.Windows;
 using Altim.Providers;
 using Altim.Providers.Claude;
 using Altim.Providers.Codex;
+using Altim.Providers.Gemini;
 
 namespace Altim.App.Tray;
 
@@ -280,6 +281,7 @@ internal sealed class TrayController : IDisposable
     {
         ProviderIds.Claude => ClaudeProviderInfo.DisplayName,
         ProviderIds.Codex => CodexProviderInfo.DisplayName,
+        ProviderIds.Gemini => GeminiProviderInfo.DisplayName,
         _ => providerId,
     };
 

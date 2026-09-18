@@ -16,4 +16,7 @@ public static class ProviderIds
 
     /// <summary>OpenAI Codex.</summary>
     public const string Codex = "codex";
+
+    /// <summary>Google Gemini CLI.</summary>
+    public const string Gemini = "gemini";
 }

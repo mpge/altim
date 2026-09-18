@@ -75,11 +75,20 @@ split only where a provider gave one.
 |---|---|
 | Claude / Claude Code | in development |
 | OpenAI Codex | in development |
-| Gemini CLI, Cursor, GitHub Copilot | planned |
+| Google Gemini CLI | in development — token history only; see below |
+| Cursor, GitHub Copilot | planned |
 
 Altim never invents numbers. Every metric is traced to a documented local source in
 [PROVIDERS.md](PROVIDERS.md), and anything that cannot be read reliably is shown as
 unavailable rather than estimated.
+
+**Gemini CLI shows no usage meter, on purpose.** It keeps a real remaining-quota figure, with the
+server's own reset time, in the memory of a running `gemini` process and writes it to disk nowhere,
+so there is nothing on your machine for Altim to read. Google publishes the free-tier allowance as
+a number of *requests* per day rather than tokens, and which of 1,000, 1,500 or 2,000 applies to you
+is only recorded in files Altim will not open. Manufacturing a percentage would mean guessing the
+limit and estimating the usage, so Altim reports neither and says so. What it does report is real:
+tokens per turn, per session, per model and per day, taken from Gemini CLI's own session files.
 
 ## Platforms
 
@@ -252,7 +261,7 @@ dotnet run --project src/Altim.App
 |---|---|
 | `src/Altim.Core` | models, interfaces, usage math, reset arithmetic, the monitoring scheduler, notification thresholds. Depends on nothing but the BCL |
 | `src/Altim.Providers` | shared provider plumbing: tail readers, incremental scanning, process detection, CLI invocation |
-| `src/Altim.Providers.Claude`, `.Codex` | one project per provider |
+| `src/Altim.Providers.Claude`, `.Codex`, `.Gemini` | one project per provider |
 | `src/Altim.Storage` | SQLite: migrations, usage history, retention, settings |
 | `src/Altim.UI` | Avalonia views, view models, design system, custom controls |
 | `src/Altim.Platform.Windows`, `.MacOS`, `.Linux` | native tray, notifications, autostart, power events |
@@ -272,6 +281,9 @@ keeps the logic testable without a UI.
 3. Document every field's source in [PROVIDERS.md](PROVIDERS.md), graded documented, best-effort or
    unavailable, and only parse numeric and timestamp fields out of provider files.
 4. Register it in the composition root.
+5. Implement `IUsageHistorySource` only if the provider genuinely reports whole days. A provider
+   that cannot reach into the past leaves those days unknown, which the map draws differently from
+   a day that used nothing.
 
 No UI work is required: views render whatever metrics a provider reports.
 
@@ -313,9 +325,10 @@ MIT — see [LICENSE](LICENSE).
 
 ## Trademarks
 
-Altim is an independent open-source project, not affiliated with or endorsed by Anthropic or
-OpenAI. Claude and Claude Code are trademarks of Anthropic; OpenAI and Codex are trademarks of
-OpenAI. Their marks appear here only to identify which of your own tools a figure belongs to.
+Altim is an independent open-source project, not affiliated with or endorsed by Anthropic, OpenAI
+or Google. Claude and Claude Code are trademarks of Anthropic; OpenAI and Codex are trademarks of
+OpenAI; Google and Gemini are trademarks of Google LLC. Their names and marks appear here only to
+identify which of your own tools a figure belongs to.
 
 The MIT licence covers Altim's code and grants no rights in anyone's trademarks. See
 [TRADEMARKS](TRADEMARKS.md) before reusing the provider marks in a fork.

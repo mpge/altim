@@ -48,6 +48,15 @@ the samples themselves, which Altim was already storing.
 Altim does not store project names, prompts, commands or file paths in that database. Agent
 activity is shown live in the interface and is not written to history.
 
+One provider's store is worth naming specifically. Gemini CLI keeps its session transcripts in the
+same directory tree as its Google sign-in credentials, and each transcript's first line holds the
+absolute paths of the folders that session was working in. Altim's reader never lists that
+directory: it starts three levels below it, at the `chats` folder the transcripts are actually in,
+and it reads token counts and timestamps out of them and nothing else. Your credential files are
+never opened, and neither the folder paths nor the project name reaches Altim's database, its logs
+or its screen. A test holds every one of those files open and unreadable and checks that Altim still
+works, which it only can if it never tried to read them.
+
 You can delete everything from **Settings → Privacy → Clear usage history**, or by deleting the
 database file. Settings live alongside it.
 
@@ -78,6 +87,9 @@ file is Altim's own to delete.
 ## Network activity
 
 Altim itself makes no network requests for usage data.
+
+The Gemini CLI integration makes none at all, of any kind: it reads files and looks for a running
+process, and that is the whole of it.
 
 One provider integration is an exception worth stating plainly: live Codex quota comes from asking
 the installed Codex CLI, over local inter-process communication, and that CLI then contacts OpenAI

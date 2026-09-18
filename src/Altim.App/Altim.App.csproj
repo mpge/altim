@@ -129,6 +129,7 @@
     <ProjectReference Include="..\Altim.Providers\Altim.Providers.csproj" />
     <ProjectReference Include="..\Altim.Providers.Claude\Altim.Providers.Claude.csproj" />
     <ProjectReference Include="..\Altim.Providers.Codex\Altim.Providers.Codex.csproj" />
+    <ProjectReference Include="..\Altim.Providers.Gemini\Altim.Providers.Gemini.csproj" />
     <!-- All three platform projects are referenced unconditionally; each resolves
          to the closest face its own target frameworks offer, so this builds on
          every OS. The composition root picks one at run time with

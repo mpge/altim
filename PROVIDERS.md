@@ -11,8 +11,11 @@ Each source is graded:
 - **Unavailable** — cannot be obtained locally today. Modelled in the provider contract so it can
   light up later without UI changes.
 
-Verification date: **2026-09-15**. Findings below were executed against a live installation on
-Windows 11 unless marked unverified.
+Verification date: **2026-09-15** for Codex and Claude Code, **2026-09-18** for Gemini CLI.
+Codex and Claude Code findings were executed against live installations on Windows 11 unless marked
+unverified. **Gemini CLI is not installed on the verification machine**, so its section was
+established by reading the vendor's own open source at a named tag and its published documentation,
+and says so at the top rather than borrowing the others' standing.
 
 ---
 
@@ -356,6 +359,241 @@ would ingest other people's secrets. Altim records an executable name and a bool
 
 ---
 
+## Google Gemini CLI
+
+**Verified against upstream source at tag `v0.60.0`** (npm `@google/gemini-cli`, published
+2026-09-15), read directly for every file named below. **Not verified against a live installation**,
+because `gemini` is not on this machine's path, so the findings describe what current Gemini CLI
+writes rather than what was observed being written. They are graded best-effort accordingly.
+
+What *was* established here is the layout, by listing directories and reading file timestamps and
+nothing else: `~/.gemini/tmp` holds two project directories, one of which has a `chats` directory,
+holding a single session file with a `.json` extension last written **2026-01-15**. That store was
+written by `v0.24.0` (published 2026-01-14), and `v0.60.0` is **73 stable releases later**, so it
+predates token counts in session files entirely. Altim reads it, finds no usage in it, and reports
+none. That is the correct answer, and it is the path this machine exercises.
+
+### Sources
+
+| Metric | Source | Grade |
+|---|---|---|
+| Per-turn tokens: prompt, output, cached, thoughts, tool, total | `<home>/tmp/<project>/chats/**/*.jsonl`, lines where `type == "gemini"` → `tokens.{input,output,cached,thoughts,tool,total}` | Best-effort |
+| Per-day token totals, for the usage map | the same lines, bucketed by each message's own `timestamp` | Best-effort |
+| Per-session totals, session id, start instant | the same files: the first line's `sessionId` and `startTime`, and the turns beneath it | Best-effort |
+| Subagent tokens | `<home>/tmp/<project>/chats/<parent session id>/<session id>.jsonl` | Best-effort |
+| Model id | `model` on a `type == "gemini"` line | Best-effort |
+| Last activity | the newest `timestamp` any line carried | Best-effort |
+| Installation present | `gemini` on `PATH`, and `<home>` on disk. No process is started to decide it | Documented |
+| A session running now | process named `gemini` / `gemini.exe`, or a session file written inside the activity window | Best-effort |
+| **Session, daily or weekly usage percentage** | — never written to disk. See below | **Unavailable** |
+| **Window length** | — same | **Unavailable** |
+| **Reset instant** | — the server returns one per model, and the CLI keeps it in memory only | **Unavailable** |
+| **Plan or subscription tier** | — only in `oauth_creds.json` / `google_accounts.json`, which Altim will not open | **Unavailable** |
+| **Which session a running process belongs to** | — would need the process's command line, which Altim never reads | **Unavailable** |
+| **Cache-write tokens** | — Gemini's response usage reports cache *reads* and never cache *writes* | **Unavailable** |
+| **Cost in currency** | — no prices ship locally | **Unavailable** |
+
+There is no `gemini usage` or `gemini quota` subcommand. `/usage` exists and is an alias of
+`/stats`, which is interactive.
+
+### The quota exists, and it is never written down
+
+This is the whole reason Gemini has no meter in Altim, so it is worth stating exactly.
+
+Gemini CLI really does hold a remaining-quota figure, and a good one. `/stats` calls
+`Config.refreshUserQuota()`, which POSTs `retrieveUserQuota` to
+`cloudcode-pa.googleapis.com/v1internal` and gets back `buckets[]` of
+`{modelId, remainingAmount, remainingFraction, resetTime}` — remaining, limit and **the server's own
+reset instant, per model**. That is precisely the shape Altim wants.
+
+It lives in two private fields on the `Config` instance, `modelQuotas` and `lastRetrievedQuota`, and
+goes from there to the terminal through an in-process event. **Nothing writes it to disk.** When the
+`gemini` process exits, the figure is gone. So:
+
+- There is no file for Altim to read, stale or otherwise.
+- `gemini -p "/stats"` does not work as the Claude Code equivalent does. Two independent reasons:
+  the non-interactive UI prints only items carrying a `text` field of type info, warning or error,
+  and the stats item has structured fields and no `text`, so **nothing is printed**; and a slash
+  command that returns no prompt falls through to ordinary prompt handling, so the string `/stats`
+  is then **sent to the model as a prompt and spends a request**. A passive monitor must not spend
+  a user's allowance to find out how much of it is left, which is the same rule that keeps Altim
+  away from `codex exec --json`.
+- `gemini -p "…" --output-format json` does return `stats` with a full per-model token breakdown,
+  and `--output-format stream-json` returns a `result` event with the same. Both require actually
+  running a turn. Same rule, same answer.
+
+### The published allowance is in requests, and it cannot become a percentage
+
+Google does publish a free-tier limit, which makes this the one provider where the temptation to
+compute a meter is real. It has to be refused, twice over.
+
+From the CLI's own `docs/resources/quota-and-pricing.md` at `v0.60.0`, verbatim:
+
+> - 1000 maximum model requests / user / day
+> - Model requests will be made across the Gemini model family as determined by Gemini CLI.
+
+and, in the same file:
+
+> Requests are limited per user per minute and are subject to the availability of the service in
+> times of high demand.
+
+The full table: Gemini Code Assist (Individual) 1,000/day; Google AI Pro 1,500/day; Google AI Ultra
+2,000/day; Gemini API key free tier 250/day; Code Assist Standard 1,500/day, Enterprise 2,000/day;
+Workspace AI Ultra 2,000/day.
+
+Two things make a percentage impossible without inventing something:
+
+1. **The denominator is unknown.** Which of 1,000, 1,500 or 2,000 applies depends on the account's
+   subscription, and the only local record of that is inside `oauth_creds.json` and
+   `google_accounts.json`. Altim does not open credential files, for any provider. `settings.json`
+   says `security.auth.selectedType: "oauth-personal"` and nothing more, which is every one of those
+   three tiers.
+2. **The numerator does not exist.** The limit counts **model requests**, not tokens. A session file
+   records model *turns*, and a turn is not a request. Google's own quota page says so in as many
+   words: "When in agent mode or when using the Gemini CLI, one prompt might result in multiple
+   model requests." Counting `type == "gemini"` lines and calling them requests would be a guess
+   wearing a number's clothes.
+
+Deriving a percentage would therefore mean guessing a denominator and estimating a numerator, which
+is `AGENTS.md` rules 1 and 2 broken in one expression. Altim reports the tokens it can actually see
+and says "not reported by this provider" for the percentage.
+
+Two further reasons not to lean on the published figure even as a label: the repository contradicts
+itself at the same tag (the README says the API-key free tier is 1,000 requests a day, the quota
+document says 250), and the Google page the documentation links to for the individual tier no longer
+carries a row for it at all — `docs.cloud.google.com/gemini/docs/quotas` lists Code Assist Standard
+(1,500/day) and Enterprise (2,000/day) and no individual tier, checked 2026-09-18. The 60 requests
+per minute figure appears in the gemini-cli README and in neither of the other two places.
+
+### What the session files hold
+
+Gemini CLI writes one append-only **JSON Lines** file per session. The first line is the file's
+metadata, and the rest are records:
+
+```jsonc
+{"sessionId":"…","projectHash":"…","startTime":"…","lastUpdated":"…","kind":"main","directories":["…"]}
+{"id":"…","timestamp":"…","type":"user","content":[…]}
+{"id":"…","timestamp":"…","type":"gemini","model":"…","content":[…],"tokens":null}
+{"id":"…","timestamp":"…","type":"gemini","model":"…","content":[…],"tokens":{"input":…,"output":…,"cached":…,"thoughts":…,"tool":…,"total":…}}
+{"$set":{…}}
+{"$rewindTo":"<message id>"}
+```
+
+`tokens` is the API response's own `usageMetadata`, copied field for field:
+`input` is `promptTokenCount`, `output` is `candidatesTokenCount`, `cached` is
+`cachedContentTokenCount`, `thoughts` is `thoughtsTokenCount`, `tool` is
+`toolUsePromptTokenCount`, `total` is `totalTokenCount`. Recording is unconditional — there is no
+setting that turns it off — and its only failure mode is a full disk.
+
+**This is new.** The dormant January installation on this machine holds a single JSON document per
+session with a `messages[]` array and **no token counts anywhere in it**, which is what the format
+was 73 stable releases ago. Altim reads such a file, finds nothing, and reports nothing from it. The
+vendor documents none of this format and is plainly willing to change it, so every field is optional
+at the parse and an unexpected shape degrades one figure to unavailable rather than failing a read.
+
+#### The units overlap, and adding them double counts
+
+Google's API reference is explicit that `promptTokenCount` "is still the total effective prompt size
+meaning this includes the number of tokens in the cached content", and that `totalTokenCount` is
+"prompt + thoughts + response candidates". So Altim converts once, in `GeminiTokenBucket.ToTotals`:
+
+| Altim component | From | Why |
+|---|---|---|
+| Input | `input - cached`, clamped at zero | Altim's input means *uncached* input; `input` includes `cached` |
+| Cache read | `cached` | the part of the prompt served from cache |
+| Output | `output + thoughts` | reasoning tokens are generated, and Google counts them inside the request total |
+| Cache write | — | **null, not zero.** Gemini's response usage has no cache-creation figure at all |
+
+The three populated components sum to `prompt + candidates + thoughts`, which is exactly
+`totalTokenCount`. `tool` is read and carried but folded into none of them: Google does not say
+whether tool-use prompt tokens are already inside `promptTokenCount`, and adding them could count the
+same tokens twice. Under-reporting a component is preferable to inventing one.
+
+#### Four traps a naive reader gets wrong
+
+1. **The same message id is appended repeatedly.** The recorder writes a model turn when it
+   completes, writes the whole record again when the response's usage arrives, and again when its
+   tool calls are enriched. Gemini CLI's own loader keys messages by id and keeps the last. Summing
+   lines therefore counts the same tokens several times over. Altim de-duplicates on message id, and
+   the identity set outlives one pass so an incremental boundary cannot reintroduce the double count.
+2. **The session id is on the first line only.** Message records do not repeat it, so a pass that
+   resumes part way through a growing file never sees it. Each file's identity is read once and kept.
+3. **A resumed session is rewritten, not appended to**, so a byte cursor into one can be stale. The
+   incremental scanner re-reads a file that shrank; de-duplication on message id is what makes that
+   safe.
+4. **Subagent transcripts live one level deeper** and are named after the parent session rather than
+   with the `session-` prefix. They are included. On Claude Code, subagent transcripts carried most
+   of the token volume and outnumbered main ones 2,056 to 22.
+
+`$rewindTo` markers are **not** applied. A rewind removes messages from the conversation Gemini CLI
+will resume; it does not un-spend the tokens they cost. A usage monitor counts what was spent.
+
+### Nothing is read outside the chats directory
+
+`~/.gemini` holds `oauth_creds.json`, `google_accounts.json`, `mcp-oauth-tokens.json` and
+`a2a-oauth-tokens.json` at its top level. Altim's Gemini reader never lists that directory and never
+opens a file in it. Every enumeration it performs is **rooted at a `chats` directory**, three levels
+below, so there is no path through the code that reaches a credential file rather than a filter that
+avoids one. Two tests hold that line. `AFileOutsideAChatsDirectoryIsNeverRead` plants a decoy
+session file, complete with token counts, at the Gemini home, at `tmp`, and in the project directory,
+and asserts none of their tokens reaches the total; widening the enumeration by one level turns it
+red. `ACredentialFileIsNeverOpened` holds the credential files open with `FileShare.None`, so that
+reading one would throw, and asserts the reading still succeeds. The first is the load-bearing one:
+the reader treats an unreadable file as one with nothing new in it, which is correct and which means
+a lock alone cannot tell a read that was refused from a read that never happened.
+
+The directory under `tmp` that holds a project's sessions is named after the project: current
+versions use a slug of the project folder's own name, earlier ones a hash of its full path, and each
+such directory carries a marker file holding the absolute project path. None of that is read,
+returned, persisted or logged. The metadata line's `directories` field — the session's workspace
+directories, as absolute paths — and its `projectHash` are discarded at the parse along with every
+prompt, thought and tool result.
+
+### Paths
+
+| Item | Windows | macOS / Linux |
+|---|---|---|
+| Home | `%USERPROFILE%\.gemini` | `~/.gemini` |
+| Override | `GEMINI_CLI_HOME` — replaces the **home directory**, so the result is `%GEMINI_CLI_HOME%\.gemini` | same |
+| Per-project work | `<home>\tmp\<project>\` | same |
+| Sessions | `<home>\tmp\<project>\chats\session-<YYYY-MM-DDTHH-MM>-<first 8 of session id>.jsonl` | same |
+| Subagents | `<home>\tmp\<project>\chats\<parent session id>\<session id>.jsonl` | same |
+| Legacy sessions | the same directory, one JSON document per `.json` file, no token counts | same |
+
+macOS and Linux paths come from upstream source, not local execution: **unverified**.
+
+### Known fragility
+
+- The session format is undocumented and has already changed once in the way that matters most: it
+  carried no token counts at all in January.
+- Session pruning is a setting, not a guarantee. The documentation says the default policy keeps 30
+  days; the settings object it lives on defaults to absent in the source, and the cleanup pass runs
+  only for the project a session is started in. Altim depends on neither reading: its scan is bounded
+  by its own window and file caps, and a day it cannot account for stays unknown.
+- The project directory naming changed from a path hash to a slug, with a migration at start-up, so
+  both layouts can be present at once. Altim does not read either name, which is why the change costs
+  it nothing.
+- An npm-shim install runs the CLI as `node`, so the process scan will not see it. File recency is
+  the fallback signal and is why the provider does not depend on the scan alone.
+- `gemini --version` honours a `CLI_VERSION` environment variable, so it is not a trustworthy
+  version signal. Altim does not run it.
+
+### Deliberately not read
+
+| Source | Reason |
+|---|---|
+| `retrieveUserQuota` on `cloudcode-pa.googleapis.com` | it is an undocumented internal endpoint and calling it directly would mean reading the user's OAuth credentials, which Altim does not do for any provider |
+| `gemini -p "…" --output-format json` turn stats | obtaining them means running a turn and spending a model request |
+| `gemini -p "/stats"` | prints nothing, then sends `/stats` to the model as a prompt |
+| `--list-sessions` | starts a process, lists only the current working directory's project, and reports no usage |
+| OpenTelemetry to a local file (`telemetry.enabled`, `telemetry.outfile`) | genuinely carries `gemini_cli.token.usage` per model, but telemetry is **off by default**, turning it on means writing to the user's `settings.json` and restarting their CLI, and `logPrompts` defaults to **true** so the file it produces would contain the user's prompts. The same reasoning keeps Altim away from Claude Code's OTLP export |
+| `logs.json` | user prompts only: `{sessionId, messageId, timestamp, type, message}`. No usage of any kind |
+| Checkpoints and the `history/` shadow git repository | conversation state and file contents, no token counts |
+| `settings.json`, `projects.json`, `.project_root`, `installation_id` | configuration and identity. None carries usage, and two of them map a directory back to a project path |
+| `oauth_creds.json`, `google_accounts.json`, `mcp-oauth-tokens.json` | credentials and account identity. Never opened, for any reason |
+
+---
+
 ## Day backfill: what fills the usage map
 
 The map draws one square per provider per local calendar day, and a day's token figure comes only
@@ -368,13 +606,21 @@ against.
 |---|---|---|---|
 | Codex daily buckets, `account/usage/read` | the buckets the reply carries: 100 used days spread over about nine months here | Best-effort | one gated network call, at most daily, with the five-minute fallback above; one undifferentiated figure per day, recorded as input with the other three components unreported |
 | Claude Code transcripts, bucketed by each message's timestamp | what the scan covers: the newest 96 transcripts written in the last 7 days, four days of usage here | Best-effort | local only, starts no process and makes no network call; reuses the incremental scanner and its cursors; reports all four components |
+| Gemini CLI session files, bucketed by each model turn's timestamp | what the scan covers: the newest 96 session files written in the last 7 days, across every project directory | Best-effort | local only, starts no process and makes no network call; reports input, output and cache read, and never cache write, which Gemini does not report at all |
 | Altim's own samples | from install | Best-effort | supplies the day's **peak percentage only**, never its tokens |
 
-**Neither reach is a number Altim can promise.** The Codex figure counts days that had usage rather
+**No reach here is a number Altim can promise.** The Codex figure counts days that had usage rather
 than days in a window, so the span is far wider than the count; the Claude figure is whatever the
-newest transcripts still on disk happen to cover, which is days rather than months. Both move with
-how the account was used. A backfill runs at most once a day per provider, is skipped entirely when
-its source is unavailable, and leaves the days it cannot account for unknown rather than zero.
+newest transcripts still on disk happen to cover, which is days rather than months; the Gemini
+figure depends on a retention policy that is a setting rather than a guarantee and that only runs
+for projects the user reopens. All three move with how the account was used. A backfill runs at most
+once a day per provider, is skipped entirely when its source is unavailable, and leaves the days it
+cannot account for unknown rather than zero.
+
+**A Gemini day carries tokens and never a peak.** No Gemini source reports a percentage at all, so
+that provider's row of the map is drawn from volume alone and its peak stays unknown for every day,
+including days Altim watched. That is the same distinction the map already makes everywhere else:
+unknown is not zero.
 
 **A day row is merged field by field**: its token figure comes from a per-day source above, its peak
 from Altim's samples, and neither writer can erase the other's field. The first run here wrote **104
@@ -391,6 +637,7 @@ Wired up today:
 |---|---|
 | Claude Code | status-line state file (documented), headless `/usage` summary, transcript token history including subagents, per-day totals from that same pass, `claude agents --json` sessions |
 | Codex | app-server `account/rateLimits/read` and `account/usage/read`, day backfill with a five-minute bounded fallback to the last reading, rollout tail fallback, read-only state database for recent threads, `codex doctor --json` for paths and auth mode |
+| Gemini CLI | session-file token history including subagents, per-day totals from that same pass, per-session totals with model and start instant, presence and activity. **No quota metric of any kind**, because none exists locally |
 
 Deliberately not read yet, and why:
 
@@ -399,6 +646,9 @@ Deliberately not read yet, and why:
 | `codex exec --json` turn usage | obtaining it means *running* a turn; a passive monitor must not spend a user's quota |
 | `account/rateLimits/updated` push | needs a long-lived subscription, which conflicts with one scheduler owning all timing. Polling is gated at 60s instead |
 | Claude Code OpenTelemetry export | requires injecting environment variables into the user's tool and running a collector |
+| Gemini CLI OpenTelemetry export | off by default, would mean editing the user's `settings.json` and restarting their CLI, and its prompt logging defaults to on, so the file it produced would hold their prompts |
+| Gemini CLI `retrieveUserQuota` | the one source with a real remaining figure and reset instant, and the only way to reach it is to read the user's OAuth credentials and call an undocumented internal endpoint. Altim opens no credential file, for any provider |
+| Gemini CLI headless `/stats` and `--output-format json` | the first prints nothing and then spends a model request sending `/stats` to the model; the second requires running a turn |
 | `cost-state` and `quotaLimits` transcript entries | present in 7 and 4 files out of 2,069; too rare to build on, useful later as a cross-check |
 | `stats-cache.json` | measured seven months stale with zero costs; a version gate is not worth the wrong-number risk |
 | session registry files | observed claiming an idle session whose process id had been recycled; the CLI's own listing is authoritative |
@@ -421,5 +671,14 @@ that anywhere:
 - Raw lines are never persisted, logged or included in diagnostics.
 - Credential files are never opened. Auth state is learned only from a redacted CLI report.
 - Project and repository identifiers are not stored in the usage history database.
+
+Gemini CLI adds two of its own, because its store is laid out differently from the other two:
+
+- **Its session files sit three levels below the directory its credentials do**, so the reader's
+  enumerations are rooted at a `chats` directory rather than at the Gemini home and filtered on the
+  way down. There is no path through that code which reaches `oauth_creds.json`.
+- **Its metadata line carries the session's workspace directories as absolute paths**, beside a name
+  for the project. Both are discarded at the parse, along with the prompts, the model's reasoning,
+  the tool arguments and the tool output that fill the rest of the file.
 
 See [PRIVACY.md](PRIVACY.md) for the user-facing statement.

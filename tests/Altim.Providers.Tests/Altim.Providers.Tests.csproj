@@ -18,6 +18,7 @@
     <ProjectReference Include="..\..\src\Altim.Providers\Altim.Providers.csproj" />
     <ProjectReference Include="..\..\src\Altim.Providers.Claude\Altim.Providers.Claude.csproj" />
     <ProjectReference Include="..\..\src\Altim.Providers.Codex\Altim.Providers.Codex.csproj" />
+    <ProjectReference Include="..\..\src\Altim.Providers.Gemini\Altim.Providers.Gemini.csproj" />
   </ItemGroup>
 
   <ItemGroup>
