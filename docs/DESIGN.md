@@ -213,7 +213,8 @@ stop on the way to the next control.
 Fill animates 180ms ease-out only when the value changes. Nothing else in the control moves.
 
 **Dial.** The meter's cross section bent round a swept arc, used where one reading is the
-subject of a whole surface rather than one of several in a column. Same 8px rail with fully
+subject of a surface rather than one of several in a column. Two surfaces are headed by one: the
+tray panel, and every provider card on the Overview. Same 8px rail with fully
 round ends, same 2px gap, same 4px engraving, 14 in all — but with the rail innermost and the
 engraving on the face's outer edge, so the scale stands on the far side of the rail from the
 figure, the way a metric row puts the figure above the rail and the scale below it. Track
@@ -264,12 +265,20 @@ which matters more here than on the meter, because the dial shows one window out
 the name is what says which. It is a tab stop exactly when it has both a level and a threshold,
 and **focus opens the same tip a pointer opens**.
 
-**The dial does not animate.** The meter's fill travels 180ms because it lives on a window
-somebody already has open. The dial's surface is the tray panel, which is laid out once at
-start-up, hidden rather than closed, and goes on taking readings while nobody is looking at it: a
-transition there would rebuild a path per frame for a panel nobody can see, and the panel's whole
-budget is that opening it is a show rather than a build. Its two paths are built once and rebuilt
-only when the face's size or the level moves.
+**The dial does not animate**, on either surface. The meter's fill travels 180ms because it
+lives on a window somebody already has open. The dial's first surface is the tray panel, which is
+laid out once at start-up, hidden rather than closed, and goes on taking readings while nobody is
+looking at it: a transition there would rebuild a path per frame for a panel nobody can see, and
+the panel's whole budget is that opening it is a show rather than a build. Its two paths are
+built once and rebuilt only when the face's size or the level moves. The Overview's cards do
+stand on a window somebody has open, and the dial stays still there too, because one instrument
+that moves on one surface and not on another is two instruments.
+
+**The figure standing in the face is not announced twice.** It is the dial's own reading, which
+the dial's peer already reads out in words, so a view that stands a figure inside the face takes
+that text out of the content view. Without that a screen reader says the percentage once as the
+dial and again as the text standing in it, which is the one duplication a drawn control invites
+and the one a view has to decline.
 
 **Metric row.** Label left (`Label`, `TextSecondary`), figure right (`Figure` or `FigureSmall`),
 meter beneath spanning full width, optional sub-caption (`Caption`) under the label. Token
@@ -281,12 +290,52 @@ There is no nested variant; sections inside a panel are split by separators and 
 
 **Provider card.** The panel, used only on Overview, one per provider. Header row: 28px provider
 glyph, provider name (`Subhead`), a 16px disclosure that opens the provider's own page, status
-dot + word right. Metrics stack below, separated by 16px, each one a `Lead` name with the
-`Figure` right aligned and the meter beneath. **Every metric on a card takes the same figure
-size (reference)**: elsewhere the first metric on a surface takes `Figure` and the rest
-`FigureSmall`, but a card's metrics are a set to be read against one another and two sizes would
-say one of them mattered more. The card's token count, when the provider reports one, is a
-`Caption` under the metrics.
+dot + word right.
+
+**The card is headed by a dial**, carrying the window nearest its ceiling out of the ones *this*
+provider reports, with the rest of its windows as rows beneath it and a 1px rule between the two
+— the rule the tray panel draws under its own reading, doing the same job. The window on the
+dial is not also a row underneath it: a card that drew one window twice would have a reader
+counting one more window than the provider reports.
+
+The face is the panel's 144, unchanged, and so is the scale on it. **That is the whole answer to
+two cards side by side.** A gauge suits one reading against a target, and several gauges in a row
+is the arrangement usually advised against, because gauges do not compare — but what makes two
+gauges incomparable is two scales, two sizes or two positions. These are one control at one size
+on one shared scale, and the card grid arranges every cell in a row at the row's height, so the
+two faces stand at the same height in both cards and two sweeps end at angles that can be read
+against one another without reading either figure. A face sized per card would give that up,
+which is why there is no per-card face size: an instrument that can be resized is an instrument
+that can stop comparing.
+
+What the shared scale cannot say is *which* window each dial is carrying, and two providers can
+easily have different ones nearest their ceilings — Claude Code's session against Codex's
+week. So the window is named, in `Lead` at the medium weight, standing in the 120 degrees the
+sweep leaves open at the foot of the face. It goes inside the face rather than under it because
+the arc's last ink is a quarter of the face above the face's own bottom edge: a name set under
+the whole control stands 44 below the dial it names and 16 above the first row beneath it, which
+reads as a heading for the rows. The provider is not named there — the card's header has said
+it four lines up — but it is in the dial's accessible name, which is what somebody arriving at
+the dial alone hears: `Session (Claude Code), 62% used, threshold 80%`.
+
+The dial's own reset is not printed under it the way the panel prints it. A card reports one
+reset, the soonest window's, in the footer, and on almost every reading that is the window on the
+dial.
+
+A provider whose reading failed carries no metric, so its card has no dial and no rule where one
+would be: the sentence and the retry stand there instead. A head window the provider reports no
+figure for keeps its dial and draws the unavailable face — an outline, no sweep — with an
+em dash inside it, because unknown is not zero and a sweep sitting at the bottom of the scale is
+the one picture that would read as a reported nothing.
+
+Metrics stack below the rule, separated by 16px, each one a `Lead` name with the `Figure` right
+aligned and the meter beneath. **Every metric on a card takes the same figure size (reference)**,
+and that includes the figure inside the dial: elsewhere the first metric on a surface takes
+`Figure` and the rest `FigureSmall`, but a card's figures are a set to be read against one
+another and two sizes would say one of them mattered more. The dial is what marks the head
+window, not a bigger number — which is also what keeps the face at 144, because `100%` set in
+`Figure` is the measurement the face was sized against. The card's token count, when the provider
+reports one, is a `Caption` under the metrics.
 
 The footer is pushed to the foot of the card, separated by a 1px rule, and split by a **vertical
 hairline** into two cells: "Resets in" over the time remaining, and "Pacing" over the comparison
@@ -411,7 +460,10 @@ Six sections split by 1px rules: header, reading, providers, resets, status, act
   **The window is the highest level any provider reports**: the one nearest its ceiling. The
   panel already prints every window's figure on its provider's own line, so the dial is not
   there to add a number — it is there to say which of those numbers decides whether you can keep
-  working, and it is the only place the panel shows the configured threshold at all. Ranking by
+  working, and it is the only place the panel shows the configured threshold at all. It is the
+  same rule an Overview card picks its own head window by, run over every provider's windows
+  rather than over one provider's: what differs between the two surfaces is the set, not the
+  rule, and a tie break written out twice is a tie break that drifts. Ranking by
   the raw level rather than by how near each window is to its own threshold is deliberate: every
   window is drawn against one shared scale, which is the whole reason two readings can be
   compared by eye, and ranking them by a ratio to a per-window alert level would order them by

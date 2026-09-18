@@ -38,6 +38,10 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
     private StatusDisplay _status = StatusDisplay.Unknown;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasHeadline))]
+    private HeadlineReadingViewModel? _headline;
+
+    [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RetryCommand))]
     [NotifyPropertyChangedFor(nameof(ShowsNoMetricsNotice))]
     [NotifyPropertyChangedFor(nameof(ShowsNoFiguresNotice))]
@@ -136,6 +140,17 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
     public ObservableCollection<MetricViewModel> Metrics { get; } = [];
 
     /// <summary>
+    /// The windows an Overview card shows as rows: every one this provider reports except
+    /// the one on the card's dial, in the order it reports them.
+    /// </summary>
+    /// <remarks>
+    /// A window drawn on the dial and again on a row beneath it would be the same figure
+    /// twice on one card, which is the one thing a card of several windows must not do: a
+    /// reader counting the windows would count one too many.
+    /// </remarks>
+    public ObservableCollection<MetricViewModel> RemainingMetrics { get; } = [];
+
+    /// <summary>
     /// The same metrics as the one line the tray panel has room for, and only the ones
     /// carrying a figure: a window with nothing to report is left out of the line rather
     /// than shown with a dash, because the line is a summary and a summary of nothing is
@@ -173,6 +188,9 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
     /// thing from a reading that failed and is said differently.
     /// </summary>
     public bool ShowsNoMetricsNotice => !HasError && !HasMetrics;
+
+    /// <summary>Whether there is a window for this provider's card to be headed by.</summary>
+    public bool HasHeadline => Headline is not null;
 
     /// <summary>Whether any window this provider reports has a reset instant to show.</summary>
     public bool HasReset => ResetText is not null;
@@ -407,9 +425,45 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         }
 
         HasMetrics = Metrics.Count > 0;
+        RebuildHeadline();
         RebuildCompactMetrics();
         RebuildReset();
         RebuildPacingMetric();
+    }
+
+    /// <summary>
+    /// Picks the window this provider's card is headed by, and leaves the rest to the rows
+    /// beneath it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rule is <see cref="HeadlineReadingViewModel.Nearest"/> - the same one the tray
+    /// panel's dial is chosen by - run over this provider's windows alone. A card's dial
+    /// answers "which of this provider's windows decides whether I can keep working", and a
+    /// dial on a card that ranked across every provider would leave one card headed by another
+    /// provider's window.
+    /// </para>
+    /// <para>
+    /// A reading that failed carries no metric at all, so a failed card has no headline and no
+    /// dial: the sentence and the retry stand where the dial would, and a dial with nothing to
+    /// report drawn over an error would be an instrument reporting on a reading that was never
+    /// taken.
+    /// </para>
+    /// </remarks>
+    private void RebuildHeadline()
+    {
+        MetricViewModel? head = HeadlineReadingViewModel.Nearest(Metrics);
+
+        Headline = head is null ? null : new HeadlineReadingViewModel(head, DisplayName);
+
+        RemainingMetrics.Clear();
+        foreach (MetricViewModel metric in Metrics)
+        {
+            if (!ReferenceEquals(metric, head))
+            {
+                RemainingMetrics.Add(metric);
+            }
+        }
     }
 
     private void RebuildCompactMetrics()

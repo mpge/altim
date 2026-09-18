@@ -5,10 +5,39 @@
   shadow. Inside it, a header, the metrics the provider reports, and a footer split by a
   vertical hairline into what happens next and how this window compares with the last one.
 
-  The metrics are all one figure size. The rest of the system gives the first metric on a
-  surface the large figure and the others the small one, so the percentage stays the largest
-  thing on screen; on a card the metrics are a set to be read against one another, and two
-  sizes would say one of them mattered more than the other.
+  The card is headed by a dial carrying the window nearest its ceiling - the one that decides
+  whether this provider can keep working - with the rest of its windows as rows beneath. It is
+  the control the tray panel is headed by, unchanged: the same 144 face, the same scale, the
+  same tokens. That is what lets two cards side by side be read against one another. Two dials
+  of one size on one scale are two readings of one instrument and their sweeps end at comparable
+  angles; two of different sizes are two pictures, which is the whole reason a gauge is said not
+  to compare.
+
+  The window is named inside the arc's own opening. The sweep is 240 and leaves 120 open at the
+  foot, which is where DESIGN.md puts the words under the figure, and a card has one line to put
+  there where the panel has two. The name is load-bearing rather than decoration: two cards'
+  dials can be carrying different windows, and then the two sweeps are not comparable at all -
+  the name is the only thing that says so.
+
+  The provider is not named there. The card header has already said it, four lines up, and
+  repeating it under every dial would be the noisiest possible way to say what the card's own
+  border already says. It is in the dial's accessible name instead, which is what somebody
+  arriving at the dial alone hears.
+
+  The figure inside the face is not announced separately. It is the dial's own reading, which
+  the dial's peer already reads out, so it is Raw in the automation tree: without that a screen
+  reader says the percentage twice, once as the dial and once as the text standing in it.
+
+  The rest of the metrics are all one figure size, and so is the figure inside the dial. The
+  rest of the system gives the first metric on a surface the large figure and the others the
+  small one, so the percentage stays the largest thing on screen; on a card the figures are a
+  set to be read against one another, and two sizes would say one of them mattered more than
+  the other. The dial is what marks the head window, not a bigger number - which also keeps the
+  figure at the size it was sized against, because 100% at Figure is what makes the face 144.
+
+  The dial's own reset is not printed under it the way the tray panel prints it. A card reports
+  one reset - the soonest window's, in the footer - and on almost every reading that is the
+  window on the dial, so a second line would be the same time twice on one card.
 
   The card carries no per-metric token line. The reference sets one under each metric, reading
   used against limit - Altim's providers report tokens per provider rather than per window and
@@ -80,7 +109,40 @@
                  Foreground="{DynamicResource AltimTextSecondaryBrush}"
                  Text="{Binding NoMetricsText}" />
 
-      <ItemsControl ItemsSource="{Binding Metrics}">
+      <!-- The head: the window nearest its ceiling, on the dial. The figure and the window's
+           name are the view's own text blocks rather than something the control draws, so they
+           take the type scale and the design system's tabular numerals; both stand inside the
+           face, so the whole head is the dial's own 144 square. -->
+      <Panel IsVisible="{Binding HasHeadline}" HorizontalAlignment="Center">
+        <controls:Dial Value="{Binding Headline.Value}"
+                       Threshold="{Binding Headline.Threshold}"
+                       AutomationProperties.Name="{Binding Headline.SourceLabel}" />
+
+        <!-- Inside the face. The dial's band is 14 deep and the clear circle inside it is
+             116 across, which is what the face was sized against. -->
+        <TextBlock HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   AutomationProperties.AccessibilityView="Raw"
+                   Classes="figure primary"
+                   Text="{Binding Headline.PercentText}" />
+
+        <!-- In the 120 the sweep leaves open at the foot. Standing it under the face instead
+             puts it 44 below the last ink of the dial it names and 16 above the first row
+             beneath, which reads as a heading for the rows. -->
+        <TextBlock HorizontalAlignment="Center"
+                   VerticalAlignment="Bottom"
+                   Theme="{DynamicResource AltimLeadMediumText}"
+                   Classes.warn="{Binding Headline.IsAboveThreshold}"
+                   Text="{Binding Headline.WindowLabel}" />
+      </Panel>
+
+      <!-- The rule the tray panel draws under its own reading, doing the same job: the head
+           reading is one section and the windows under it are another. It is also the one
+           line that runs the card's full width at the same height on every card in the row,
+           which is what stops a dial floating in a card rather than heading one. -->
+      <Separator IsVisible="{Binding HasHeadline}" />
+
+      <ItemsControl ItemsSource="{Binding RemainingMetrics}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>
             <StackPanel Spacing="{DynamicResource AltimSpace16}" />

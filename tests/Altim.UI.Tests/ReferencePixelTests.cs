@@ -93,7 +93,7 @@ public sealed class ReferencePixelTests
     {
         using ProviderViewModel row = Row();
         var card = new ProviderCardView { DataContext = row };
-        using PixelHost host = PixelHost.Show(card, width: 420d, height: 420d);
+        using PixelHost host = PixelHost.Show(card, width: 420d, height: 560d);
 
         Frame frame = host.Capture();
 
@@ -102,6 +102,15 @@ public sealed class ReferencePixelTests
             .Single(s => s.Bounds.Width <= 1d && s.Bounds.Height > 1d);
 
         Rect bounds = host.BoundsOf(divider);
+
+        // The footer is at the foot of the card, so a card taller than the window puts the
+        // divider off the bottom of the frame - where every count below it would read as a
+        // shortfall rather than as a missing hairline. The card grew when the dial arrived;
+        // this is the guard that says so out loud instead of the counts drifting.
+        Assert.True(
+            bounds.Bottom <= frame.Height,
+            $"The card is taller than the frame: the divider ends at {bounds.Bottom} of "
+                + $"{frame.Height}, so this assertion is reading pixels that were never drawn.");
         Assert.Equal(1d, bounds.Width, 6);
         Assert.True(bounds.Height >= 40d, $"The divider is only {bounds.Height} tall.");
 

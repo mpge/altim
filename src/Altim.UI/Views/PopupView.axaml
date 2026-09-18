@@ -64,9 +64,12 @@
                        AutomationProperties.Name="{Binding Headline.SourceLabel}" />
 
         <!-- Inside the face. The dial's band is 14 deep and the clear circle inside it is
-             116 across, which is what the face was sized against. -->
+             116 across, which is what the face was sized against. The figure is the dial's
+             own reading, which the dial's peer already reads out, so it is Raw in the
+             automation tree rather than a second announcement of the same percentage. -->
         <TextBlock HorizontalAlignment="Center"
                    VerticalAlignment="Center"
+                   AutomationProperties.AccessibilityView="Raw"
                    Theme="{DynamicResource AltimFigureText}"
                    Text="{Binding Headline.PercentText}" />
       </Panel>

@@ -228,13 +228,11 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     /// threshold at all.
     /// </para>
     /// <para>
-    /// Ranking by the raw level rather than by how near each window is to its own threshold
-    /// is deliberate. Every window is drawn against one shared scale, which is the whole
-    /// reason two readings can be compared by eye; ranking them by a ratio to a per-window
-    /// alert level would order them by something nobody can see on that scale. A tie goes to
-    /// the window that rolls over first, because that is the one reached first, and then to
-    /// the order the providers were registered in, so the same readings always pick the same
-    /// window.
+    /// The choosing rule itself is <see cref="HeadlineReadingViewModel.Beats"/>, which an
+    /// Overview card runs over one provider's windows while the panel runs it over every
+    /// provider's. What differs between the two surfaces is the set, not the rule, and a tie
+    /// break written out twice is a tie break that drifts. Here the set is walked in the order
+    /// the providers were registered, so the same readings always pick the same window.
     /// </para>
     /// <para>
     /// A window with no percentage is never picked over one that has a figure, but when no
@@ -254,7 +252,7 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
         {
             foreach (MetricViewModel metric in row.Metrics)
             {
-                if (best is null || Beats(metric, best))
+                if (best is null || HeadlineReadingViewModel.Beats(metric, best))
                 {
                     best = metric;
                     provider = row.DisplayName;
@@ -265,38 +263,6 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
         Headline = best is not null && provider is not null
             ? new HeadlineReadingViewModel(best, provider)
             : null;
-    }
-
-    /// <summary>Whether one metric should be on the dial ahead of another.</summary>
-    /// <param name="candidate">The metric being considered.</param>
-    /// <param name="holder">The metric currently holding the dial.</param>
-    /// <returns>True when the candidate takes it.</returns>
-    private static bool Beats(MetricViewModel candidate, MetricViewModel holder)
-    {
-        if (candidate.Value is not { } level)
-        {
-            return false;
-        }
-
-        if (holder.Value is not { } held)
-        {
-            return true;
-        }
-
-        if (level > held)
-        {
-            return true;
-        }
-
-        if (level < held)
-        {
-            return false;
-        }
-
-        // Level for level, the window that rolls over first is the one reached first. A
-        // window reporting no instant never displaces one that does.
-        return candidate.ResetsAt is { } instant
-            && (holder.ResetsAt is not { } best || instant < best);
     }
 
     /// <summary>
