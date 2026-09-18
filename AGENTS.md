@@ -53,7 +53,7 @@ live in `docs/superpowers/`.
 
 ```
 dotnet build Altim.sln -c Release      # 0 warnings; warnings are errors
-dotnet test Altim.sln -c Release       # 2 skipped: the non-Windows tests
+dotnet test Altim.sln -c Release       # 3 skipped on Windows; more off it, by platform
 ```
 
 - **A running Altim locks `Altim.App`'s output.** `dotnet build Altim.sln` then fails with MSB3027.
@@ -74,10 +74,15 @@ Tests here are expected to *discriminate*, not merely pass.
   every one of them caught a real defect — several times a defect in the test itself. A test that
   passes against a wrong implementation is worse than no test.
 - Apply mutations **byte-exactly in Python with `assert old in source`**, and hash the file before
-  and after to prove it changed. **These sources are LF.** A PowerShell `.Replace` using `\r\n`
-  matches nothing, throws nothing, and reports a false green.
+  and after to prove it changed. **Most sources are LF, but nine are CRLF** — three under
+  `Altim.Platform.Windows/Interop`, `ProviderPageViewModel.cs`, `SettingsOptions.cs`,
+  `PopupWindow.axaml`, and three under `tests/Altim.UI.Tests`. Read each file's own bytes and
+  match its own endings. A replacement written with the wrong ending matches nothing, throws
+  nothing, and reports a false green.
 - A mutation that deletes the only call site of a private member will not compile, because
-  warnings are errors (`IDE0051`). It proves nothing; respell it.
+  warnings are errors (`IDE0051`). It proves nothing; respell it. **A harness that greps only for `error CS`
+  reads that as zero failing tests and reports a false green** — two agents lost work to
+  exactly this. Confirm the build succeeded before believing a run.
 - Pixel tests (`tests/Altim.UI.Tests/PixelTests.cs`) guard design-system rules that no structural
   test can see. Dispose every captured bitmap.
 - Source-shape tests guard invariants like "no view model holds a `Geometry`". They are load-bearing;
