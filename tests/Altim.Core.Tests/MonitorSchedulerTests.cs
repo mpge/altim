@@ -500,6 +500,17 @@ public sealed class MonitorSchedulerTests
     }
 
     [Fact]
+    /// <remarks>
+    /// Seen failing once with three refreshes where two were expected, on a machine running
+    /// several builds at once, and not reproduced in 35 runs since — 25 of this test alone
+    /// and 10 of the whole suite under four parallel builds. Recorded rather than patched,
+    /// because the count is not where a bug would hide: <c>ProviderRegistration</c> records a
+    /// request in a single bool, so any number of requests arriving during one refresh serve
+    /// exactly one more, and no sequence of hints can queue two. A third refresh therefore
+    /// comes from somewhere else, a scheduled tick landing inside the window being the
+    /// candidate. If this fails again, that is the thread to pull, and loosening the count
+    /// would only hide it.
+    /// </remarks>
     public async Task ARefreshRequestedWhileOneIsInFlightRunsOnceMoreOnExit()
     {
         var time = new TestTimeProvider();
