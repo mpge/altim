@@ -37,7 +37,7 @@ rows and drop downs.
 | Card | radius 12, 1px border, 24px padding | ✅ |
 | Header | 28px glyph, 21px name, 16px chevron; status dot + word right | ✅ — the chevron opens that provider's page |
 | Metric | name + figure + meter, one figure size for the set | ✅ |
-| Meter | 8px tall, radius 4 | ✅ |
+| Meter | 8px tall, radius 4 | ✅ — the rail is the reference's; the graduated scale under it and the threshold index through it are Altim's own, added because a reading measured against a ceiling should read like an instrument. See `DESIGN.md`. |
 | Footer | 1px rule, two cells split by a vertical hairline: "Resets in" and "Pacing" | ✅ — plus the last refreshed caption at the far end of the same row, and the footer pushed to the foot of the card so two cards in a row line up |
 
 **Pacing** is a real computation: this window's level against the same point in the previous

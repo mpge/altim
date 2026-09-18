@@ -1,10 +1,21 @@
 <!--
   Meter.
 
-  The control draws itself; the theme only hands it the three brushes. Fill is TextPrimary
-  in both variants and stays TextPrimary above the threshold - the bar never turns red. It
-  is the metric label beside it that moves to StatusWarn, which the view does by binding to
-  the meter's IsAboveThreshold.
+  The control draws itself; the theme only hands it brushes and measurements. Fill is
+  TextPrimary in both variants and stays TextPrimary above the threshold - the bar never
+  turns red. It is the metric label beside it that moves to StatusWarn, which the view does
+  by binding to the meter's IsAboveThreshold.
+
+  The scale and the threshold index are the same ink, TextSecondary, and are told apart by
+  geometry rather than by colour: the index is twice the weight of a graduation and is the
+  only mark that crosses the rail. Two keys carry the one value because they are two roles,
+  and a scale drawn in "the threshold brush" would be a colour no document names.
+
+  The focus ring is handed over as a brush, a weight, an offset and a radius rather than
+  hosted as a template part, because there is no template: the control draws it, outside its
+  own bounds, the way every other ring in the system is drawn. FocusAdorner is nulled for
+  the reason every other focusable theme nulls it - the framework's dashed rectangle would
+  be a second focus indicator drawn on top of this one.
 -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -13,7 +24,14 @@
   <ControlTheme x:Key="{x:Type controls:Meter}" TargetType="controls:Meter">
     <Setter Property="TrackBrush" Value="{DynamicResource AltimMeterTrackBrush}" />
     <Setter Property="FillBrush" Value="{DynamicResource AltimMeterFillBrush}" />
+    <Setter Property="ScaleBrush" Value="{DynamicResource AltimMeterScaleBrush}" />
     <Setter Property="ThresholdBrush" Value="{DynamicResource AltimMeterThresholdBrush}" />
+    <Setter Property="FocusRingBrush" Value="{DynamicResource AltimFocusRingBrush}" />
+    <Setter Property="FocusRingWidth" Value="{DynamicResource AltimFocusRingWidth}" />
+    <Setter Property="FocusRingOffset" Value="{DynamicResource AltimFocusRingOffset}" />
+    <Setter Property="FocusRingRadius" Value="{DynamicResource AltimRadius8}" />
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+    <Setter Property="ClipToBounds" Value="False" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </ControlTheme>

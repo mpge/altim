@@ -446,10 +446,14 @@ public sealed class PixelTests
         Frame frame = host.Capture();
         Rect bounds = host.BoundsOf(meter);
 
-        // The tick is TextSecondary on a Border track, both flat colours. Every pixel in
-        // the tick column is one or the other; a smeared tick would be a blend of them.
+        // Every mark in the meter is a flat colour on a flat ground: the index and the
+        // graduations are TextSecondary, the track is Border, and the page under the scale
+        // is Surface. A pixel that is none of the three is a mark spread over two rows or
+        // two columns at partial coverage, which is exactly what an unsnapped hairline is.
+        // The band covers the graduations as well as the rail, because they are hairlines
+        // too and there are twenty of them.
         //
-        // The band stops short of the rail's rounded ends on every side. Those ends are
+        // It stops short of the rail's rounded ends on every side. Those ends are
         // antialiased against the page by design - the rail is a pill - so a band that
         // included them would be reporting the radius as a smear. The inset is the rail's
         // own radius, which is half its height, in device pixels.
@@ -462,7 +466,9 @@ public sealed class PixelTests
 
         int blended = frame.Count(
             band,
-            colour => !Ink.Near(colour, Ink.Border, 6) && !Ink.Near(colour, Ink.TextSecondary, 6));
+            colour => !Ink.Near(colour, Ink.Border, 6)
+                && !Ink.Near(colour, Ink.TextSecondary, 6)
+                && !Ink.Near(colour, Ink.Surface, 6));
 
         Assert.True(
             blended == 0,

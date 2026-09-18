@@ -15,9 +15,11 @@ the way. Two ideas carry the identity:
 
 1. **Numbers are the subject.** The percentage is the largest thing on screen; labels stay
    small and quiet. All figures set in tabular numerals so digits do not shift as they tick.
-2. **The altitude tape.** The logo is an ascending mark, the name reads as altimeter. Meters
-   are flat rails with a hairline limit tick, history is a tape with hairline level lines at
-   0/50/100. No rounded candy bars, no gradient fills, no shadowed cards stacked on cards.
+2. **The altitude tape.** The logo is an ascending mark, the name reads as altimeter. A
+   reading measured against a limit is drawn as an instrument reads it: meters are flat rails
+   with a graduated scale that tightens toward the ceiling and a hairline index at the limit,
+   history is a tape with hairline level lines at 0/50/100. No rounded candy bars, no gradient
+   fills, no shadowed cards stacked on cards.
 
 Restraint rules: separators and whitespace instead of nesting cards; one accent per surface;
 colour carries provider identity and status only, never decoration.
@@ -45,7 +47,9 @@ contrast than text, pure black is never used as a surface:
 | `TextSecondary` | `#8A8A90` | labels, captions, secondary metrics |
 | `Border` | `#232326` | 1px borders, separators, meter track |
 
-Meter fill is `TextPrimary` in both themes. Status and provider colour:
+Meter fill is `TextPrimary` in both themes, and the meter's scale and threshold index are
+both `TextSecondary` in both themes: one ink for the whole engraving, told apart by
+geometry. Status and provider colour:
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
@@ -155,11 +159,49 @@ reads as an em dash — never as a zero, and never as a blank.
 
 ## Components
 
-**Meter.** 8px tall, radius 4, track `Border`, fill `TextPrimary`. A 1px `TextSecondary` tick
-marks a configured threshold. Fill animates 180ms ease-out only when the value changes. Above
-threshold the fill stays `TextPrimary`; the *label* turns `StatusWarn`. The bar never turns red.
-Minimum width 48. A meter reports a level by its width, so one collapsed to nothing by an
-auto-sized column reports nothing, silently.
+**Meter.** A rail read against a graduated scale: an 8px rail with radius 4, a 2px gap, and a
+4px scale under it, 14 in all. Track `Border`, fill `TextPrimary`. Minimum width 48. A meter
+reports a level by its width, so one collapsed to nothing by an auto-sized column reports
+nothing, silently.
+
+The scale is `TextSecondary` hairlines, and **the interval halves twice on the way up**: every
+10 per cent to half way, every 5 from there to 80, every 2.5 over the last fifth. Altim's job is
+to say how close a level is to a ceiling, so the tape is coarse where the answer is "nowhere
+near" and fine where the difference between two readings is the difference between carrying on
+and stopping. The two boundaries are levels the product already treats as meaningful: 50 is the
+half way rule the history tape rules at, and 80 is the session threshold Altim ships with.
+Neither moves with the configured threshold, because a scale that reshaped itself per metric
+would leave the meters in one column measuring against different tapes, and a card's metrics are
+a set to be read against one another. **The bar itself stays linear.** It is the graduations
+that crowd, never the mapping from a level to a position.
+
+Graduations at 0, 50 and 100 run the full 4px depth and the rest 2px: the same three landmarks
+the history tape rules at, so two readings on a page are read against the same marks whichever
+control carries them. No two graduations are ever drawn closer than 4px; below that the tape
+thins from the fine end and the three landmarks are the last to go. The whole tape is carried
+from 160px up, and the narrowest meter the window can produce is 514: a provider card on the
+Overview, one column, with the window shrunk to the 820 it refuses to go below.
+
+The threshold is an **index**, not a colour change: a `TextSecondary` mark two hairlines wide
+that crosses the rail and carries on to the foot of the scale. It is the only mark that touches
+both, and the only one at that weight, so position, extent and weight tell it apart from a
+graduation with no help from colour. It is drawn over the fill rather than under it, so it is
+still there at 100%. Above the threshold the fill stays `TextPrimary`; the *label* turns
+`StatusWarn`. The bar never turns red.
+
+A meter with nothing to report draws the rail as a hairline outline and nothing else: no track,
+no fill, no scale, no index. The scale is the apparatus for reading a level and there is no
+level, so furnishing the empty rail with everything except a figure would be the one thing this
+document does not allow. The control measures 14 tall either way, so a metric arriving does not
+reflow the page.
+
+The threshold is named in words by the meter's tip, which is also its accessible name:
+`62% used, threshold 80%`, or "Not reported by this provider". The meter is a tab stop exactly
+when it has both a level and a threshold, which is the one thing the row around it does not
+print, and **focus opens the same tip a pointer opens**. A meter with nothing to add is not a
+stop on the way to the next control.
+
+Fill animates 180ms ease-out only when the value changes. Nothing else in the control moves.
 
 **Metric row.** Label left (`Label`, `TextSecondary`), figure right (`Figure` or `FigureSmall`),
 meter beneath spanning full width, optional sub-caption (`Caption`) under the label. Token

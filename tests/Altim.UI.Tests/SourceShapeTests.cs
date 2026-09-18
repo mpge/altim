@@ -108,6 +108,39 @@ public sealed partial class SourceShapeTests
     }
 
     /// <summary>
+    /// A control that draws its own ring has no template part for the guard above to find,
+    /// so it is found by the brush it is handed instead. It drops the framework adorner for
+    /// the same reason every other focusable theme does: two indicators on one control.
+    /// </summary>
+    [Fact]
+    public void EveryThemeHandingOverAFocusRingBrushDropsTheDefaultAdorner()
+    {
+        int checkedThemes = 0;
+
+        foreach (string file in ProjectXaml())
+        {
+            string xaml = File.ReadAllText(file);
+            foreach (Match block in ControlThemeBlock.Matches(xaml))
+            {
+                if (!block.Value.Contains(@"Property=""FocusRingBrush""", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                checkedThemes++;
+
+                Assert.True(
+                    block.Value.Contains(@"FocusAdorner"" Value=""{x:Null}""", StringComparison.Ordinal),
+                    $"{Path.GetFileName(file)} offset {block.Index} draws its own focus ring and "
+                        + "keeps the framework's dashed one beside it.");
+            }
+        }
+
+        // Meter and UsageMap: the two controls that draw themselves and take focus.
+        Assert.Equal(2, checkedThemes);
+    }
+
+    /// <summary>
     /// Every key declared in Primitives.axaml is named in <see cref="TokenTests"/>. A
     /// primitive nobody asserts on is a primitive nobody notices the loss of.
     /// </summary>

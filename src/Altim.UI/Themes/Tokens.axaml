@@ -56,6 +56,7 @@
       <SolidColorBrush x:Key="AltimFocusRingBrush" Color="#0A0A0A" />
       <SolidColorBrush x:Key="AltimMeterTrackBrush" Color="#EAEAEA" />
       <SolidColorBrush x:Key="AltimMeterFillBrush" Color="#0A0A0A" />
+      <SolidColorBrush x:Key="AltimMeterScaleBrush" Color="#666666" />
       <SolidColorBrush x:Key="AltimMeterThresholdBrush" Color="#666666" />
       <SolidColorBrush x:Key="AltimPopupBackgroundBrush" Color="#FAFAFA" />
       <SolidColorBrush x:Key="AltimSidebarBackgroundBrush" Color="#FAFAFA" />
@@ -115,6 +116,7 @@
       <SolidColorBrush x:Key="AltimFocusRingBrush" Color="#0A0A0A" />
       <SolidColorBrush x:Key="AltimMeterTrackBrush" Color="#EAEAEA" />
       <SolidColorBrush x:Key="AltimMeterFillBrush" Color="#0A0A0A" />
+      <SolidColorBrush x:Key="AltimMeterScaleBrush" Color="#666666" />
       <SolidColorBrush x:Key="AltimMeterThresholdBrush" Color="#666666" />
       <SolidColorBrush x:Key="AltimPopupBackgroundBrush" Color="#FAFAFA" />
       <SolidColorBrush x:Key="AltimSidebarBackgroundBrush" Color="#FAFAFA" />
@@ -174,6 +176,7 @@
       <SolidColorBrush x:Key="AltimFocusRingBrush" Color="#F2F2F3" />
       <SolidColorBrush x:Key="AltimMeterTrackBrush" Color="#232326" />
       <SolidColorBrush x:Key="AltimMeterFillBrush" Color="#F2F2F3" />
+      <SolidColorBrush x:Key="AltimMeterScaleBrush" Color="#8A8A90" />
       <SolidColorBrush x:Key="AltimMeterThresholdBrush" Color="#8A8A90" />
       <SolidColorBrush x:Key="AltimPopupBackgroundBrush" Color="#151517" />
       <SolidColorBrush x:Key="AltimSidebarBackgroundBrush" Color="#151517" />

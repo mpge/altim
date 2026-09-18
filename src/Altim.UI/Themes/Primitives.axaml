@@ -106,7 +106,17 @@
   <x:Double x:Key="AltimProviderGlyphSizeLarge">28</x:Double>
   <x:Double x:Key="AltimIconSize">16</x:Double>
   <x:Double x:Key="AltimIconStrokeThickness">1.5</x:Double>
-  <x:Double x:Key="AltimMeterHeight">8</x:Double>
+  <!-- The meter is a rail read against a scale: an 8 tall rail, a 2 gap, and a 4 tall
+       row of graduations under it. The graduations tighten toward the ceiling, which is
+       where a reading starts to matter, and the threshold is an index crossing all 14
+       rather than a change of colour. The control owns these numbers - Meter.RailHeight
+       and the constants beside it - so a view cannot lose them by not applying a theme;
+       these tokens are the design system's copy, and MeterTests fails if the two
+       disagree. -->
+  <x:Double x:Key="AltimMeterHeight">14</x:Double>
+  <x:Double x:Key="AltimMeterRailHeight">8</x:Double>
+  <x:Double x:Key="AltimMeterScaleGap">2</x:Double>
+  <x:Double x:Key="AltimMeterScaleHeight">4</x:Double>
 
   <!-- A meter reports a level by its width, so a meter with no width reports nothing. In
        an auto sized column it would measure to zero and vanish, which is why it asks for
