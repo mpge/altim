@@ -419,14 +419,29 @@ straight to the working-area corner.
 | Tray host | own `Shell_NotifyIcon` message-only window, version 4 (click coordinates), `Shell_NotifyIconGetRect` | own `NSStatusItem` via `objc_msgSend`; anchor from the status button's window frame | Avalonia `TrayIcon` (StatusNotifierItem) |
 | Popup | positioned borderless window | positioned borderless window | working-area corner; no anchor exists in the protocol |
 | Notifications | `Microsoft.WindowsAppSDK` `AppNotificationManager` | `UNUserNotificationCenter` interop | `org.freedesktop.Notifications` over `Tmds.DBus.Protocol` |
-| Autostart | `HKCU\...\Run`, **reporting state from `StartupApproved`** | `SMAppService` (the selector is `mainAppService`), macOS 13+, bundle required; only *enabled* reports true, "requires approval" does not | `~/.config/autostart/*.desktop`, disable via `Hidden=true`; the entry names `$APPIMAGE` when it is set, never the AppImage's temporary mount point |
+| Autostart | `HKCU\...\Run`, **reporting state from `StartupApproved`** | `SMAppService` (the selector is `mainAppService`, `NS_SWIFT_NAME(mainApp)`), macOS 13+, bundle required **and code signature required**; only *enabled* reports true, "requires approval" does not | `~/.config/autostart/*.desktop`, disable via `Hidden=true`; the entry names `$APPIMAGE` when it is set, never the AppImage's temporary mount point |
 | Power/session | `Microsoft.Win32.SystemEvents` plus `PBT_APMSUSPEND` / `GUID_CONSOLE_DISPLAY_STATE` | `NSWorkspace.shared.notificationCenter` (not the default centre): `WillSleep`, `DidWake`, `ScreensDidWake` | logind `PrepareForSleep` on the **system** bus — one signal, `true` to sleep and `false` to wake |
-| Theme | `ColorValuesChanged` | **`NSDistributedNotificationCenter`** — appearance is *not* posted to the workspace centre | portal `org.freedesktop.appearance` on the **session** bus; may resolve late |
+| Theme | `ColorValuesChanged` | **`NSDistributedNotificationCenter`** — appearance is *not* posted to the workspace centre. The name is **undocumented**: see below | portal `org.freedesktop.appearance` on the **session** bus; may resolve late |
 | Reduce motion | `SPI_GETCLIENTAREAANIMATION`, re-read on every `WM_SETTINGCHANGE` reaching the tray's hidden top-level window | `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion`, with `AccessibilityDisplayOptionsDidChange` on the **workspace** centre | portal `org.gnome.desktop.interface` / `enable-animations` on the **session** bus; **no freedesktop key exists**, so a session without GNOME's namespace reports unknown |
 
 macOS uses **three** notification centres, and picking the wrong one fails silently rather than
 loudly: the workspace centre for sleep and wake, the distributed centre for appearance, and the
-user-notification centre for notifications.
+user-notification centre for notifications. Apple says so in terms for the first: *"All
+notifications in this header file must be registered on this notification center. If you register
+on other notification centers, you will not receive the notifications."*
+
+One of the three names is not Apple's to promise. `AppleInterfaceThemeChangedNotification` appears
+in **no public SDK header** and has no documentation page; it is used this way by Flutter, Fyne and
+every other toolkit that needs the signal, which is corroboration rather than a contract. Apple can
+retire it without notice, and what that would cost is bounded: `ThemeChanged` would stop firing and
+Altim would keep the appearance it read at start-up. The sanctioned alternative is KVO on
+`NSApp.effectiveAppearance`, which needs an `NSApplication` and is therefore a different shape of
+solution rather than a drop-in one. Everything else in the macOS column is documented API.
+
+`SMAppService` needs a **code-signed** bundle as well as a bundle: the header says apps using those
+APIs must be code signed and `registerAndReturnError:` answers `kSMErrorInvalidSignature` otherwise.
+An ad-hoc signature satisfies it, which is why `packaging/macos/build-macos.sh` applies one when no
+Developer ID is configured. Start at login is therefore half a packaging feature.
 
 macOS runs as an accessory app: `MacOSPlatformOptions.ShowInDock = false` **and** `LSUIElement` in
 the bundle, because Avalonia sets the activation policy at runtime and overrides the plist alone.
@@ -761,8 +776,18 @@ Provider readers are tested against captured fixture files containing synthetic 
 transcripts enter the repository. View models are plain objects and are tested directly; headless
 Avalonia tests cover the meter and tape controls.
 
-CI runs on 4-core runners with `--blame-hang-timeout`, because the xUnit host is known to deadlock
-on 2-core hosts.
+CI builds and runs the whole suite on **windows-latest, ubuntu-latest and macos-latest**, all at
+warnings-as-errors. The macOS runner is Apple silicon, so it is also the only place the suite runs
+on arm64. Each platform skips a different handful of tests, because each of those skips covers
+behaviour that exists on one operating system only; `.github/workflows/build.yml` carries the
+counts and the rule behind them, and a count that moves should be read as "which test moved"
+rather than "the platform changed".
+
+The runners are 4-core, which matters because the xUnit host is known to deadlock on 2-core hosts.
+This document previously claimed CI passed `--blame-hang-timeout` as well. It does not and it
+cannot: that is a VSTest switch, and these projects run on Microsoft.Testing.Platform, which
+rejects it exactly as it rejects `--nologo`. A job that hangs is bounded by `timeout-minutes` on
+the job instead.
 
 ## Risks
 
@@ -771,15 +796,32 @@ on 2-core hosts.
    main package was absent, and the self-contained payload for the pinned version omits a resource
    library that registration requires. Packaging must resolve this, and notification failure must
    degrade to "Altim runs and does not notify", never to a failed start.
-1. **macOS and Linux interop are written without a macOS or Linux host to test on.** Both are
-   isolated behind `IPlatformService` and `ITrayHost`, both are selected by a run-time platform
-   check in the composition root, and both are marked unverified until someone runs them. What
-   *is* verified from here is that neither stack throws when it is constructed on the wrong
-   operating system — every one of their types is compiled into every build and is inert rather
-   than absent off its own platform, and `ForeignPlatformStackTests` builds the same services in
-   the same order the composition root does and asserts each reports itself unavailable. That
-   catches the failure that would matter most, a constructor turning a degraded capability into
-   a failure to start, and it catches nothing else.
+1. **macOS and Linux interop are written without a macOS or Linux host to develop on.** Both are
+   isolated behind `IPlatformService` and `ITrayHost`, and both are selected by a run-time platform
+   check in the composition root. Two different claims get made about them and they must not be run
+   together.
+
+   *Compiled and tested on the platform, in CI.* The solution builds and the suite runs on
+   windows-latest, ubuntu-latest and macos-latest. On macOS, `MacOSNativeStackTests` constructs the
+   same five services in the same order the composition root does and proves three things that
+   needed a Mac to prove: that the Objective-C runtime is reached through the `objc_msgSend`
+   declarations at all, that the dynamically registered callback class is created, and that the
+   bundle guards in `MacOSNotificationService` and `MacOSAutoStartService` fire — an unbundled
+   process reaching `UNUserNotificationCenter.currentNotificationCenter` or `SMAppService` is
+   killed by an Objective-C exception no managed `catch` can take, so the decision *not to ask*
+   is the load-bearing one. `ForeignPlatformStackTests` is the mirror image and asserts the same
+   stack is inert on a machine that is not a Mac.
+
+   *Run on the platform.* Nobody has done this. A runner has no menu bar to put an `NSStatusItem`
+   in, no user session to show a notification to, and no way to look at a popup, so none of the
+   first rows of the platform matrix above is verified: not the status item, not its anchor
+   rectangle, not the menu, not notifications, not start at login. Every file in
+   `Altim.Platform.MacOS` still carries that warning in its own remarks, and they stay until
+   somebody runs Altim on a Mac. The same applies to `Altim.Platform.Linux`.
+
+   What the CI layer catches is the failure that would matter most — a constructor turning a
+   degraded capability into a failure to start, or a mis-declared P/Invoke faulting the process —
+   and beyond that it catches nothing.
 2. **Provider formats are internal and disclaimed by their vendors.** Every field is optional at the
    parse boundary; a shape change degrades one metric to unavailable instead of breaking the app.
 3. **The live Codex quota call requires the vendor CLI and the network**, so it is optional, rate

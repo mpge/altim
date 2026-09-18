@@ -44,6 +44,18 @@ namespace Altim.Platform.MacOS;
 /// mode and absent otherwise.
 /// </para>
 /// <para>
+/// <b>That notification name is undocumented, and this is the one place in the macOS layer
+/// that depends on something Apple does not publish.</b> <c>AppleInterfaceThemeChangedNotification</c>
+/// appears in no public SDK header and has no documentation page; it is used this way by
+/// Flutter, Fyne and every other cross-platform toolkit that needs the signal, which is
+/// corroboration and not a guarantee. Apple can retire it without notice. What that would cost
+/// is bounded: <see cref="ThemeChanged"/> would stop firing and Altim would keep whatever
+/// appearance it read at start-up, which is a stale theme rather than a failure. Everything
+/// else on this class is documented API — the three <c>NSWorkspace</c> names are declared in
+/// <c>NSWorkspace.h</c>, and Apple states in terms that registering them anywhere but
+/// <c>NSWorkspace</c>'s own centre receives nothing.
+/// </para>
+/// <para>
 /// <b>The tray icon is not swapped on a theme change.</b> It is a template image; the menu
 /// bar tints it. <see cref="ThemeChanged"/> exists for the application's own light and dark
 /// surfaces.
@@ -70,7 +82,10 @@ public sealed class MacOSPlatformService : IPlatformService, IObjCCallbackSink, 
     /// <summary>Posted by <c>NSWorkspace</c> when the displays wake, which S0 sleep may be all of.</summary>
     private const string ScreensDidWakeNotification = "NSWorkspaceScreensDidWakeNotification";
 
-    /// <summary>The system-wide appearance broadcast, posted to the distributed centre.</summary>
+    /// <summary>
+    /// The system-wide appearance broadcast, posted to the distributed centre. Undocumented:
+    /// see the class remarks for what depends on it and what its disappearance would cost.
+    /// </summary>
     private const string InterfaceThemeChangedNotification = "AppleInterfaceThemeChangedNotification";
 
     private readonly MacOSTrayHost _tray;

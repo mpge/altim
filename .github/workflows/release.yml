@@ -188,6 +188,21 @@ jobs:
         if: matrix.platform == 'macos'
         run: bash packaging/macos/build-macos.sh --version "$VERSION" --arch universal
 
+      # The script finishing is not the same as the bundle being an application. A
+      # release that ships one with an unsubstituted version, no bundle identifier
+      # or a single architecture slice is worse than one that stops here, because
+      # nothing downstream would notice: the DMG still mounts and the .app still
+      # has the right shape. This is the same script build.yml runs on every push.
+      - name: Check the app bundle
+        if: matrix.platform == 'macos'
+        run: |
+          set -euo pipefail
+          # CFBundleShortVersionString is the release version with any prerelease
+          # or build suffix removed, which is what build-macos.sh substitutes.
+          short="${VERSION%%-*}"
+          short="${short%%+*}"
+          bash packaging/macos/verify-bundle.sh dist/.macos-stage/Altim.app "$short" universal
+
       - name: Note that the macOS artefacts are unsigned
         if: matrix.platform == 'macos' && env.MACOS_SIGNING_IDENTITY == ''
         run: echo "::warning::MACOS_SIGNING_IDENTITY is not set. The DMG is unsigned and un-notarised; Gatekeeper will refuse to open it after download."

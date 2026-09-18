@@ -23,12 +23,20 @@ a local run and a CI run produce the same thing.
 | Linux: `.deb` and `.rpm` from `nfpm.yaml` | **verified** — nfpm is a Go binary and runs on Windows; both packages were built and their control metadata read back |
 | Linux: AppImage | **never executed** — `appimagetool` is itself an AppImage |
 | Linux: installing or running any of the three | **never executed** |
-| macOS: anything at all | **never executed** |
+| macOS: `dotnet build` and the full test suite | **run on every push** — `build.yml` has a `macos-latest` job; Apple silicon, so this is also the only arm64 run of the suite |
+| macOS: `build-macos.sh`, the `.app`, the universal merge and the DMG | **run on every push** — `build.yml`'s `macos-bundle` job assembles it and `verify-bundle.sh` reads it back |
+| macOS: installing, launching or signing anything | **never executed** — no Apple Developer account, and a runner has no menu bar |
 | `release.yml`, `build.yml` | `actionlint` clean |
 | the three shell scripts | `shellcheck --severity=style` clean |
 
-Lint-clean is not the same as correct. Nothing on the macOS path, and nothing that
-installs or launches on Linux, has been observed working.
+Lint-clean is not the same as correct, and neither is assembled-in-CI. The macOS
+rows say a bundle is produced and that reading it back finds an application in it.
+They do not say Altim runs on a Mac: nobody has launched it, nothing is signed with
+a real identity, and nothing is notarised. Nothing that installs or launches on
+Linux has been observed working either.
+
+`build.yml` uploads the unsigned macOS bundle as an artefact with a fourteen-day
+retention, which is the shortest path from here to somebody actually trying it.
 
 ---
 
@@ -468,6 +476,27 @@ unchanged. A file that exists in only one of the two publishes is treated as an
 error, not skipped: it would produce a bundle that works on one Mac and not the
 other.
 
+**Three of the native libraries are already universal, and `lipo` will not take
+them.** SkiaSharp, HarfBuzzSharp and Avalonia each ship one fat `.dylib` under
+`runtimes/osx/native/`, which is the architecture-neutral `osx` runtime identifier
+rather than `osx-arm64` or `osx-x64`. Runtime identifier fallback resolves that same
+file for both publishes, so both sides of the merge are the identical binary and
+both already carry `x86_64` and `arm64`. `lipo -create` refuses two inputs that
+share an architecture — cctools fatals with "... have the same architectures
+(x86_64) and can't be in the same fat output file" — and under `set -e` that ended
+the build. The script now skips a pair whose architecture sets already match, and
+then reads every Mach-O in the finished bundle back to confirm it carries both
+slices, because a merge that was skipped for a good reason and one skipped for a
+bad reason look identical in a count.
+
+**Reading the bundle back.** `packaging/macos/verify-bundle.sh` takes a built
+`Altim.app` and checks the things that would otherwise only surface on somebody's
+Mac: an unsubstituted `@SHORT_VERSION@`, a missing `CFBundleIdentifier` (which is
+what silently turns off notifications and start at login), `LSUIElement` going
+missing, the menu bar template assets not reaching anywhere
+`MacOSTrayAssets.DiscoverAssetDirectory` looks, and a thin Mach-O. It also requires
+a valid code signature, and reports which kind it is.
+
 ### `LSUIElement`, and why the plist alone is not enough
 
 `packaging/macos/Info.plist` sets `LSUIElement`, which is what keeps the Dock tile
@@ -497,9 +526,39 @@ remove the upscale.
 
 ## Signing
 
-Nothing is signed today. Every signing step is skipped cleanly when its credential
-is absent, and the release notes the workflow writes say so on the release page,
-so an unsigned release is obvious rather than silent.
+Nothing is signed with an identity today. Every identity-signing step is skipped
+cleanly when its credential is absent, and the release notes the workflow writes say
+so on the release page, so an unsigned release is obvious rather than silent.
+
+### macOS is ad-hoc signed even with no credentials, and has to be
+
+"Unsigned" is not one of the options on a Mac. Apple's macOS Big Sur universal apps
+release notes are explicit: *"New in macOS 11 on Macs with Apple silicon ... the
+operating system enforces that any executable must be signed before it's allowed to
+run. There isn't a specific identity requirement for this signature: a simple ad-hoc
+signature is sufficient."* The same page adds that a workflow using tools that modify
+a binary after linking "might need to manually call `codesign(1)` as an additional
+build phase", and `lipo` is such a tool.
+
+`SMAppService` is the second reason. Its header states that apps using those APIs
+must be code signed, and `registerAndReturnError:` answers `kSMErrorInvalidSignature`
+otherwise, so an unsealed bundle has no start at login even on the machine that built
+it. The third is simply that without a bundle seal there is no
+`_CodeSignature/CodeResources` and nothing can tell an intact bundle from a tampered
+one.
+
+So `build-macos.sh` ad-hoc signs (`codesign --force --sign -`, inside out, bundle
+last) whenever `MACOS_SIGNING_IDENTITY` is absent. **This is not a substitute for a
+Developer ID.** An ad-hoc signature carries no identity, Gatekeeper still refuses a
+downloaded copy, and notarisation is still impossible. It is the difference between a
+bundle somebody can run on their own Mac and one they cannot, which matters because
+CI uploads exactly such a bundle as an artefact.
+
+The .NET SDK already ad-hoc signs the apphost itself for any `osx*` runtime
+identifier, and from .NET 10 it does so when cross-building too, via a managed Mach-O
+signer rather than by shelling out to `codesign`. Per-architecture signatures survive
+`lipo` — each slice in a universal binary carries its own code directory — so the
+re-sign above is about sealing the *bundle*, not about repairing the binaries.
 
 ### Windows
 
@@ -621,11 +680,16 @@ These are open, not hidden.
    correctly reported as undelivered and everything else works — which is the
    behaviour ARCHITECTURE.md asks for.
 
-2. **Linux and macOS artefacts are unverified end to end.** The scripts are
-   lint-clean and the workflow is `actionlint`-clean, but no `.deb`, `.rpm`,
-   AppImage or `.app` built by them has been installed or run. ARCHITECTURE.md's
-   risk 2 already says the native integrations behind them are unverified; this
-   adds the packaging layer to that list.
+2. **Linux and macOS artefacts are unverified end to end.** No `.deb`, `.rpm`,
+   AppImage or `.app` built by these scripts has been installed or run.
+   ARCHITECTURE.md's risk 1 already says the native integrations behind them are
+   unverified; this adds the packaging layer to that list.
+
+   macOS is now half a step further along than Linux: the `.app` and the DMG are
+   assembled on a real macOS runner on every push and read back, so "the script
+   runs and produces a bundle" is observed rather than assumed. What is still
+   missing is everything after that — nobody has copied the bundle to a Mac,
+   double-clicked it, and seen a menu bar icon.
 
 3. **No update mechanism outside Windows.** Velopack supports macOS, but its
    updater replaces the `.app` in place, and an unsigned, un-notarised replacement
@@ -644,7 +708,7 @@ These are open, not hidden.
    is in force and `Directory.Packages.props` was not ours to edit. Move it to
    `<PackageVersion Include="Velopack" Version="1.2.0" />` and drop the attribute.
 
-6. **`packaging/linux/build-linux.sh` and `packaging/macos/build-macos.sh` need the
-   executable bit in git** (`git update-index --chmod=+x`). The release workflow
+6. **`packaging/linux/build-linux.sh`, `packaging/macos/build-macos.sh` and
+   `packaging/macos/verify-bundle.sh` need the executable bit in git** (`git update-index --chmod=+x`). The release workflow
    invokes them through `bash` so a missing bit cannot break a release, but a
    maintainer running `./packaging/...` locally will hit it.

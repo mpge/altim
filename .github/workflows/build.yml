@@ -14,10 +14,21 @@ jobs:
   build:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # A hung test host otherwise holds a runner for six hours. This is a deadlock
+    # guard and not a performance budget, so it is generous on purpose: the suite
+    # takes well under a minute and the build a few more.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        # macos-latest is Apple silicon, so this is also the only job that runs the
+        # suite on arm64. No macOS workload or SDK extra is needed and none is
+        # installed on purpose: Altim.Platform.MacOS is a plain net10.0 assembly that
+        # reaches NSStatusItem, UNUserNotificationCenter and SMAppService through
+        # objc_msgSend rather than through the macOS reference assemblies, which is
+        # what keeps the solution building on a machine that has no Mac SDK at all.
+        # See the comment at the top of Altim.Platform.MacOS.csproj.
+        os: [windows-latest, ubuntu-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -31,13 +42,31 @@ jobs:
 
       # Warnings are errors, so a clean build is part of the contract.
       # The Windows platform project multi-targets a Windows TFM; its reference
-      # assemblies come from NuGet, so this builds on Linux too.
+      # assemblies come from NuGet, so this builds on Linux and macOS too.
       - name: Build
         run: dotnet build Altim.sln -c Release --no-restore
 
-      # Headless Avalonia tests need no display server on Linux with Avalonia 12.
+      # Headless Avalonia tests need no display server on Linux with Avalonia 12,
+      # and need no window server on macOS for the same reason: the session is
+      # headless and drawing goes through Skia in software.
+      #
       # Do not add --nologo: these projects run on Microsoft.Testing.Platform,
       # which rejects VSTest flags and would print help instead of running.
+      #
+      # The number of skipped tests is not the same on the three platforms and a
+      # difference is not a fault. Every skip is a test of behaviour that exists on
+      # one operating system only, so each platform skips the ones not about it.
+      # Measured on Windows on 2026-09-18 and counted from the source for the other
+      # two, the skips are:
+      #
+      #   windows  3  two UnixFact command-resolution tests, and MacOSNativeStackTests
+      #   macOS    7  two WindowsFact, four Windows-only process fixtures, and the
+      #               off-macOS half of ForeignPlatformStackTests
+      #   Linux    9  the macOS list minus its one macOS skip, plus the two off-Linux
+      #               halves of ForeignPlatformStackTests and MacOSNativeStackTests
+      #
+      # Those totals go stale as tests are added; the rule behind them does not.
+      # If a count moves, read WHICH test moved before assuming the platform did.
       - name: Test
         run: dotnet test Altim.sln -c Release --no-build
 
@@ -48,3 +77,68 @@ jobs:
           name: test-results-${{ matrix.os }}
           path: '**/TestResults/**'
           if-no-files-found: ignore
+
+  # The macOS publish, kept out of the matrix above so that a compile-and-test
+  # answer still arrives quickly. Building on macOS and shipping on macOS are
+  # different claims and the second one has never been made: packaging/README.md
+  # records "macOS: anything at all - never executed".
+  #
+  # What this proves: that two self-contained publishes merge into a universal
+  # binary, that the Info.plist substitution happened, that the icon converts, that
+  # the menu bar assets reach a place the app looks in, and that a DMG mounts.
+  #
+  # What it cannot prove: that the application runs. There is no Apple Developer
+  # account, so nothing here is signed with a real identity or notarised, and a
+  # runner cannot launch a menu bar app and look at it. The artefact is uploaded so
+  # that somebody with a Mac can do the part a runner cannot.
+  macos-bundle:
+    name: macOS app bundle
+    runs-on: macos-latest
+    # Two self-contained publishes, a lipo pass over every Mach-O, and a DMG.
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Invoked through bash rather than as ./packaging/... so that a missing
+      # executable bit in the index cannot turn into a "Permission denied".
+      #
+      # A prerelease version on purpose: CFBundleShortVersionString takes at most
+      # three integers, so the script has to strip the "-ci" suffix, and the check
+      # below asserts that it did.
+      - name: Build Altim.app and the DMG
+        run: bash packaging/macos/build-macos.sh --version 0.0.0-ci --arch universal
+
+      # Assembling without an error is not the same as having an application.
+      # verify-bundle.sh reads the result back; it is a script rather than steps
+      # here so the same checks can be run by hand against the uploaded artefact.
+      - name: Check the bundle
+        run: bash packaging/macos/verify-bundle.sh dist/.macos-stage/Altim.app 0.0.0 universal
+
+      # The DMG is the artefact a user would download, so mounting it is the last
+      # thing between "a file was produced" and "the file is a disk image with an
+      # application on it".
+      - name: Mount the DMG and look inside
+        run: |
+          set -euo pipefail
+          dmg="$(find dist/macos -name '*.dmg' -print -quit)"
+          [ -n "$dmg" ] || { echo "no DMG was produced" >&2; exit 1; }
+          hdiutil verify "$dmg"
+          mountpoint="$RUNNER_TEMP/altim-dmg"
+          mkdir -p "$mountpoint"
+          hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mountpoint"
+          trap 'hdiutil detach "$mountpoint" || true' EXIT
+          ls -la "$mountpoint"
+          [ -d "$mountpoint/Altim.app" ] || { echo "the DMG has no Altim.app in it" >&2; exit 1; }
+          [ -L "$mountpoint/Applications" ] || { echo "the DMG has no /Applications symlink to drag onto" >&2; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-unsigned-bundle
+          path: dist/macos/**
+          if-no-files-found: error
+          retention-days: 14

@@ -255,6 +255,15 @@ dotnet test Altim.sln -c Release
 dotnet run --project src/Altim.App
 ```
 
+Continuous integration runs both of the first two on **Windows, Linux and macOS**, so every change
+is compiled with warnings as errors and tested on all three; the macOS runner is Apple silicon, so
+it is also the only place the suite runs on arm64. Each platform skips a different handful of
+tests, because each of those skips is a test of behaviour that exists on one operating system only.
+`.github/workflows/build.yml` lists the counts and the rule behind them.
+
+Compiling and passing tests on macOS is not the same claim as running on a Mac, and only the first
+one is made. See [Packaging](#packaging).
+
 ## Repository layout
 
 | Path | What lives there |
@@ -298,13 +307,27 @@ No UI work is required: views render whatever metrics a provider reports.
 
 Where a desktop cannot do something, Altim degrades visibly rather than pretending.
 
+The macOS column is written from Apple's headers and has been compiled and exercised as far as a
+runner can reach, which is not far: CI constructs the whole macOS service stack on a real Mac and
+proves the Objective-C runtime is reached, the dynamic callback class registers, and the guards
+that keep an unbundled process away from `UNUserNotificationCenter` and `SMAppService` actually
+fire. A runner has no menu bar to put a status item in, so everything in the first row remains
+unverified. The same is true of Linux, for the same reason.
+
 ## Packaging
 
 | Platform | Artefacts | State |
 |---|---|---|
 | Windows | `Setup.exe`, portable zip, delta updates | built, installed, run and uninstalled on Windows 11 |
 | Linux | AppImage, `.deb`, `.rpm` | packages built and their metadata checked; **never installed or run** |
-| macOS | universal `.app`, DMG | **never executed** — no macOS host |
+| macOS | universal `.app`, DMG | assembled on a macOS runner and read back by `packaging/macos/verify-bundle.sh`; **never installed, launched or signed on a Mac** |
+
+The macOS row describes what continuous integration does, not a report from a Mac. It says the
+bundle assembles, that both architecture slices are present, that the `Info.plist` substitution
+happened and that the DMG mounts with an application inside it. It does not say Altim runs: nobody
+has launched it on macOS, and the menu bar presence, notifications and start at login are all still
+unverified. `build.yml` uploads the unsigned bundle as an artefact so that somebody with a Mac can
+close that gap.
 
 Scripts live in [`packaging/`](packaging/), with a README covering how to produce each artefact by
 hand and what a maintainer needs in order to sign them. A version tag builds all three through

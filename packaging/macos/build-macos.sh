@@ -111,6 +111,7 @@ if [ "${#RIDS[@]}" -gt 1 ]; then
     SECONDARY="$REPO_ROOT/dist/.publish/${RIDS[1]}"
     step "Merging ${RIDS[0]} and ${RIDS[1]} into universal binaries"
     merged=0
+    already=0
     while IFS= read -r -d '' file; do
         rel="${file#"$MACOS_DIR"/}"
         other="$SECONDARY/$rel"
@@ -118,14 +119,30 @@ if [ "${#RIDS[@]}" -gt 1 ]; then
         # Only Mach-O files can be merged. Everything else — managed assemblies,
         # .json, the icon assets — is architecture-neutral and is already correct.
         case "$(file -b "$file")" in
-            *Mach-O*)
-                lipo -create -output "$file.universal" "$file" "$other"
-                mv "$file.universal" "$file"
-                merged=$((merged + 1))
-                ;;
+            *Mach-O*) ;;
+            *) continue ;;
         esac
+
+        # Some native dependencies are already universal, and lipo will not take
+        # them. SkiaSharp, HarfBuzzSharp and Avalonia each ship ONE fat dylib under
+        # runtimes/osx/native, which is the architecture-neutral osx runtime
+        # identifier rather than osx-arm64 or osx-x64. Runtime identifier fallback
+        # resolves that same file for both publishes, so both sides of this merge
+        # are the identical binary and both already carry x86_64 and arm64. lipo
+        # refuses that outright: cctools fatals with "... have the same
+        # architectures (x86_64) and can't be in the same fat output file", which
+        # under set -e ends the release build. They need no merge; the slice check
+        # below is what proves the result is right rather than the merge count.
+        if [ "$(lipo -archs "$file")" = "$(lipo -archs "$other")" ]; then
+            already=$((already + 1))
+            continue
+        fi
+
+        lipo -create -output "$file.universal" "$file" "$other"
+        mv "$file.universal" "$file"
+        merged=$((merged + 1))
     done < <(find "$MACOS_DIR" -type f -print0)
-    step "Merged $merged Mach-O files"
+    step "Merged $merged Mach-O files; $already were already universal"
 
     # A file present in only one architecture is a packaging bug, not a merge to
     # skip quietly: it would produce a bundle that works on one Mac and not the
@@ -139,6 +156,31 @@ if [ "${#RIDS[@]}" -gt 1 ]; then
         fi
     done < <(find "$SECONDARY" -type f -print0)
     [ "$missing" -eq 0 ] || { echo "$missing file(s) present in only one architecture" >&2; exit 1; }
+
+    # Having run lipo is not the same as having a universal bundle. A Mach-O that
+    # came through with one slice produces a .app that launches on one kind of Mac
+    # and dies on the other, and nothing before this point would say so: the merge
+    # count above is satisfied by a file that was skipped for a good reason and by
+    # one that was skipped for a bad one. Every Mach-O is therefore read back.
+    step "Checking every Mach-O carries both slices"
+    thin=0
+    while IFS= read -r -d '' file; do
+        case "$(file -b "$file")" in
+            *Mach-O*) ;;
+            *) continue ;;
+        esac
+        archs=" $(lipo -archs "$file") "
+        for want in arm64 x86_64; do
+            case "$archs" in
+                *" $want "*) ;;
+                *)
+                    echo "no $want slice: ${file#"$MACOS_DIR"/} (${archs# })" >&2
+                    thin=$((thin + 1))
+                    ;;
+            esac
+        done
+    done < <(find "$MACOS_DIR" -type f -print0)
+    [ "$thin" -eq 0 ] || { echo "$thin missing architecture slice(s)" >&2; exit 1; }
 fi
 
 chmod +x "$MACOS_DIR/Altim"
@@ -201,7 +243,42 @@ if [ -n "${MACOS_SIGNING_IDENTITY:-}" ]; then
     codesign --verify --deep --strict --verbose=2 "$APP"
     SIGNED=1
 else
-    step "No MACOS_SIGNING_IDENTITY: the bundle will be UNSIGNED"
+    # Ad-hoc, because "unsigned" is not actually an option. Three separate reasons:
+    #
+    #   1. macOS 11 and later enforce that any executable must be signed before it
+    #      is allowed to run on an Apple silicon Mac. Apple's Big Sur universal apps
+    #      release notes say a simple ad-hoc signature is sufficient, and that a
+    #      workflow using tools that modify a binary after linking "might need to
+    #      manually call codesign(1) as an additional build phase". lipo above is
+    #      exactly such a tool.
+    #   2. SMAppService, which is how start at login is implemented, requires it:
+    #      its header states that apps using those APIs must be code signed, and
+    #      registerAndReturnError: answers kSMErrorInvalidSignature otherwise. An
+    #      unsealed bundle therefore has no start at login even on the machine that
+    #      built it.
+    #   3. Without a bundle seal there is no _CodeSignature/CodeResources, so
+    #      nothing can tell an intact bundle from a tampered one, and codesign
+    #      --verify reports the app as not signed at all.
+    #
+    # This is NOT a substitute for a Developer ID. An ad-hoc signature carries no
+    # identity, Gatekeeper still refuses a downloaded copy, and notarisation is
+    # still impossible. It is the difference between a bundle somebody can run on
+    # their own Mac and one they cannot.
+    step "No MACOS_SIGNING_IDENTITY: ad-hoc signing so the bundle can run at all"
+
+    # Inside out, exactly as above: nested Mach-O first, the bundle last, because
+    # signing the bundle seals the main executable and writes CodeResources.
+    while IFS= read -r -d '' file; do
+        case "$(file -b "$file")" in
+            *Mach-O*)
+                [ "$file" = "$MACOS_DIR/Altim" ] && continue
+                codesign --force --sign - "$file"
+                ;;
+        esac
+    done < <(find "$MACOS_DIR" -type f -print0)
+
+    codesign --force --sign - "$APP"
+    codesign --verify --deep --strict --verbose=2 "$APP"
 fi
 
 # ---------------------------------------------------------------------------
@@ -271,8 +348,9 @@ step "Done: $DIST"
 ls -lh "$DIST"
 echo
 if [ "$SIGNED" -eq 0 ]; then
-    echo "    UNSIGNED and NOT notarised. Gatekeeper will refuse to open this on a"
-    echo "    machine that downloaded it. See packaging/README.md, 'macOS signing'."
+    echo "    AD-HOC signed only, and NOT notarised. It will run on the machine it was"
+    echo "    built on, and Gatekeeper will refuse to open a copy that was downloaded."
+    echo "    See packaging/README.md, 'macOS signing'."
 elif [ "$NOTARISED" -eq 0 ]; then
     echo "    Signed but NOT notarised. Gatekeeper will still refuse a downloaded copy."
 fi

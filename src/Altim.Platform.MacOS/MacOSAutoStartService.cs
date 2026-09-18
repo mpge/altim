@@ -59,6 +59,18 @@ public enum MacOSLoginItemStatus
 /// false and accepts a write that does nothing —
 /// <see cref="IAutoStartService"/> already tells callers to read the state back.
 /// </para>
+/// <para>
+/// <b>There is a third requirement, and it is not checked here: the bundle has to be code
+/// signed.</b> <c>SMAppService.h</c> states that apps using these APIs must be code signed,
+/// and <c>registerAndReturnError:</c> answers <c>kSMErrorInvalidSignature</c> for a bundle
+/// that is not. It is deliberately not checked, because there is nothing useful to do with
+/// the answer that <see cref="Status"/> does not already do better: a refused registration
+/// leaves the service reporting <see cref="MacOSLoginItemStatus.NotRegistered"/>, which is
+/// the truth, and reading the state back is what the interface asks of every caller anyway.
+/// What it does mean is that packaging owns half of this feature. An ad-hoc signature is
+/// enough, and <c>packaging/macos/build-macos.sh</c> applies one when no Developer ID is
+/// configured for exactly this reason.
+/// </para>
 /// </remarks>
 public sealed class MacOSAutoStartService : IAutoStartService
 {
