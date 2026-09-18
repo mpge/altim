@@ -163,7 +163,8 @@
                   <Path Grid.Column="0"
                         Classes="glyph"
                         Classes.anthropic="{Binding IsAnthropic}"
-                        Classes.openai="{Binding IsOpenAI}" />
+                        Classes.openai="{Binding IsOpenAI}"
+                        Classes.gemini="{Binding IsGemini}" />
                   <StackPanel Grid.Column="1" Margin="8,0,0,0" Spacing="{DynamicResource AltimSpace2}">
                     <TextBlock Theme="{DynamicResource AltimBodyText}" Text="{Binding DisplayName}" />
                     <TextBlock Theme="{DynamicResource AltimCaptionText}"

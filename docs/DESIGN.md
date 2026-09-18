@@ -74,9 +74,17 @@ geometry. Status and provider colour:
 | `StatusError` | `#B42318` | `#F87171` | provider unreachable |
 | `AccentAnthropic` | `#C05B32` | `#D2764D` | provider glyph and dot only |
 | `AccentOpenAI` | `#0A0A0A` | `#F2F2F3` | provider glyph and dot only |
+| `AccentGemini` | `#8857C1` | `#9B72CB` | provider glyph and dot only |
 | `DialNormal` | `#1D4ED8` | `#3B82F6` | a dial's sweep below half way |
 | `DialCaution` | `#CA6A04` | `#FCD34D` | a dial's sweep from half way to the threshold |
 | `DialExceeded` | `#7F1D1D` | `#E04747` | a dial's sweep past the threshold |
+
+One accent per provider, and each is a single ink in that vendor's own hue rather than the
+vendor's artwork recoloured. `AccentGemini` is Google's own gradient midpoint: Dark takes it
+as it is and Light takes the same hue and saturation down in lightness for a white ground,
+which is the treatment `AccentAnthropic` already has. It stands 5.0:1 from `Surface` in Light
+and 5.3:1 in Dark, and it is deliberately violet rather than Google's blue, because a blue
+glyph would sit on the same panel as `DialNormal` and read as a reading rather than a name.
 
 A provider accent never fills a meter, a button, or a background. It marks identity at 16,
 20 or 28px and nothing else. Status colour appears as a 6px or 8px dot, a single word, or the
@@ -491,40 +499,49 @@ in `Surface`.
 **Provider marks.** Each provider wears its own vendor's mark, on the same 16px box the line
 icons use but filled rather than stroked, in that provider's accent: Claude's is Anthropic's
 radial burst, whose tapered spokes run out from a solid centre at uneven lengths, widths and
-spacings; Codex's is OpenAI's interlocking knot, six braided strands around an open hexagon.
+spacings; Codex's is OpenAI's interlocking knot, six braided strands around an open hexagon;
+Gemini's is Google's four pointed star, whose arms taper to a point along concave flanks.
 Any other provider keeps a plain circle. Each is a **single monochrome path** — the accent is
 what marks identity, so a mark in its vendor's own colours would repeat what the palette has
 already said, in colours the palette does not hold, and would break the rule that provider
 colour marks identity and nothing else. Drawn at three sizes from one path: 16 beside a label,
 20 in an activity row, 28 where a provider heads a card.
 
-**The path data is the vendors' own outlines, not a drawing of them.** Both come from the
+**The path data is the vendors' own outlines, not a drawing of them.** All three come from the
 [Simple Icons](https://simpleicons.org) set, which is CC0 and traces each mark from the
 vendor's own published brand asset. Each was moved onto the 16px box by scale and translation
 alone, so the outline is still the vendor's: the burst is one closed figure of 158 segments,
-the knot is a silhouette with seven counters cut out of it. A mark redrawn from memory is a
-different mark that resembles one, and resembling one is the failure mode that gets shipped —
-it passes every test a path can be held to and still reads wrong to anyone who knows the mark.
+the knot is a silhouette with seven counters cut out of it, the star is one closed figure of
+quadratic flanks and three circular arcs. A mark redrawn from memory is a different mark that
+resembles one, and resembling one is the failure mode that gets shipped — it passes every test
+a path can be held to and still reads wrong to anyone who knows the mark. The fitting is done
+by a path transformer rather than by hand, and it has to resolve a smooth quadratic's implied
+control point — the reflection of the one before it — or the flanks of the star come out
+distorted with every endpoint, every bound and every quadrant still correct.
 
 Every mark fills its 16×16 box on all four sides. A shape stretched `Uniform` is scaled to its
 own bounds and pinned to the top left of its slot rather than centred, so a mark whose bounds
 are not square hangs to one side of the label it belongs to — which is what a hexagon 13 wide
-in a 15 tall box did. Neither vendor's ink is square on its own grid — the burst is 0.08 per
+in a 15 tall box did. Two of the three are not square on their own grid — the burst is 0.08 per
 cent narrower than it is tall, the knot 1.4 per cent — so each axis is scaled to the box on its
-own. One mark is solid at the centre and the other open there, which is what tells them apart
-at 16px and what balances an `AccentOpenAI` that is very nearly the ink colour itself.
+own. Google's star is already square there, so both its axes take the same factor and its
+outline is not distorted at all. The knot is open at its centre where the other two are solid,
+which is what tells it from them at 16px and what balances an `AccentOpenAI` that is very
+nearly the ink colour itself; the burst and the star are told apart by everything else, the
+burst covering its box and the star running out along the two axes and tapering.
 
-Both paths declare `F1`, the non-zero fill rule, because that is the rule SVG applies when a
-file names none and therefore the rule the vendors' own files are drawn under. On this artwork
-it changes nothing — no two subpaths overlap and the knot's counters are nested rather than
-lapped, so even-odd draws the same picture, which `ProviderGlyphTests` checks rather than
-assumes. It is declared anyway: re-tracing either mark from a newer vendor asset whose subpaths
-do lap would otherwise hole those laps out with no error and no failing parse.
+All three paths declare `F1`, the non-zero fill rule, because that is the rule SVG applies when
+a file names none and therefore the rule the vendors' own files are drawn under. On this artwork
+it changes nothing — no two subpaths overlap, the knot's counters are nested rather than lapped,
+and the star's outline never crosses itself — so even-odd draws the same picture, which
+`ProviderGlyphTests` checks rather than assumes. It is declared anyway: re-tracing any of them
+from a newer vendor asset whose subpaths do lap would otherwise hole those laps out with no
+error and no failing parse.
 
 **Trademarks.** The provider marks are the vendors' own and identify the vendors' own products,
-which is nominative use. Altim claims no endorsement by, or affiliation with, Anthropic or
-OpenAI. Neither mark is restyled or recoloured beyond the single ink it is drawn in, neither is
-combined with Altim's own mark, and neither ever stands for Altim. Simple Icons' CC0 waiver
+which is nominative use. Altim claims no endorsement by, or affiliation with, Anthropic, OpenAI
+or Google. No mark is restyled or recoloured beyond the single ink it is drawn in, none is
+combined with Altim's own mark, and none ever stands for Altim. Simple Icons' CC0 waiver
 covers the traced path data and nothing else: the vendors' trademark rights in the marks those
 paths depict are untouched by it. The full notice, including what the MIT licence does not
 grant a fork, is in [TRADEMARKS.md](../TRADEMARKS.md).
@@ -568,6 +585,29 @@ same ground. Three things stacked:
 
 **Popup panel.** 320px wide, radius 12 **(reference)**, 1px border, `SurfaceMuted`, one shadow.
 Six sections split by 1px rules: header, reading, providers, resets, status, action.
+
+**Only the providers this machine actually has.** Altim registers every provider it knows how to
+read, so a machine with one agent installed listed three, two of them saying nothing. A provider
+whose status is settled as *not detected* is left out of the rows, the rings, the legend and the
+resets alike — a row dropped while its ring stayed on the face would be worse than the clutter it
+removed. **A provider whose last reading failed is never left out**: it is installed, Altim could
+not read it, and hiding it would turn a fault into a silence. Nor is one that has not been probed
+yet, which would otherwise appear a moment later and push the panel about under the reader's
+pointer; until it answers it reads as any provider with no figures does. This is a consequence of
+what is installed, not a preference, and there is no setting for it.
+
+The same rule gives Overview its cards. Three surfaces are deliberately outside it. The **status
+line** speaks for every provider, because one sentence saying "Gemini CLI not detected" is what
+explains a short list, and because it is what says "No providers detected" when the list is empty.
+**History** draws every provider, because one uninstalled today still used something last week and
+dropping its line would erase the past rather than tidy the present. **Settings** lists every
+provider with its own status sentence, because that page is the inventory and is where a reader
+goes to find out why something is missing. The **sidebar** keeps a page for every provider too:
+navigation is a table of contents rather than a report, and that page is where the sentence and
+the retry live for somebody who has just installed an agent.
+
+With none of them installed the provider section carries its one sentence, "No providers
+detected", and the status line arrives at the same words over the same set.
 
 - **Header**: the 22px mark and the wordmark in `Heading`, with the gear at the far end.
 - **Reading**: the panel's hero. **One dial, centred, carrying one sweep per provider** on its
@@ -691,6 +731,8 @@ AI agents are doing."
 - Unavailable metric: "Not reported by this provider" — never a zero or a guess.
 - Provider error: "Unable to retrieve usage" with a "Retry" button.
 - Empty history: "No usage recorded yet. Altim starts collecting when an agent runs."
+- No provider installed: "No providers detected" — the provider section's sentence and, over the
+  same set, the status line's.
 - Threshold alert: "Session usage reached 80%." Reset alert: "Usage has reset."
 
 - Pacing with too little history: `—`. Reset time not reported: `—`.

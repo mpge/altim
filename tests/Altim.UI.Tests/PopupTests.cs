@@ -533,7 +533,7 @@ public sealed class PopupTests
             new TestClock(Readings.Now),
             AltimSettings.Default);
 
-        Assert.False(panel.HasProviders);
+        Assert.False(panel.HasVisibleProviders);
 
         Surface.Show(new PopupView { DataContext = panel }, window =>
         {

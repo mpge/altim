@@ -77,6 +77,7 @@
                   <Path Classes="glyph"
                         Classes.anthropic="{Binding IsAnthropic}"
                         Classes.openai="{Binding IsOpenAI}"
+                        Classes.gemini="{Binding IsGemini}"
                         IsVisible="{Binding IsProviderMark}" />
                   <Path Classes="icon"
                         Classes.home="{Binding IsOverviewIcon}"

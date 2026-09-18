@@ -53,6 +53,14 @@ internal static class Readings
     public static ProviderUsage NoMetrics(string providerId) =>
         new(providerId, ProviderStatus.Idle, [], null, Now.AddMinutes(-1), null);
 
+    /// <summary>
+    /// The settled answer that the provider is not on this machine. It carries no metric,
+    /// which is not the same thing as a reading that failed: nothing went wrong.
+    /// </summary>
+    /// <param name="providerId">The provider the reading belongs to.</param>
+    public static ProviderUsage NotDetected(string providerId) =>
+        new(providerId, ProviderStatus.NotDetected, [], null, Now.AddMinutes(-1), null);
+
     /// <summary>A reading that could not be taken.</summary>
     /// <param name="providerId">The provider the reading belongs to.</param>
     public static ProviderUsage Failed(string providerId) =>

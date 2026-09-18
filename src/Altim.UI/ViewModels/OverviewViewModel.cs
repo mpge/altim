@@ -46,7 +46,7 @@ public sealed partial class OverviewViewModel : ObservableObject, IDashboardPage
     private string _eyebrowText;
 
     [ObservableProperty]
-    private bool _hasProviders;
+    private bool _hasVisibleProviders;
 
     [ObservableProperty]
     private bool _hasActivity;
@@ -86,12 +86,15 @@ public sealed partial class OverviewViewModel : ObservableObject, IDashboardPage
             Providers.Add(provider);
         }
 
-        HasProviders = Providers.Count > 0;
+        // Over every provider, not the carded ones: a provider uninstalled today still used
+        // something last week, and dropping its line would erase the past rather than tidy
+        // the present.
         UsageHistory = new HistoryViewModel(Providers, history, timeProvider)
         {
             SelectedRange = HistoryRange.Week,
         };
 
+        RebuildVisibleProviders();
         RebuildStatus();
     }
 
@@ -101,8 +104,25 @@ public sealed partial class OverviewViewModel : ObservableObject, IDashboardPage
     /// <summary>The page's own name, as the heading reads it.</summary>
     public string PageTitle => "Usage overview";
 
-    /// <summary>One card per provider.</summary>
+    /// <summary>
+    /// Every provider the dashboard was built over, installed here or not. This is the set
+    /// that is read, paced, charted and aggregated into the status line; it is not the set
+    /// that gets a card.
+    /// </summary>
     public ObservableCollection<ProviderViewModel> Providers { get; } = [];
+
+    /// <summary>
+    /// One card per provider that is actually on this machine. The rule, and the reasons
+    /// each status falls where it does, are <see cref="ProviderVisibility"/>'s.
+    /// </summary>
+    /// <remarks>
+    /// A card for a provider that is not installed is a name, a mark, no dial and a sentence
+    /// saying nothing was reported, which is the same clutter the tray panel had. A card for
+    /// a provider whose reading failed is a name, a sentence and a Retry, which is the
+    /// opposite: it is the page telling you something is wrong and offering the one action
+    /// that can change it. Only the first is dropped.
+    /// </remarks>
+    public ObservableCollection<ProviderViewModel> VisibleProviders { get; } = [];
 
     /// <summary>The last week of history, as the panel beside the activity list shows it.</summary>
     public HistoryViewModel UsageHistory { get; }
@@ -125,7 +145,11 @@ public sealed partial class OverviewViewModel : ObservableObject, IDashboardPage
     /// <summary>Shown when no provider reports a live session.</summary>
     public string NoActivityText => UsageFormat.NoActivity;
 
-    /// <summary>Shown when no provider is configured at all.</summary>
+    /// <summary>
+    /// Shown in place of the cards when none of the providers is installed here. It is the
+    /// documented sentence for that state rather than an empty grid, and it is the same one
+    /// the status line arrives at over the same set, so the two cannot disagree.
+    /// </summary>
     public string NoProvidersText => UsageFormat.NoProviders;
 
     /// <summary>Whether the status dot carries no status colour at all.</summary>
@@ -212,7 +236,7 @@ public sealed partial class OverviewViewModel : ObservableObject, IDashboardPage
     private void RebuildActivity()
     {
         List<AgentSessionViewModel> sessions = [];
-        foreach (ProviderViewModel provider in Providers)
+        foreach (ProviderViewModel provider in VisibleProviders)
         {
             sessions.AddRange(provider.Sessions);
         }
@@ -232,10 +256,60 @@ public sealed partial class OverviewViewModel : ObservableObject, IDashboardPage
     {
         if (e.PropertyName is nameof(ProviderViewModel.CurrentUsage))
         {
+            RebuildVisibleProviders();
             RebuildStatus();
         }
     }
 
+    /// <summary>Rebuilds the carded set from the registered one, in registration order.</summary>
+    /// <remarks>
+    /// Left alone when the answer has not changed, which is almost every time: this runs on
+    /// every reading from every provider, and replacing the collection each time would throw
+    /// the cards away and rebuild them, dials and all, for nothing.
+    /// </remarks>
+    private void RebuildVisibleProviders()
+    {
+        List<ProviderViewModel> shown = [];
+        foreach (ProviderViewModel provider in Providers)
+        {
+            if (provider.IsShown)
+            {
+                shown.Add(provider);
+            }
+        }
+
+        HasVisibleProviders = shown.Count > 0;
+
+        if (VisibleProviders.Count == shown.Count)
+        {
+            bool same = true;
+            for (int i = 0; i < shown.Count; i++)
+            {
+                if (!ReferenceEquals(VisibleProviders[i], shown[i]))
+                {
+                    same = false;
+                    break;
+                }
+            }
+
+            if (same)
+            {
+                return;
+            }
+        }
+
+        VisibleProviders.Clear();
+        foreach (ProviderViewModel provider in shown)
+        {
+            VisibleProviders.Add(provider);
+        }
+    }
+
+    /// <summary>
+    /// The one sentence about the integrations as a whole, over <b>every</b> provider rather
+    /// than over the carded ones. It is what explains a page with fewer cards than the
+    /// machine has agents, and what the page says when there are no cards at all.
+    /// </summary>
     private void RebuildStatus()
     {
         List<ProviderUsage> readings = [];

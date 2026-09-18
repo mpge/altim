@@ -53,6 +53,11 @@
     <Setter Property="Data" Value="{x:Static fmt:ProviderIdentity.OpenAIMark}" />
   </Style>
 
+  <Style Selector="Path.glyph.gemini">
+    <Setter Property="Fill" Value="{DynamicResource AltimAccentGeminiBrush}" />
+    <Setter Property="Data" Value="{x:Static fmt:ProviderIdentity.GeminiMark}" />
+  </Style>
+
   <!-- A line icon: the same 16px box, stroked rather than filled, in the ink of the
        surface it stands on. The quiet class is for an icon inside a control whose label
        is already carrying the meaning, such as a drop down's chevron. -->

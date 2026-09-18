@@ -114,7 +114,7 @@ public static class DesignData
     [
         new DesignUsageProvider(ProviderIdentity.ClaudeId, "Claude Code"),
         new DesignUsageProvider(ProviderIdentity.CodexId, "Codex"),
-        new DesignUsageProvider("gemini", "Gemini CLI"),
+        new DesignUsageProvider(ProviderIdentity.GeminiId, "Gemini CLI"),
     ];
 
     private static ProviderUsage UsageFor(string providerId)

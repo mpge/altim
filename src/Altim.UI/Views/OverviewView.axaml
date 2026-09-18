@@ -51,11 +51,16 @@
         </StackPanel>
       </Grid>
 
-      <TextBlock IsVisible="{Binding !HasProviders}"
+      <!-- A card for each provider this machine actually has. One that is settled as not
+           installed has no card, because a card for it is a name and a sentence saying
+           nothing was reported; one whose reading failed keeps its card, because that card
+           is the sentence and the Retry. The status line opposite the heading still speaks
+           for every provider. -->
+      <TextBlock IsVisible="{Binding !HasVisibleProviders}"
                  Theme="{DynamicResource AltimBodyText}"
                  Text="{Binding NoProvidersText}" />
 
-      <ItemsControl ItemsSource="{Binding Providers}">
+      <ItemsControl ItemsSource="{Binding VisibleProviders}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>
             <controls:CardGrid MinimumColumnWidth="{DynamicResource AltimCardMinWidth}"

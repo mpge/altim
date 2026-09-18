@@ -40,6 +40,7 @@ public sealed class AgentSessionViewModel : ObservableObject
         ProviderName = providerName;
         IsAnthropic = ProviderIdentity.IsAnthropic(session.ProviderId);
         IsOpenAI = ProviderIdentity.IsOpenAI(session.ProviderId);
+        IsGemini = ProviderIdentity.IsGemini(session.ProviderId);
         LastActivityAt = session.LastActivityAt ?? session.StartedAt;
         Title = string.IsNullOrWhiteSpace(session.ModelId) ? UnnamedSession : session.ModelId;
         ChipText = string.IsNullOrWhiteSpace(session.ModelId) ? null : session.ModelId;
@@ -79,6 +80,9 @@ public sealed class AgentSessionViewModel : ObservableObject
 
     /// <summary>Whether the row's mark wears the OpenAI accent.</summary>
     public bool IsOpenAI { get; }
+
+    /// <summary>Whether the row's mark wears the Gemini accent.</summary>
+    public bool IsGemini { get; }
 
     /// <summary>The model the session runs, or a plain fallback.</summary>
     public string Title { get; }

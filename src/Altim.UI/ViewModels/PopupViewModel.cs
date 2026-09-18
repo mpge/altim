@@ -39,7 +39,7 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     private bool _hasResets;
 
     [ObservableProperty]
-    private bool _hasProviders;
+    private bool _hasVisibleProviders;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasHeadline))]
@@ -73,7 +73,6 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
             Providers.Add(row);
         }
 
-        HasProviders = Providers.Count > 0;
         Rebuild();
     }
 
@@ -84,8 +83,34 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     /// </summary>
     public event EventHandler<string?>? OpenRequested;
 
-    /// <summary>One row per provider, in the order they were registered.</summary>
+    /// <summary>
+    /// One row per provider, in the order they were registered, whether or not the machine
+    /// has that provider. This is the set that is read, aggregated into the status line and
+    /// disposed; it is not the set that is shown.
+    /// </summary>
     public ObservableCollection<ProviderViewModel> Providers { get; } = [];
+
+    /// <summary>
+    /// The providers the panel actually lists: every registered one except those settled as
+    /// not installed on this machine.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="ProviderVisibility"/> holds the rule and says why each status falls where
+    /// it does. The short version is that a provider which is simply not here has nothing to
+    /// report, and one whose last reading failed has something important to report, so
+    /// absence is hidden and failure never is.
+    /// </para>
+    /// <para>
+    /// A separate collection rather than a flag each row hides itself with, because
+    /// everything else on the panel is built by walking this list: the rings on the dial,
+    /// the legend that names them and the reset lines. A row that hid itself would leave its
+    /// ring on the face and its line under the resets heading, which is worse than the
+    /// clutter it was removing - a face carrying an arc for a provider the panel does not
+    /// list.
+    /// </para>
+    /// </remarks>
+    public ObservableCollection<ProviderViewModel> VisibleProviders { get; } = [];
 
     /// <summary>Every reset instant any provider reports, soonest first.</summary>
     public ObservableCollection<ResetRowViewModel> Resets { get; } = [];
@@ -130,7 +155,11 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     /// <summary>Shown in place of the resets section when no window reports an instant.</summary>
     public string NoResetsText => UsageFormat.NoResetsReported;
 
-    /// <summary>Shown when no provider is configured at all.</summary>
+    /// <summary>
+    /// Shown in place of the provider rows when none of them is installed here. It is the
+    /// documented sentence for that state rather than a blank panel, and it is the same one
+    /// the status line arrives at over the same set, so the two cannot disagree.
+    /// </summary>
     public string NoProvidersText => UsageFormat.NoProviders;
 
     /// <summary>Takes a reading from every provider at once.</summary>
@@ -202,11 +231,75 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
 
     private void Rebuild()
     {
+        RebuildVisibleProviders();
         RebuildStatusLine();
         RebuildHeadline();
         RebuildResets();
     }
 
+    /// <summary>Rebuilds the listed set from the registered one, in registration order.</summary>
+    /// <remarks>
+    /// Left alone when the answer has not changed, which is almost every time: the panel is
+    /// rebuilt on every reading from every provider, and replacing the collection each time
+    /// would throw away the list's item containers and make the rows flash for no reason.
+    /// </remarks>
+    private void RebuildVisibleProviders()
+    {
+        List<ProviderViewModel> shown = [];
+        foreach (ProviderViewModel provider in Providers)
+        {
+            if (provider.IsShown)
+            {
+                shown.Add(provider);
+            }
+        }
+
+        HasVisibleProviders = shown.Count > 0;
+
+        if (Same(VisibleProviders, shown))
+        {
+            return;
+        }
+
+        VisibleProviders.Clear();
+        foreach (ProviderViewModel provider in shown)
+        {
+            VisibleProviders.Add(provider);
+        }
+    }
+
+    private static bool Same(
+        IReadOnlyList<ProviderViewModel> current,
+        IReadOnlyList<ProviderViewModel> wanted)
+    {
+        if (current.Count != wanted.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < wanted.Count; i++)
+        {
+            if (!ReferenceEquals(current[i], wanted[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The one sentence about the integrations as a whole, over <b>every</b> provider rather
+    /// than over the listed ones.
+    /// </summary>
+    /// <remarks>
+    /// This is the line that explains a short list. On a machine with two of the three
+    /// agents installed it reads "Gemini CLI not detected", which is the whole of what a
+    /// reader needs to know about the one that is missing, and the reason a row, a ring and
+    /// a reset line for it would be clutter rather than information. It is also what the
+    /// panel says when nothing at all is installed: the aggregator answers that case with
+    /// "No providers detected", which is the same sentence the empty provider section shows.
+    /// </remarks>
     private void RebuildStatusLine()
     {
         List<ProviderUsage> readings = [];
@@ -288,7 +381,7 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
         string? provider = null;
         List<DialReading> rings = [];
 
-        foreach (ProviderViewModel row in Providers)
+        foreach (ProviderViewModel row in VisibleProviders)
         {
             foreach (MetricViewModel metric in row.Metrics)
             {
@@ -332,7 +425,7 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     private void RebuildResets()
     {
         List<(DateTimeOffset At, ResetRowViewModel Row)> rows = [];
-        foreach (ProviderViewModel provider in Providers)
+        foreach (ProviderViewModel provider in VisibleProviders)
         {
             MetricViewModel? soonest = null;
             foreach (MetricViewModel metric in provider.Metrics)

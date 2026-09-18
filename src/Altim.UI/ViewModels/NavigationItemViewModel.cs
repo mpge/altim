@@ -35,11 +35,13 @@ public sealed class NavigationItemViewModel
     /// <param name="icon">The mark the row carries.</param>
     /// <param name="isAnthropic">Whether a provider mark wears the Anthropic accent.</param>
     /// <param name="isOpenAI">Whether a provider mark wears the OpenAI accent.</param>
+    /// <param name="isGemini">Whether a provider mark wears the Gemini accent.</param>
     public NavigationItemViewModel(
         IDashboardPage page,
         NavigationIcon icon = NavigationIcon.Overview,
         bool isAnthropic = false,
-        bool isOpenAI = false)
+        bool isOpenAI = false,
+        bool isGemini = false)
     {
         ArgumentNullException.ThrowIfNull(page);
 
@@ -47,6 +49,7 @@ public sealed class NavigationItemViewModel
         Icon = icon;
         IsAnthropic = isAnthropic;
         IsOpenAI = isOpenAI;
+        IsGemini = isGemini;
     }
 
     /// <summary>The page the row shows.</summary>
@@ -75,4 +78,7 @@ public sealed class NavigationItemViewModel
 
     /// <summary>Whether the mark wears the OpenAI accent.</summary>
     public bool IsOpenAI { get; }
+
+    /// <summary>Whether the mark wears the Gemini accent.</summary>
+    public bool IsGemini { get; }
 }

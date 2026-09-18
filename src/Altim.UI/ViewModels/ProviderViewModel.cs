@@ -38,6 +38,9 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
     private StatusDisplay _status = StatusDisplay.Unknown;
 
     [ObservableProperty]
+    private bool _isShown = true;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasHeadline))]
     private HeadlineReadingViewModel? _headline;
 
@@ -113,9 +116,11 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         DisplayName = provider.DisplayName;
         IsAnthropic = ProviderIdentity.IsAnthropic(provider.Id);
         IsOpenAI = ProviderIdentity.IsOpenAI(provider.Id);
+        IsGemini = ProviderIdentity.IsGemini(provider.Id);
 
         _currentUsage = new ProviderUsage(provider.Id, provider.Status, [], null, null, null);
         _status = new StatusDisplay(provider.Status);
+        _isShown = ProviderVisibility.IsShown(provider.Status);
         _integrationText = UsageFormat.IntegrationSentence(provider.Status);
 
         provider.UsageChanged += OnUsageChanged;
@@ -135,6 +140,9 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
 
     /// <summary>Whether the mark wears the OpenAI accent.</summary>
     public bool IsOpenAI { get; }
+
+    /// <summary>Whether the mark wears the Gemini accent.</summary>
+    public bool IsGemini { get; }
 
     /// <summary>The metrics this provider actually reports, in the order it reports them.</summary>
     public ObservableCollection<MetricViewModel> Metrics { get; } = [];
@@ -300,6 +308,7 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         usage = UsageReadingNormaliser.Normalise(usage, _timeProvider.GetUtcNow());
 
         Status = new StatusDisplay(usage.Status);
+        IsShown = ProviderVisibility.IsShown(usage.Status);
         HasError = usage.Status == ProviderStatus.Error;
         IntegrationText = UsageFormat.IntegrationSentence(usage.Status);
         LastRefreshedText = UsageFormat.LastRefreshed(usage.LastRefreshed);

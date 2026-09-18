@@ -228,7 +228,7 @@ public sealed class ReferencePixelTests
         // unscoped search for the text finds that as well.
         ItemsControl rows = host.Window.GetVisualDescendants()
             .OfType<ItemsControl>()
-            .First(c => ReferenceEquals(c.ItemsSource, panel.Providers));
+            .First(c => ReferenceEquals(c.ItemsSource, panel.VisibleProviders));
 
         // Every figure on the row shares one baseline: the compact line is one line.
         IReadOnlyList<TextBlock> figures = rows.GetVisualDescendants()

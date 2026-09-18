@@ -67,7 +67,8 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
                 new ProviderPageViewModel(provider),
                 NavigationIcon.Provider,
                 provider.IsAnthropic,
-                provider.IsOpenAI));
+                provider.IsOpenAI,
+                provider.IsGemini));
         }
 
         Sections.Add(new NavigationItemViewModel(History, NavigationIcon.History));

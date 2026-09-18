@@ -28,6 +28,7 @@ public sealed class TokenTests
         "AltimStatusErrorColor",
         "AltimAccentAnthropicColor",
         "AltimAccentOpenAIColor",
+        "AltimAccentGeminiColor",
         "AltimSidebarSelectedColor",
     ];
 
@@ -44,6 +45,7 @@ public sealed class TokenTests
         "AltimStatusErrorBrush",
         "AltimAccentAnthropicBrush",
         "AltimAccentOpenAIBrush",
+        "AltimAccentGeminiBrush",
         "AltimSeparatorBrush",
         "AltimHoverBrush",
         "AltimHoverMutedBrush",
@@ -318,6 +320,76 @@ public sealed class TokenTests
         // Backgrounds lift rather than invert, and the border stays under the text.
         Assert.True(muted.R > surface.R, "SurfaceMuted should lift above Surface in Dark.");
         Assert.True(border.R < secondary.R, "Border should stay lower contrast than text.");
+    }
+
+    /// <summary>
+    /// The three provider accents are the pairs DESIGN.md names, and each of them stands clear
+    /// of the ground it is drawn on in both variants.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A provider accent is the only colour in Altim that carries identity rather than a
+    /// reading, so it is the one colour a reader is expected to learn. Writing the six values
+    /// out is what stops the palette and the design document drifting apart, and the contrast
+    /// floor is the same 3:1 the dial's bands are held to: these are marks rather than text,
+    /// and 3:1 is what a graphic has to reach to be seen at all.
+    /// </para>
+    /// <para>
+    /// Gemini's is a violet rather than Google's blue on purpose. The dial's normal band is a
+    /// blue, it appears on the same panel, and a provider's mark reading as a band is exactly
+    /// the confusion the one-accent-per-provider rule exists to avoid.
+    /// </para>
+    /// </remarks>
+    [AvaloniaFact]
+    public void TheProviderAccentsAreTheDocumentedPairsAndStandClearOfTheirGround()
+    {
+        AltimTheme theme = DesignSystem.LoadStandalone();
+
+        (string Key, string Light, string Dark)[] accents =
+        [
+            ("AltimAccentAnthropicColor", "#C05B32", "#D2764D"),
+            ("AltimAccentOpenAIColor", "#0A0A0A", "#F2F2F3"),
+            ("AltimAccentGeminiColor", "#8857C1", "#9B72CB"),
+        ];
+
+        foreach ((string key, string light, string dark) in accents)
+        {
+            Assert.Equal(Color.Parse(light), Colour(theme, key, ThemeVariant.Light));
+            Assert.Equal(Color.Parse(dark), Colour(theme, key, ThemeVariant.Dark));
+
+            foreach (ThemeVariant variant in Variants)
+            {
+                Color accent = Colour(theme, key, variant);
+                foreach (string ground in new[] { "AltimSurfaceColor", "AltimSurfaceMutedColor" })
+                {
+                    double ratio = Contrast(accent, Colour(theme, ground, variant));
+                    Assert.True(
+                        ratio >= 3d,
+                        $"{key} stands {ratio:F2}:1 from {ground} in {variant}, under the 3:1 a mark needs.");
+                }
+            }
+        }
+    }
+
+    /// <summary>The contrast ratio between two opaque colours, as WCAG defines it.</summary>
+    /// <param name="first">One colour.</param>
+    /// <param name="second">The other.</param>
+    private static double Contrast(Color first, Color second)
+    {
+        double one = Luminance(first);
+        double two = Luminance(second);
+        return (Math.Max(one, two) + 0.05d) / (Math.Min(one, two) + 0.05d);
+    }
+
+    /// <summary>Relative luminance, as WCAG defines it.</summary>
+    /// <param name="colour">The colour to measure.</param>
+    private static double Luminance(Color colour) =>
+        (0.2126d * Channel(colour.R)) + (0.7152d * Channel(colour.G)) + (0.0722d * Channel(colour.B));
+
+    private static double Channel(byte value)
+    {
+        double part = value / 255d;
+        return part <= 0.03928d ? part / 12.92d : Math.Pow((part + 0.055d) / 1.055d, 2.4d);
     }
 
     /// <summary>The meter fill is TextPrimary in both variants, as the brief requires.</summary>

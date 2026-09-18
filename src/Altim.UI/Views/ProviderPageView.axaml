@@ -27,7 +27,8 @@
         <Path Grid.Column="0"
               Classes="glyph large"
               Classes.anthropic="{Binding Provider.IsAnthropic}"
-              Classes.openai="{Binding Provider.IsOpenAI}" />
+              Classes.openai="{Binding Provider.IsOpenAI}"
+              Classes.gemini="{Binding Provider.IsGemini}" />
         <TextBlock Grid.Column="1"
                    Margin="12,0,0,0"
                    VerticalAlignment="Center"

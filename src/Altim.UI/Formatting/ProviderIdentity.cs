@@ -7,24 +7,26 @@ namespace Altim.UI.Formatting;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Each of the two providers is drawn as its own vendor's mark: Anthropic's radial burst for
-/// Claude, OpenAI's interlocking knot for Codex. Anything else wears the neutral circle.
-/// Every mark is a single monochrome path on the 16px box, filled in the provider's accent,
-/// because the accent is what carries identity - a mark drawn in its vendor's own colours
-/// would repeat what the palette already says, in colours the palette does not hold. The
-/// views stretch that box to 16, 20 or 28 depending on what the mark is standing beside.
+/// Each of the three providers is drawn as its own vendor's mark: Anthropic's radial burst
+/// for Claude, OpenAI's interlocking knot for Codex, Google's four pointed star for Gemini.
+/// Anything else wears the neutral circle. Every mark is a single monochrome path on the 16px
+/// box, filled in the provider's accent, because the accent is what carries identity - a mark
+/// drawn in its vendor's own colours would repeat what the palette already says, in colours
+/// the palette does not hold. The views stretch that box to 16, 20 or 28 depending on what
+/// the mark is standing beside.
 /// </para>
 /// <para>
-/// <strong>The path data is the vendors' own outlines, not a drawing of them.</strong> Both
-/// come from the Simple Icons set, which is CC0 and traces each mark from the vendor's own
-/// published brand asset, and both were moved onto this box by scale and translation alone,
-/// so the outlines are still the vendors' to four decimal places. A mark drawn from memory is
-/// a different mark that resembles one - which is exactly what these two replaced.
+/// <strong>The path data is the vendors' own outlines, not a drawing of them.</strong> All
+/// three come from the Simple Icons set, which is CC0 and traces each mark from the vendor's
+/// own published brand asset, and all three were moved onto this box by scale and translation
+/// alone, so the outlines are still the vendors' to four decimal places. A mark drawn from
+/// memory is a different mark that resembles one - which is exactly what the first two
+/// replaced.
 /// </para>
 /// <para>
 /// These marks identify the vendors' own products, which is nominative use. Altim claims no
-/// endorsement by, or affiliation with, Anthropic or OpenAI. Neither mark is restyled or
-/// combined with Altim's own, and neither stands for Altim. Simple Icons' CC0 waiver covers
+/// endorsement by, or affiliation with, Anthropic, OpenAI or Google. No mark is restyled or
+/// combined with Altim's own, and none stands for Altim. Simple Icons' CC0 waiver covers
 /// the traced path data and nothing else: the vendors' trademark rights in the marks those
 /// paths depict are untouched by it. TRADEMARKS.md is the full notice, and says what the MIT
 /// licence does not grant a fork that keeps these paths.
@@ -34,28 +36,33 @@ namespace Altim.UI.Formatting;
 /// <c>Stretch="Uniform"</c> is scaled to its own bounds and pinned to the top left of its
 /// slot rather than centred, so a mark whose bounds are not square sits visibly off centre
 /// beside the label it belongs to - which is what the old placeholder hexagon, 13 wide in a
-/// 15 tall box, did. Neither vendor's ink is square on its own 24 unit grid - the burst is
+/// 15 tall box, did. Two of the three are not square on their own 24 unit grid - the burst is
 /// 0.08 per cent narrower than it is tall, the knot 1.4 per cent - so each axis is scaled to
-/// 15 units on its own. Every arc in the knot is circular and unrotated, which is what lets
-/// an axis-aligned scale stay exact: each radius takes its own axis and the rotation stays
-/// zero. <c>ProviderGlyphTests</c> holds every mark to all four sides.
+/// 15 units on its own; the star is already square there and takes the same factor on both.
+/// Every arc in the knot and in the star is circular and unrotated, which is what lets an
+/// axis-aligned scale stay exact: each radius takes its own axis and the rotation stays zero.
+/// The star's flanks are quadratics, two of them smooth continuations whose control point is
+/// the reflection of the one before, so the fitting has to resolve that reflection rather
+/// than treat the pair as ordinary coordinates. <c>ProviderGlyphTests</c> holds every mark to
+/// all four sides, and holds the star to the share of its box Google's outline covers.
 /// </para>
 /// <para>
 /// <strong>Every path opens <c>F1</c>, the non-zero fill rule.</strong> That is the rule SVG
 /// applies when a file names none, so it is the rule the vendors' own files are rendered
 /// under and the rule that draws what they draw. On this artwork it changes nothing: no two
-/// subpaths overlap, and the knot's counters are nested inside its silhouette rather than
-/// lapped over one another, so even-odd produces the same picture - which
-/// <c>ProviderGlyphTests</c> proves rather than assumes. It is declared anyway, because
-/// re-tracing either mark from a newer vendor asset whose subpaths do lap would otherwise
-/// hole those laps out with no error and no failing parse.
+/// subpaths overlap, the knot's counters are nested inside its silhouette rather than lapped
+/// over one another, and the star's outline never crosses itself, so even-odd produces the
+/// same picture - which <c>ProviderGlyphTests</c> proves rather than assumes. It is declared
+/// anyway, because re-tracing any of them from a newer vendor asset whose subpaths do lap
+/// would otherwise hole those laps out with no error and no failing parse.
 /// </para>
 /// <para>
 /// Neither the accent nor the mark is handed to a view model. Brushes live in the theme
 /// dictionaries and are resolved per variant, so a bound brush would be the wrong variant's
 /// the moment the system switched; and a <see cref="Geometry"/> cannot be built at all until
 /// Avalonia's rendering platform exists. Both are therefore chosen by the style classes keyed
-/// off <see cref="IsAnthropic"/> and <see cref="IsOpenAI"/>, which a view applies.
+/// off <see cref="IsAnthropic"/>, <see cref="IsOpenAI"/> and <see cref="IsGemini"/>, which a
+/// view applies.
 /// </para>
 /// <para>
 /// <strong>Nothing here parses at type initialisation.</strong> <see cref="Geometry.Parse"/>
@@ -74,6 +81,9 @@ public static class ProviderIdentity
 
     /// <summary>The provider identifier Codex reports.</summary>
     public const string CodexId = "codex";
+
+    /// <summary>The provider identifier the Gemini CLI reports.</summary>
+    public const string GeminiId = "gemini";
 
     /// <summary>
     /// The Anthropic mark, as path data on the 16px box: Claude's radial burst, whose tapered
@@ -162,11 +172,35 @@ public static class ProviderIdentity
         + "M6.3553 7.061 L8.0039 6.1236 L9.6557 7.061 V8.9356 L8.0099 9.8729 "
         + "L6.3583 8.9356 Z";
 
+    /// <summary>
+    /// The Google Gemini mark, as path data on the 16px box: the four pointed star, whose
+    /// arms taper to a point along concave flanks.
+    /// </summary>
+    /// <remarks>
+    /// One closed figure, and the only one of the three drawn in quadratic curves: the
+    /// flanks are <c>Q</c> and <c>q</c> segments with two smooth <c>t</c> continuations,
+    /// whose control point is the reflection of the one before it, and three circular
+    /// unrotated arcs. Nothing in it laps anything else in it. Simple Icons'
+    /// <c>googlegemini</c> path, traced from Google's own brand asset, carried here from
+    /// its 24 unit grid. It is the only mark of the three that is already square there, so
+    /// both axes take the same factor and the outline is not distorted at all.
+    /// </remarks>
+    public const string GeminiMarkPath =
+        "F1 "
+        + "M7.4 12.575 Q8 13.9438 8 15.5 q0 -1.5563 0.5813 -2.925 q0.6 "
+        + "-1.3687 1.6125 -2.3813 t2.3813 -1.5938 Q13.9438 8 15.5 8 "
+        + "q-1.5563 0 -2.925 -0.5813 a7.6875 7.6875 0 0 1 -2.3813 -1.6125 "
+        + "a7.6875 7.6875 0 0 1 -1.6125 -2.3813 Q8 2.0563 8 0.5 q0 1.5563 "
+        + "-0.6 2.925 q-0.5813 1.3687 -1.5938 2.3813 a7.6875 7.6875 0 0 1 "
+        + "-2.3813 1.6125 Q2.0563 8 0.5 8 q1.5563 0 2.925 0.6 q1.3687 "
+        + "0.5813 2.3813 1.5938 t1.5938 2.3813";
+
     /// <summary>The mark any other provider wears, as path data on the 16px box.</summary>
     public const string CirclePath = "M 8,0.5 A 7.5,7.5 0 1 0 8,15.5 A 7.5,7.5 0 1 0 8,0.5 Z";
 
     private static readonly Lazy<Geometry> LazyAnthropicMark = Lazily(AnthropicMarkPath);
     private static readonly Lazy<Geometry> LazyOpenAIMark = Lazily(OpenAIMarkPath);
+    private static readonly Lazy<Geometry> LazyGeminiMark = Lazily(GeminiMarkPath);
     private static readonly Lazy<Geometry> LazyCircle = Lazily(CirclePath);
 
     /// <inheritdoc cref="AnthropicMarkPath" />
@@ -174,6 +208,9 @@ public static class ProviderIdentity
 
     /// <inheritdoc cref="OpenAIMarkPath" />
     public static Geometry OpenAIMark => LazyOpenAIMark.Value;
+
+    /// <inheritdoc cref="GeminiMarkPath" />
+    public static Geometry GeminiMark => LazyGeminiMark.Value;
 
     /// <summary>The default mark. Parsed on first read, never at type initialisation.</summary>
     public static Geometry Circle => LazyCircle.Value;
@@ -187,6 +224,7 @@ public static class ProviderIdentity
     public static Geometry Glyph(string? providerId) =>
         IsAnthropic(providerId) ? AnthropicMark
         : IsOpenAI(providerId) ? OpenAIMark
+        : IsGemini(providerId) ? GeminiMark
         : Circle;
 
     /// <summary>The path data for a provider identifier, which needs no platform at all.</summary>
@@ -194,6 +232,7 @@ public static class ProviderIdentity
     public static string GlyphPath(string? providerId) =>
         IsAnthropic(providerId) ? AnthropicMarkPath
         : IsOpenAI(providerId) ? OpenAIMarkPath
+        : IsGemini(providerId) ? GeminiMarkPath
         : CirclePath;
 
     /// <summary>Whether this provider wears the Anthropic accent.</summary>
@@ -205,6 +244,11 @@ public static class ProviderIdentity
     /// <param name="providerId">The identifier the provider reports.</param>
     public static bool IsOpenAI(string? providerId) =>
         string.Equals(providerId, CodexId, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether this provider wears the Gemini accent.</summary>
+    /// <param name="providerId">The identifier the provider reports.</param>
+    public static bool IsGemini(string? providerId) =>
+        string.Equals(providerId, GeminiId, StringComparison.OrdinalIgnoreCase);
 
     private static Lazy<Geometry> Lazily(string path) =>
         new(() => Geometry.Parse(path), LazyThreadSafetyMode.ExecutionAndPublication);

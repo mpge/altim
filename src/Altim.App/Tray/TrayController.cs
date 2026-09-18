@@ -12,6 +12,7 @@ using Altim.Providers;
 using Altim.Providers.Claude;
 using Altim.Providers.Codex;
 using Altim.Providers.Gemini;
+using Altim.UI.Formatting;
 
 namespace Altim.App.Tray;
 
@@ -237,8 +238,19 @@ internal sealed class TrayController : IDisposable
     /// </summary>
     /// <param name="readings">Every provider's current reading.</param>
     /// <remarks>
+    /// <para>
     /// Nothing is invented. A provider that reported no usable percentage says so, a failed
     /// reading says it is unavailable, and neither is rendered as a zero.
+    /// </para>
+    /// <para>
+    /// Only the providers this machine has, on the same rule as the panel's rows - see
+    /// <see cref="ProviderVisibility"/>. This is the surface with least room for a line about
+    /// a tool the reader does not own: the shell truncates the whole tooltip at 127
+    /// characters, so a provider that is simply not installed costs one of the three lines
+    /// that fit. <b>A failed reading still takes its line</b>, and an uninstalled provider is
+    /// still reported by the tray's own menu, which carries a disabled line for every
+    /// degraded condition - so nothing is concealed by leaving it out here.
+    /// </para>
     /// </remarks>
     public static string BuildTooltip(IReadOnlyList<ProviderUsage> readings)
     {
@@ -250,9 +262,16 @@ internal sealed class TrayController : IDisposable
         }
 
         var text = new StringBuilder("Altim");
+        int listed = 0;
 
         foreach (ProviderUsage reading in readings)
         {
+            if (!ProviderVisibility.IsShown(reading.Status))
+            {
+                continue;
+            }
+
+            listed++;
             string name = DisplayNameFor(reading.ProviderId);
 
             if (reading.Status == ProviderStatus.Error)
@@ -272,6 +291,13 @@ internal sealed class TrayController : IDisposable
             {
                 _ = text.Append('\n').Append(name).Append(" not reported");
             }
+        }
+
+        if (listed == 0)
+        {
+            // Registered but none of them here. The words are the panel's, so the tray and
+            // the panel cannot end up describing the same machine differently.
+            _ = text.Append('\n').Append(UsageFormat.NoProviders);
         }
 
         return Truncate(text.ToString());

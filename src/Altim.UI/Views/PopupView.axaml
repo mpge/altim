@@ -156,15 +156,18 @@
 
     <Separator IsVisible="{Binding HasHeadline}" />
 
-    <!-- Providers -->
-    <TextBlock IsVisible="{Binding !HasProviders}"
+    <!-- Providers. Only the ones this machine actually has: a provider settled as not
+         installed is left out of the rows, the rings, the legend and the resets alike, and
+         when none of them is installed the section carries the sentence instead. The status
+         line below still speaks for every provider, which is what names the missing one. -->
+    <TextBlock IsVisible="{Binding !HasVisibleProviders}"
                Margin="{DynamicResource AltimInset16}"
                Theme="{DynamicResource AltimBodyText}"
                Text="{Binding NoProvidersText}" />
 
-    <ItemsControl IsVisible="{Binding HasProviders}"
+    <ItemsControl IsVisible="{Binding HasVisibleProviders}"
                   Margin="{DynamicResource AltimInset16}"
-                  ItemsSource="{Binding Providers}">
+                  ItemsSource="{Binding VisibleProviders}">
       <ItemsControl.ItemsPanel>
         <ItemsPanelTemplate>
           <StackPanel Spacing="{DynamicResource AltimSpace16}" />
@@ -180,7 +183,8 @@
                   VerticalAlignment="Center"
                   Classes="glyph large"
                   Classes.anthropic="{Binding IsAnthropic}"
-                  Classes.openai="{Binding IsOpenAI}" />
+                  Classes.openai="{Binding IsOpenAI}"
+                  Classes.gemini="{Binding IsGemini}" />
 
             <Grid Grid.Row="0" Grid.Column="1" Margin="12,0,0,0" ColumnDefinitions="Auto,Auto,*">
               <TextBlock Grid.Column="0"
