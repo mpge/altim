@@ -31,9 +31,12 @@ namespace Altim.Core.Usage;
 /// means the provider has not been probed yet, so hiding it would be a guess, and a guess
 /// that resolves a moment later: the row would appear under the reader's pointer as the
 /// first reading landed and push everything below it down. A provider that has not answered
-/// yet is shown as it is shown at any other time it has no figures - its name, its mark, and
-/// the sentence that says nothing was reported - and settles into place or out of the list
-/// when the reading arrives.
+/// yet is shown with its name, its mark and the sentence for that state - "Waiting for the
+/// first reading." - and settles into place or out of the list when the reading arrives. It
+/// is emphatically <em>not</em> shown with the sentence a provider gets when it answered and
+/// reported nothing: being listed before anything is known about it is the reason this
+/// paragraph exists, and "Not reported by this provider" over it would be the surface
+/// answering a question it has not asked.
 /// </para>
 /// <para>
 /// This decides what the usage surfaces list: the tray panel's provider rows and the rings,

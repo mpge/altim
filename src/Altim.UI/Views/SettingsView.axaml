@@ -23,8 +23,22 @@
 
       <TextBlock Theme="{DynamicResource AltimDisplayText}" Text="{Binding Title}" />
 
+      <!--
+        The stored settings could not be read. It is a different event from a write that
+        failed, it belongs at the head of the page rather than under General because it is
+        about every control below it, and it has to say that those controls are showing
+        defaults rather than the user's own values. Everything that writes a setting is
+        disabled underneath it: the page cannot save what it never read without saving
+        defaults over it.
+      -->
+      <TextBlock IsVisible="{Binding LoadFailed}"
+                 Theme="{DynamicResource AltimBodyText}"
+                 Foreground="{DynamicResource AltimStatusErrorBrush}"
+                 TextWrapping="Wrap"
+                 Text="{Binding LoadFailedText}" />
+
       <!-- General -->
-      <StackPanel Spacing="{DynamicResource AltimSpace12}">
+      <StackPanel IsEnabled="{Binding CanEditSettings}" Spacing="{DynamicResource AltimSpace12}">
         <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding GeneralHeading}" />
 
         <ToggleSwitch Content="Launch at login" IsChecked="{Binding LaunchAtLogin}" />
@@ -67,7 +81,7 @@
       <Separator />
 
       <!-- Notifications -->
-      <StackPanel Spacing="{DynamicResource AltimSpace12}">
+      <StackPanel IsEnabled="{Binding CanEditSettings}" Spacing="{DynamicResource AltimSpace12}">
         <TextBlock Theme="{DynamicResource AltimHeadingText}" Text="{Binding NotificationsHeading}" />
 
         <ToggleSwitch Content="Enable notifications" IsChecked="{Binding NotificationsEnabled}" />
@@ -118,7 +132,7 @@
           and with whose credentials rather than "allow network calls". Switching it off
           turns the notice on, in the same words the provider page uses.
         -->
-        <StackPanel Spacing="{DynamicResource AltimSpace4}">
+        <StackPanel IsEnabled="{Binding CanEditSettings}" Spacing="{DynamicResource AltimSpace4}">
           <ToggleSwitch Content="{Binding AllowNetworkCallsLabel}" IsChecked="{Binding AllowNetworkCalls}" />
           <TextBlock Theme="{DynamicResource AltimCaptionText}"
                      Foreground="{DynamicResource AltimTextSecondaryBrush}"
@@ -136,9 +150,10 @@
           asked for, the caption says what is written and that it can be undone, and the
           notice under it carries the three answers that are not yes: no Claude Code here,
           a status line of the user's own in the way, or a settings file that would not be
-          read. The switch is disabled for the first two, because there is nothing it could do.
+          read. The switch is disabled for all three, because there is nothing it could do
+          about the first two and no way to know what it would be doing about the third.
         -->
-        <StackPanel Spacing="{DynamicResource AltimSpace4}">
+        <StackPanel IsEnabled="{Binding CanEditSettings}" Spacing="{DynamicResource AltimSpace4}">
           <ToggleSwitch Content="{Binding ClaudeStatusLineLabel}"
                         IsEnabled="{Binding CanChangeStatusLine}"
                         IsChecked="{Binding ClaudeStatusLineEnabled}" />

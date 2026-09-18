@@ -50,6 +50,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
     private int _saveGeneration;
     private bool _applying;
     private bool _followingStatusLine;
+    private bool? _knownStatusLineInstalled;
 
     [ObservableProperty]
     private bool _launchAtLogin;
@@ -92,6 +93,10 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
 
     [ObservableProperty]
     private bool _saveFailed;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanEditSettings))]
+    private bool _loadFailed;
 
     [ObservableProperty]
     private string? _clearHistoryResult;
@@ -239,11 +244,20 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
     public bool ShowsStatusLineNotice => StatusLineNotice is not null;
 
     /// <summary>
-    /// False when the switch cannot do anything: there is no Claude Code to configure, or
-    /// the user's own status line is in the way. The notice says which.
+    /// False when the switch cannot do anything: there is no Claude Code to configure, the
+    /// user's own status line is in the way, or the settings file could not be read at all.
+    /// The notice says which.
     /// </summary>
+    /// <remarks>
+    /// The third was missing, and it is the one that could do damage. A file Altim cannot
+    /// read is a file Altim does not know the contents of; leaving the switch live over one
+    /// meant a user could flip it, Altim would record the flip, and the entry in the file
+    /// would go on being whatever it already was.
+    /// </remarks>
     public bool CanChangeStatusLine =>
-        StatusLineState is not (StatusLineInstallState.AnotherStatusLine or StatusLineInstallState.NoConfiguration);
+        StatusLineState is not (StatusLineInstallState.AnotherStatusLine
+            or StatusLineInstallState.NoConfiguration
+            or StatusLineInstallState.Failed);
 
     /// <summary>
     /// The install or revert currently in flight, or a completed task when there is none.
@@ -270,6 +284,31 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
     /// <summary>Shown when a write to the settings store failed.</summary>
     public string SaveFailedText => "Settings could not be saved";
 
+    /// <summary>Shown when the stored settings could not be read.</summary>
+    /// <remarks>
+    /// A read that failed and a write that failed are different events and used to render as
+    /// the same sentence. This one also has to say what the controls underneath it are
+    /// showing, because they are not the user's settings: the page is built on
+    /// <see cref="AltimSettings.Default"/> and a failed read leaves it there.
+    /// </remarks>
+    public string LoadFailedText =>
+        "Settings could not be read. The values below are the defaults rather than yours, so "
+        + "nothing here can be changed until the stored settings can be read.";
+
+    /// <summary>
+    /// Whether the page may be edited at all.
+    /// </summary>
+    /// <remarks>
+    /// <b>False while a read has failed</b>, and this is the most serious thing this page
+    /// does. The page renders <see cref="AltimSettings.Default"/> from its constructor, and a
+    /// failed read leaves every control showing a default as though it were the user's own
+    /// choice. <c>_current</c> stays at Default too, so the first change anybody made wrote
+    /// Default-plus-that-change over the settings that were actually stored: one unreadable
+    /// read and one toggle, and the user's configuration was gone. <see cref="SaveAsync"/>
+    /// refuses as well, so a change arriving from anywhere else cannot do it either.
+    /// </remarks>
+    public bool CanEditSettings => !LoadFailed;
+
     /// <summary>The running version.</summary>
     public string VersionText => Version;
 
@@ -285,6 +324,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
             AltimSettings settings = await BackgroundWork.RunAsync(_store.GetAsync, ct)
                 .ConfigureAwait(true);
             Apply(settings);
+            LoadFailed = false;
         }
         catch (OperationCanceledException)
         {
@@ -292,9 +332,12 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
         }
         catch (Exception)
         {
-            // A failed read leaves the last known values on screen rather than replacing
-            // them with defaults that a later change would write back over the real ones.
-            SaveFailed = true;
+            // A read that failed is not a write that failed, and saying "Settings could not
+            // be saved" here reported an event that had not happened. What did happen is
+            // that the page is still showing its constructor's defaults, which are not the
+            // user's settings, so it says so and locks itself: the first change anybody made
+            // would otherwise have written those defaults over the stored record.
+            LoadFailed = true;
         }
 
         // The stored flag records what the user asked for; Claude Code's own settings file
@@ -342,6 +385,15 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
     /// </remarks>
     public Task SaveAsync(CancellationToken ct = default)
     {
+        // The stored record was never read, so _current is Default and every value on the
+        // page is Default. Writing now would put Default into the store on top of whatever
+        // is actually there, and settings the user cannot see are settings the user cannot
+        // put back.
+        if (LoadFailed)
+        {
+            return Task.CompletedTask;
+        }
+
         AltimSettings next = _current with
         {
             LaunchAtLogin = LaunchAtLogin,
@@ -472,7 +524,32 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
     {
         StatusLineState = state;
 
+        // Failed says the settings file could not be read or updated and that nothing was
+        // changed, so what is true is whatever was last actually observed rather than "off".
+        // Mapping it to off made a file that could not be read render as "definitely not
+        // installed", and because the switch moved, the handler wrote that guess into the
+        // store. A failed inspection at load has nothing observed behind it at all, and then
+        // the switch keeps showing what the user asked for while CanChangeStatusLine stops
+        // anybody acting on a state nobody knows.
+        if (state is StatusLineInstallState.Failed)
+        {
+            if (_knownStatusLineInstalled is { } known)
+            {
+                Show(known);
+            }
+
+            return;
+        }
+
         bool installed = state is StatusLineInstallState.Installed;
+        _knownStatusLineInstalled = installed;
+        Show(installed);
+    }
+
+    /// <summary>Moves the switch without re-entering the install it is following.</summary>
+    /// <param name="installed">What the settings file holds.</param>
+    private void Show(bool installed)
+    {
         if (ClaudeStatusLineEnabled == installed)
         {
             return;

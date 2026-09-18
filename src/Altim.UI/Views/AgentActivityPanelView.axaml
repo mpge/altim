@@ -7,6 +7,13 @@
   written down - PRIVACY.md - so there is no second span to offer, and a drop down whose list
   has one entry in it is a control that lies about what it can do.
 
+  "Live" is a claim, so the panel keeps it: the list follows every reading, which is the cadence
+  the cards, the status line and the tray panel all move at. It used to be read once, when the
+  window opened, so an agent that started and finished while somebody sat on this page never
+  appeared on it - a badge saying live over a snapshot. Following costs nothing: a provider
+  reads its sessions in the same pass that reads its usage, and asking again hands back what
+  that pass already had.
+
   The chip carries the model a session is running, and only that. The reference's chips show
   the file being edited and the command being run; Altim's providers are built so that neither
   can be obtained - process arguments are never read, and the parsers reject any string shaped

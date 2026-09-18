@@ -372,7 +372,19 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
     /// dial draws its unavailable face and the figure is an em dash, which says "nothing was
     /// reported for this" rather than leaving the panel headed by nothing. A panel with no
     /// windows at all has no headline and the section is not drawn - there would be no window
-    /// to name, and an unnamed dial is furniture.
+    /// to name, and an unnamed dial is furniture, and with no face to carry them there are no
+    /// rings either.
+    /// </para>
+    /// <para>
+    /// <b>Every listed provider gets a ring</b>, including one whose reading failed and one
+    /// nothing has been read from yet. DESIGN.md: "a ring missing from the legend would be a
+    /// provider missing from the panel" - and those two are providers the panel is still
+    /// listing, with a row of their own under the face. The ring was previously taken from
+    /// the provider's headline, which a provider with no metrics does not have, so on a
+    /// machine with three providers and one unreachable the dial drew two rings and the
+    /// legend named two, while three rows stood underneath. A provider with no window to name
+    /// has its ring labelled with its own name, because there is no window to put in front
+    /// of it, and the figure is the em dash every unreported reading gets.
     /// </para>
     /// </remarks>
     private void RebuildHeadline()
@@ -392,24 +404,18 @@ public sealed partial class PopupViewModel : ObservableObject, IDisposable
                 }
             }
 
-            if (row.Headline is { } head)
-            {
-                // The ring number is taken from the list as it stands rather than from a
-                // counter of its own, so the legend's marks and the face's rings cannot end
-                // up numbered differently.
-                rings.Add(new DialReading(
-                    rings.Count,
-                    head.SourceLabel,
-                    head.Value,
-                    head.Threshold,
-                    head.ResetText));
-            }
+            // The ring number is taken from the list as it stands rather than from a
+            // counter of its own, so the legend's marks and the face's rings cannot end up
+            // numbered differently.
+            rings.Add(row.Headline is { } head
+                ? new DialReading(rings.Count, head.SourceLabel, head.Value, head.Threshold, head.ResetText)
+                : new DialReading(rings.Count, row.DisplayName, null));
         }
 
         // Replaced rather than mutated: the dial caches its paths against the list it was
         // handed, so a collection edited in place would leave the face drawing the readings
-        // before last.
-        DialReadings = rings;
+        // before last. No headline is no face, and a face nothing draws carries no rings.
+        DialReadings = best is null ? [] : rings;
 
         Headline = best is not null && provider is not null
             ? new HeadlineReadingViewModel(best, provider)

@@ -240,11 +240,25 @@ public sealed class ProviderPageTests
             Assert.False(Surface.Shows(window, "62%"));
             Assert.DoesNotContain("0%", Surface.Lines(window));
 
-            // Both rails are still drawn: the reported one filled, the unreported one an outline.
+            // Both rails are still drawn, and they are drawn differently. The first metric
+            // reports nothing, so its rail is the unavailable outline with no fill; the
+            // second reports 38, so its rail is a filled one. Asserting only the first left
+            // the whole point of the test - that one unreported window does not take the
+            // reported one down with it - untested, and an implementation that drew every
+            // rail as unavailable passed.
             IReadOnlyList<Meter> meters = Surface.Visible<Meter>(window);
             Assert.Equal(2, meters.Count);
+
             Assert.True(meters[0].IsUnavailable);
             Assert.Equal(0d, meters[0].RenderedFillWidth);
+
+            Assert.False(meters[1].IsUnavailable);
+            Assert.Equal(38d, meters[1].Value);
+            Assert.True(
+                meters[1].RenderedFillWidth > 0d,
+                "The reported rail is drawn with no fill, which reads as a zero.");
+
+            Assert.True(Surface.Shows(window, "38%"));
             Assert.False(Surface.Shows(window, UsageFormat.ProviderUnavailable));
         }, width: 760d, height: 1400d);
     }

@@ -6,6 +6,7 @@ using Altim.UI.Formatting;
 using Altim.UI.Tests.Fakes;
 using Altim.UI.ViewModels;
 using Altim.UI.Views;
+using Avalonia;
 using Avalonia.Automation.Peers;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
@@ -42,6 +43,118 @@ public sealed class PopupTests
 
     private static FakeUsageProvider Gemini() =>
         new("gemini", "Gemini CLI", Readings.Healthy("gemini", 12d));
+
+    /// <summary>
+    /// <b>A provider the panel lists keeps its ring, even with nothing to put on it.</b>
+    /// </summary>
+    /// <remarks>
+    /// The ring used to be taken from the provider's headline, and a provider with no metrics
+    /// has no headline, so a machine with three providers and one unreachable drew two rings
+    /// and named two in the legend while three rows stood underneath. DESIGN.md and the view's
+    /// own comment both say the opposite in words: "a ring missing from the legend would be a
+    /// provider missing from the panel". The rule held for a window with no percentage, which
+    /// is the case a user rarely meets, and not for the failed reading, which is the case they
+    /// do. The ring has no window to be named after, so it takes the provider's own name and
+    /// the em dash every unreported reading takes.
+    /// </remarks>
+    [AvaloniaFact]
+    public void AProviderThatCouldNotBeReadKeepsItsRingAndItsLegendRow()
+    {
+        using PopupViewModel panel = Panel(
+            Claude(),
+            Codex(),
+            new FakeUsageProvider("gemini", "Gemini CLI", Readings.Failed("gemini")));
+
+        Assert.Equal(3, panel.VisibleProviders.Count);
+        Assert.Equal(3, panel.DialReadings.Count);
+
+        Assert.Equal(
+            ["Session (Claude Code)", "Session (Codex)", "Gemini CLI"],
+            panel.DialReadings.Select(r => r.Label));
+
+        // Never a zero for the one that could not be read, and never a threshold index over
+        // an outlined ring either.
+        Assert.Null(panel.DialReadings[2].Value);
+        Assert.Null(panel.DialReadings[2].Threshold);
+        Assert.False(panel.DialReadings[2].IsReported);
+        Assert.Equal(UsageFormat.Unknown, panel.DialReadings[2].PercentText);
+
+        // The ring numbers still come from the list, so the legend's marks and the face's
+        // arcs cannot be numbered differently.
+        Assert.Equal([0, 1, 2], panel.DialReadings.Select(r => r.Ring));
+        Assert.Equal([14d, 10d, 6d], panel.DialReadings.Select(r => r.LegendMarkDiameter));
+
+        Surface.Show(new PopupView { DataContext = panel }, window =>
+        {
+            Dial dial = Assert.Single(Surface.Visible<Dial>(window));
+            Assert.Equal(3, dial.Arcs.Count);
+
+            ItemsControl legend = Assert.Single(
+                Surface.Visible<ItemsControl>(window),
+                items => items.ItemsSource is IReadOnlyList<DialReading>);
+
+            Assert.Equal(
+                ["Session (Claude Code)", "62%", "Session (Codex)", "41%", "Gemini CLI", UsageFormat.Unknown],
+                Surface.Lines(legend));
+
+            // The provider is under the face as well, with the failure and the one action
+            // that can change it, which is what makes a ring with no figure readable at all.
+            Assert.True(Surface.Shows(window, UsageFormat.ProviderUnavailable));
+            Assert.DoesNotContain("0%", Surface.Lines(window));
+        }, width: 320d, height: 1400d);
+    }
+
+    /// <summary>
+    /// The one line stays inside the panel when a provider reports five windows.
+    /// </summary>
+    /// <remarks>
+    /// It was a horizontal <c>StackPanel</c> with no wrapping, trimming or maximum width, so
+    /// on a provider reporting five windows the line simply kept going, out of the 320 wide
+    /// panel and into the shadow margin. It wraps rather than trims: a summary with the last
+    /// two windows cut off reads as the whole list, and this product does not hide figures it
+    /// has. Claude Code reports three seven-day windows, so the line is also where two windows
+    /// of one length had to stop being called the same thing.
+    /// </remarks>
+    [AvaloniaFact]
+    public void TheCompactLineStaysInsideThePanel()
+    {
+        var crowded = new ProviderUsage(
+            "claude",
+            ProviderStatus.Active,
+            [
+                Readings.Metric("five_hour", "Session", 26d, TimeSpan.FromHours(5), Readings.Now.AddHours(2)),
+                Readings.Metric("seven_day", "Weekly", 41d, TimeSpan.FromDays(7), Readings.Now.AddDays(3)),
+                Readings.Metric("seven_day_opus", "Weekly (Opus)", 63d, TimeSpan.FromDays(7), Readings.Now.AddDays(3)),
+                Readings.Metric("seven_day_sonnet", "Weekly (Sonnet)", 22d, TimeSpan.FromDays(7), Readings.Now.AddDays(3)),
+                Readings.Metric("thirty_day", "Monthly", 58d, TimeSpan.FromDays(30), Readings.Now.AddDays(11)),
+            ],
+            null,
+            Readings.Now,
+            null);
+
+        using PopupViewModel panel = Panel(new FakeUsageProvider("claude", "Claude Code", crowded));
+
+        // Three seven-day windows, three different figures, and three different names. Keyed
+        // on the window's length alone all three printed "7d".
+        Assert.Equal(
+            ["5h", "7d", "7d Opus", "7d Sonnet", "30d"],
+            panel.Providers[0].CompactMetrics.Select(m => m.Label));
+
+        Surface.Show(new PopupView { DataContext = panel }, window =>
+        {
+            foreach (TextBlock block in Surface.Visible<TextBlock>(window))
+            {
+                if (block.TranslatePoint(new Point(block.Bounds.Width, 0d), window) is not { } edge)
+                {
+                    continue;
+                }
+
+                Assert.True(
+                    edge.X <= 320d,
+                    $"\"{block.Text}\" runs to {edge.X:0.#}, past the 320 the panel is wide.");
+            }
+        }, width: 320d, height: 1400d);
+    }
 
     /// <summary>
     /// One provider: the header, a name, one compact line carrying every window it

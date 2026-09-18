@@ -664,6 +664,19 @@ meant for it, and on that edge there is nothing to give up: past the panel's nea
 taskbar the icon sits in covers the shadow. The panel does not move, and the other three edges
 keep the whole inset.
 
+**The panel never loses its top edge.** Its height follows its content and its content follows
+the number of providers: measured, 529 for one, 659 for two, 765 for three. A 1366x768 screen
+has 728 to give and a 1920x1080 screen at 175% has 576, so on those the panel cannot be placed
+whole and something has to go. The order is fixed: the bottom first, then the 8px margin, then
+the tray icon, and the top last of all, which is to say never. The top carries the wordmark,
+the settings gear and the head of the dial, and a panel that opens with those above the screen
+has lost what says what it is and how to leave it, with no way to scroll back to them.
+
+So the window takes a ceiling, the working area less the panel's margin either side, and the
+panel scrolls inside it: an 8px lane on the right, the same one every other scrolling surface
+here uses, appearing only where the panel does not fit. Where it fits there is no scrollbar and
+nothing about the panel changes.
+
 ## Motion
 
 Only in response to something changing, and only where the machine has not asked for stillness.
@@ -729,10 +742,21 @@ somebody navigating back to it is looking for. The line under the title stays "H
 AI agents are doing."
 
 - Unavailable metric: "Not reported by this provider" — never a zero or a guess.
+- Nothing read yet: "Waiting for the first reading." **This is a fourth state, not the first
+  one.** "Not reported by this provider" says the provider was asked and reported nothing, and
+  a surface built before anything has been read has not asked. The first read spawns a vendor
+  command line and has taken seven seconds on the verification machine, so it is seconds of a
+  wrong sentence rather than one frame of one. It is the same sentence the provider page's
+  integration section shows for that state, held as one constant so the two cannot drift.
 - Provider error: "Unable to retrieve usage" with a "Retry" button.
 - Empty history: "No usage recorded yet. Altim starts collecting when an agent runs."
 - No provider installed: "No providers detected" — the provider section's sentence and, over the
   same set, the status line's.
+- Settings that could not be read: the page says so, says the values under it are the defaults
+  rather than the reader's own, and disables everything that writes one. A read that failed is
+  not a write that failed and does not borrow its sentence. **Nothing is written until a read
+  has succeeded**: the page is built on the defaults, so one save over an unread record
+  replaces the stored settings with them.
 - Threshold alert: "Session usage reached 80%." Reset alert: "Usage has reset."
 
 - Pacing with too little history: `—`. Reset time not reported: `—`.

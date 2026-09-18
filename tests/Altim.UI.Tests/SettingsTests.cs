@@ -3,6 +3,7 @@ using Altim.Core.Settings;
 using Altim.UI.Tests.Fakes;
 using Altim.UI.ViewModels;
 using Altim.UI.Views;
+using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Xunit;
 
@@ -332,6 +333,131 @@ public sealed class SettingsTests
         Assert.Equal("Usage history cleared.", page.ClearHistoryResult);
     }
 
+    /// <summary>
+    /// A read that failed is reported as a read that failed, and locks the page.
+    /// </summary>
+    /// <remarks>
+    /// It used to set <c>SaveFailed</c>, so the page said "Settings could not be saved" about
+    /// an event that had not happened, while every control underneath it went on showing the
+    /// constructor's defaults as though they were the user's own values.
+    /// </remarks>
+    [Fact]
+    public async Task AFailedReadIsReportedAsAFailedReadAndLocksThePage()
+    {
+        var store = new FakeSettingsStore { Failure = new IOException("locked") };
+        SettingsViewModel page = Page(store, new FakeHistoryService());
+
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(page.LoadFailed);
+        Assert.False(page.SaveFailed);
+        Assert.False(page.CanEditSettings);
+        Assert.Contains("could not be read", page.LoadFailedText, StringComparison.Ordinal);
+
+        // And it says what the controls under it are actually showing, because they are not
+        // the user's settings.
+        Assert.Contains("defaults", page.LoadFailedText, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <b>A read that failed cannot write the defaults over the stored settings.</b>
+    /// </summary>
+    /// <remarks>
+    /// This is the most serious thing on this page. The page is built on
+    /// <c>AltimSettings.Default</c>, and a failed read left <c>_current</c> there, so the
+    /// first change the user made saved Default-plus-that-change: one unreadable read and one
+    /// toggle, and a configuration nobody could get back. The store is made readable again
+    /// here before the change, so the test is discriminating - a page that writes would find a
+    /// store perfectly willing to take it.
+    /// </remarks>
+    [Fact]
+    public async Task AFailedReadCannotWriteDefaultsOverTheStoredSettings()
+    {
+        AltimSettings theirs = AltimSettings.Default with
+        {
+            LaunchAtLogin = true,
+            NotificationsEnabled = false,
+            SessionThresholdPercent = 55,
+            WeeklyThresholdPercent = 65,
+            AllowNetworkCalls = false,
+            RefreshInterval = TimeSpan.FromMinutes(5),
+        };
+
+        var store = new FakeSettingsStore { Stored = theirs, Failure = new IOException("locked") };
+        SettingsViewModel page = Page(store, new FakeHistoryService());
+
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        // The page is showing defaults, because they are all it has.
+        Assert.True(page.LoadFailed);
+        Assert.NotEqual(theirs.SessionThresholdPercent, page.SelectedSessionThreshold.Value);
+
+        // The store is fine now. Nothing has re-read it, so the page still knows nothing.
+        store.Failure = null;
+
+        page.StartMinimised = !page.StartMinimised;
+        await page.SaveAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(store.Saved);
+        Assert.Equal(0, store.Writes);
+        Assert.Equal(theirs, store.Stored);
+    }
+
+    /// <summary>And a read that succeeds unlocks it and saves normally.</summary>
+    [Fact]
+    public async Task AReadThatSucceedsLeavesThePageEditable()
+    {
+        var store = new FakeSettingsStore();
+        SettingsViewModel page = Page(store, new FakeHistoryService());
+
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(page.LoadFailed);
+        Assert.True(page.CanEditSettings);
+
+        page.LaunchAtLogin = true;
+        await page.SaveAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(Assert.IsType<AltimSettings>(store.Saved).LaunchAtLogin);
+    }
+
+    /// <summary>
+    /// A Claude Code settings file that could not be read is not a settings file that says
+    /// "off".
+    /// </summary>
+    /// <remarks>
+    /// <c>Failed</c> means the file could not be read or updated and nothing was changed, so
+    /// what is true is whatever was last actually observed. It was mapped to "not installed",
+    /// which made an unreadable file render as a definite answer; the switch then moved, and
+    /// because the switch moving is what records the choice, Altim wrote that guess into its
+    /// own store. The switch was left enabled over it as well, so the user could act on a
+    /// state nobody knew.
+    /// </remarks>
+    [Fact]
+    public async Task AStatusLineFileThatCannotBeReadIsNotRecordedAsOff()
+    {
+        var store = new FakeSettingsStore
+        {
+            Stored = AltimSettings.Default with { ClaudeStatusLineEnabled = true },
+        };
+
+        var statusLine = new FakeStatusLineService { Failure = new IOException("locked") };
+        SettingsViewModel page = Page(store, statusLine);
+
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(StatusLineInstallState.Failed, page.StatusLineState);
+
+        // What the user asked for, unchanged: nothing has been observed to contradict it.
+        Assert.True(page.ClaudeStatusLineEnabled);
+
+        // And nothing can be asked of a file Altim cannot read.
+        Assert.False(page.CanChangeStatusLine);
+        Assert.True(page.ShowsStatusLineNotice);
+        Assert.Contains("Nothing was changed", page.StatusLineNotice!, StringComparison.Ordinal);
+        Assert.Empty(statusLine.Changes);
+    }
+
     /// <summary>A store that cannot be written says so rather than pretending it saved.</summary>
     [Fact]
     public async Task SaysWhenAWriteFails()
@@ -508,6 +634,38 @@ public sealed class SettingsTests
         Assert.False(page.ClaudeStatusLineEnabled);
         Assert.Empty(statusLine.Changes);
         Assert.False(Assert.IsType<AltimSettings>(store.Saved).ClaudeStatusLineEnabled);
+    }
+
+    /// <summary>
+    /// On screen, a failed read is the sentence and a page nothing can be changed on.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RendersAFailedReadAsALockedPage()
+    {
+        var store = new FakeSettingsStore { Failure = new IOException("locked") };
+        using ProviderViewModel row = Row();
+        SettingsViewModel page = Page(store, new FakeHistoryService(), row);
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+
+        var view = new SettingsView { DataContext = page };
+
+        Surface.Show(view, window =>
+        {
+            Assert.True(Surface.Shows(window, page.LoadFailedText));
+            Assert.False(Surface.Shows(window, page.SaveFailedText));
+
+            // Nothing that writes a setting can be reached. The About section and the
+            // history action are not settings and stay where they are.
+            foreach (ToggleSwitch toggle in Surface.Visible<ToggleSwitch>(window))
+            {
+                Assert.False(toggle.IsEffectivelyEnabled);
+            }
+
+            foreach (ComboBox picker in Surface.Visible<ComboBox>(window))
+            {
+                Assert.False(picker.IsEffectivelyEnabled);
+            }
+        }, width: 760d, height: 1600d);
     }
 
     /// <summary>On screen, the five sections are all there.</summary>

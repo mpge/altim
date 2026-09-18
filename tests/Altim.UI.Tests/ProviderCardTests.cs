@@ -466,6 +466,56 @@ public sealed class ProviderCardTests
     private static int HorizontalRules(Visual root) =>
         Surface.Visible<Separator>(root).Count(rule => rule.Bounds.Width > 1d);
 
+    /// <summary>
+    /// A card for a provider nothing has been read from says it is waiting, not that the
+    /// provider reported nothing.
+    /// </summary>
+    /// <remarks>
+    /// The card was built with an empty reading and no error, so from construction until the
+    /// first reading landed it said "Waiting" in its status word and "Not reported by this
+    /// provider" in its body at the same time - two different answers to one question, one of
+    /// them invented. The first read spawns a vendor command line, so this is not one frame.
+    /// </remarks>
+    [AvaloniaFact]
+    public void ACardWithNothingReadYetSaysItIsWaiting()
+    {
+        // Unknown until the first refresh completes, which is what IUsageProvider promises
+        // and what the card is built over on every real start-up.
+        var provider = new FakeUsageProvider("claude", "Claude Code") { Status = ProviderStatus.Unknown };
+        using var row = new ProviderViewModel(provider, new TestClock(Readings.Now), AltimSettings.Default);
+
+        Surface.Show(new ProviderCardView { DataContext = row }, window =>
+        {
+            Assert.True(Surface.Shows(window, "Waiting"));
+            Assert.True(Surface.Shows(window, UsageFormat.WaitingForFirstReading));
+
+            // Not the sentence for a provider that answered and reported nothing, and not a
+            // failure either: nothing has gone wrong, nothing has happened yet.
+            Assert.False(Surface.Shows(window, UsageFormat.MetricUnavailable));
+            Assert.False(Surface.Shows(window, UsageFormat.ProviderUnavailable));
+            Assert.Empty(Surface.Visible<Dial>(window));
+            Assert.Empty(Surface.Visible<Meter>(window));
+            Assert.DoesNotContain("0%", Surface.Lines(window));
+        }, width: 564d, height: 560d);
+    }
+
+    /// <summary>
+    /// And a card whose provider answered with no metric at all keeps the other sentence,
+    /// which is the distinction this pair exists to hold apart.
+    /// </summary>
+    [AvaloniaFact]
+    public void ACardWhoseProviderReportedNothingStillSaysSo()
+    {
+        using ProviderViewModel row = Row("codex", "Codex", Readings.NoMetrics("codex"));
+
+        Surface.Show(new ProviderCardView { DataContext = row }, window =>
+        {
+            Assert.True(Surface.Shows(window, UsageFormat.MetricUnavailable));
+            Assert.False(Surface.Shows(window, UsageFormat.WaitingForFirstReading));
+            Assert.DoesNotContain("0%", Surface.Lines(window));
+        }, width: 564d, height: 560d);
+    }
+
     private static ProviderViewModel Row(string id, string name, ProviderUsage reading)
     {
         var provider = new FakeUsageProvider(id, name, reading);

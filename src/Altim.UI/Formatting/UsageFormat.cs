@@ -19,6 +19,27 @@ public static class UsageFormat
     public const string MetricUnavailable = "Not reported by this provider";
 
     /// <summary>
+    /// Shown in place of a metric nobody has asked the provider for yet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>"We have not asked yet" is a fourth state</b>, beside a reading that failed, a
+    /// reading that carried no metric and a metric carrying no figure. It must not render as
+    /// <see cref="MetricUnavailable"/>: that sentence says the provider was asked and
+    /// reported nothing, and saying it before the first reading has landed is Altim
+    /// answering a question it has not put yet. The first read spawns a vendor command line
+    /// and has taken seven seconds on the verification machine, so this is not one frame.
+    /// </para>
+    /// <para>
+    /// One constant rather than a sentence per surface, and the same one
+    /// <see cref="IntegrationSentence"/> gives for <see cref="ProviderStatus.Unknown"/>, so
+    /// the metric block and the integration section cannot end up describing the same state
+    /// in two ways.
+    /// </para>
+    /// </remarks>
+    public const string WaitingForFirstReading = "Waiting for the first reading.";
+
+    /// <summary>
     /// Shown in place of a whole reading that could not be taken. The sentence itself lives in
     /// <see cref="ProviderUsage.UnavailableDetail"/> so the words a provider puts in
     /// <c>StatusDetail</c> and the words the interface shows cannot drift apart.
@@ -236,6 +257,60 @@ public static class UsageFormat
     }
 
     /// <summary>
+    /// How one metric is named where there is only room for a couple of characters, such as
+    /// the popup's one line per provider: the window's length, and whatever the provider's
+    /// own label adds to tell it apart from another window of the same length.
+    /// </summary>
+    /// <param name="window">The window, or null when the provider reported none.</param>
+    /// <param name="label">The provider's own label for the metric.</param>
+    /// <returns>Something like <c>7d</c> or <c>7d Opus</c>, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// <see cref="WindowShort(LimitWindow?)"/> is keyed on length alone, and a provider can
+    /// report several windows of one length: Claude Code reports Weekly, Weekly (Opus) and
+    /// Weekly (Sonnet), all seven days long. Keyed on length the line printed <c>7d</c>
+    /// three times with three different figures beside it, which is three readings under one
+    /// name.
+    /// </remarks>
+    public static string? MetricShort(LimitWindow? window, string? label)
+    {
+        if (WindowShort(window) is not { } shorthand)
+        {
+            return null;
+        }
+
+        return Qualifier(label) is { } qualifier
+            ? string.Concat(shorthand, " ", qualifier)
+            : shorthand;
+    }
+
+    /// <summary>
+    /// The parenthesised part of a label, such as <c>Opus</c> in <c>Weekly (Opus)</c>, or
+    /// null when the label has none.
+    /// </summary>
+    private static string? Qualifier(string? label)
+    {
+        if (label is null)
+        {
+            return null;
+        }
+
+        int open = label.IndexOf('(', StringComparison.Ordinal);
+        if (open < 0)
+        {
+            return null;
+        }
+
+        int close = label.IndexOf(')', open + 1);
+        if (close < 0)
+        {
+            return null;
+        }
+
+        string inner = label[(open + 1)..close].Trim();
+        return inner.Length == 0 ? null : inner;
+    }
+
+    /// <summary>
     /// Formats a pacing figure: this window's level against the same point in the previous
     /// one, in percentage points.
     /// </summary>
@@ -327,6 +402,6 @@ public static class UsageFormat
         ProviderStatus.Detected => "Installed and readable.",
         ProviderStatus.NotDetected => "Not installed, or its files are not where Altim looks.",
         ProviderStatus.Error => ProviderUnavailable,
-        _ => "Waiting for the first reading.",
+        _ => WaitingForFirstReading,
     };
 }

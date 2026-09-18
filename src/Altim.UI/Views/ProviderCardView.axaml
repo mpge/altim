@@ -104,6 +104,14 @@
                 Command="{Binding RetryCommand}" />
       </StackPanel>
 
+      <!-- Nothing has been read from this provider yet. That is not the same thing as a
+           provider that answered and reported nothing, and the card used to say the second
+           from the moment it was built until the first reading landed. -->
+      <TextBlock IsVisible="{Binding ShowsWaitingNotice}"
+                 Theme="{DynamicResource AltimBodyText}"
+                 Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                 Text="{Binding WaitingText}" />
+
       <!-- A reading that carried no metric at all says so, rather than showing nothing. -->
       <TextBlock IsVisible="{Binding ShowsNoMetricsNotice}"
                  Theme="{DynamicResource AltimBodyText}"

@@ -56,6 +56,11 @@
                   Command="{Binding Provider.RetryCommand}" />
         </StackPanel>
 
+        <TextBlock IsVisible="{Binding Provider.ShowsWaitingNotice}"
+                   Theme="{DynamicResource AltimBodyText}"
+                   Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                   Text="{Binding Provider.WaitingText}" />
+
         <TextBlock IsVisible="{Binding Provider.ShowsNoMetricsNotice}"
                    Theme="{DynamicResource AltimBodyText}"
                    Foreground="{DynamicResource AltimTextSecondaryBrush}"

@@ -51,6 +51,12 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
     private bool _hasError;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsWaitingNotice))]
+    [NotifyPropertyChangedFor(nameof(ShowsNoMetricsNotice))]
+    [NotifyPropertyChangedFor(nameof(ShowsNoFiguresNotice))]
+    private bool _hasReading;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowsNoMetricsNotice))]
     private bool _hasMetrics;
 
@@ -191,11 +197,36 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
     /// </summary>
     public string DisclosureLabel => UsageFormat.DisclosureName(DisplayName);
 
+    /// <summary>The sentence shown before anything has been read from this provider.</summary>
+    public string WaitingText => UsageFormat.WaitingForFirstReading;
+
+    /// <summary>
+    /// Whether nobody has asked this provider anything yet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The fourth state.</b> A reading that failed, a reading that carried no metric, a
+    /// metric carrying no figure and a provider nothing has been read from are four
+    /// different things, and the fourth used to render as the second: every surface said
+    /// "Not reported by this provider" under every provider from construction until the
+    /// first reading landed. That is Altim answering a question it has not asked, and on the
+    /// verification machine the first read took seven seconds, so it was not one frame.
+    /// </para>
+    /// <para>
+    /// This is not read off the status: a provider is free to report
+    /// <see cref="ProviderStatus.Unknown"/> whenever it likes, whereas what the metric block
+    /// needs to know is whether <see cref="Apply"/> has ever run. <see cref="ApplySettings"/>
+    /// deliberately does not set it - a new threshold is not a reading.
+    /// </para>
+    /// </remarks>
+    public bool ShowsWaitingNotice => !HasReading;
+
     /// <summary>
     /// Whether the reading succeeded and carried no metric at all, which is a different
-    /// thing from a reading that failed and is said differently.
+    /// thing from a reading that failed and is said differently, and a different thing
+    /// again from a reading nobody has taken.
     /// </summary>
-    public bool ShowsNoMetricsNotice => !HasError && !HasMetrics;
+    public bool ShowsNoMetricsNotice => HasReading && !HasError && !HasMetrics;
 
     /// <summary>Whether there is a window for this provider's card to be headed by.</summary>
     public bool HasHeadline => Headline is not null;
@@ -213,7 +244,7 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
     /// are the same thing to a reader, and the alternative is a provider row with a name and
     /// nothing under it.
     /// </summary>
-    public bool ShowsNoFiguresNotice => !HasError && CompactMetrics.Count == 0;
+    public bool ShowsNoFiguresNotice => HasReading && !HasError && CompactMetrics.Count == 0;
 
     /// <summary>
     /// The metric pacing is measured on: the shortest window that reports a figure. It is
@@ -313,8 +344,22 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         IntegrationText = UsageFormat.IntegrationSentence(usage.Status);
         LastRefreshedText = UsageFormat.LastRefreshed(usage.LastRefreshed);
 
+        // Set before the rows are rebuilt, so the surfaces swap the waiting sentence for
+        // whatever this reading actually says in one go rather than showing the unreported
+        // sentence in between.
+        HasReading = true;
+
         RebuildMetrics(usage);
         RebuildTokens(usage);
+
+        // A failed reading says nothing about what the provider is doing either. The metric
+        // rows are dropped for exactly this reason, and a session list left standing beside
+        // "Unable to retrieve usage" reads as current activity read from a provider that
+        // could not be read at all.
+        if (usage.Status == ProviderStatus.Error)
+        {
+            ApplySessions([]);
+        }
 
         // Announced last, and deliberately: the panel rebuilds its reset list and its status
         // line when this changes, and a reading announced before the rows were rebuilt would
@@ -353,7 +398,12 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
 
         _settings = settings;
         ShowsLocalOnlyNotice = !settings.AllowNetworkCalls;
-        RebuildMetrics(CurrentUsage);
+
+        // The comparison is kept. Rebuilding the rows against a new threshold moves the
+        // meter's index and nothing else: the figures are the reading Altim already had, so
+        // the pacing computed against them is still the answer. Dropping it here left every
+        // card reading an em dash from the first settings change onwards.
+        RebuildMetrics(CurrentUsage, dropPacing: false);
     }
 
     /// <summary>Stops listening to the provider.</summary>
@@ -396,6 +446,10 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         }
 
         await LoadAsync(ct).ConfigureAwait(true);
+
+        // The failure emptied the session list, so a retry that reloaded usage alone left a
+        // provider that is working again showing no activity at all.
+        await LoadSessionsAsync(ct).ConfigureAwait(true);
     }
 
     private void OnUsageChanged(object? sender, ProviderUsage usage) =>
@@ -418,7 +472,7 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         CurrentUsage.LastRefreshed,
         ProviderUsage.UnavailableDetail));
 
-    private void RebuildMetrics(ProviderUsage usage)
+    private void RebuildMetrics(ProviderUsage usage, bool dropPacing = true)
     {
         Metrics.Clear();
 
@@ -437,7 +491,7 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         RebuildHeadline();
         RebuildCompactMetrics();
         RebuildReset();
-        RebuildPacingMetric();
+        RebuildPacingMetric(dropPacing);
     }
 
     /// <summary>
@@ -487,7 +541,7 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
             }
 
             CompactMetrics.Add(new CompactMetricViewModel(
-                UsageFormat.WindowShort(metric.Window) ?? metric.Label,
+                UsageFormat.MetricShort(metric.Window, metric.Label) ?? metric.Label,
                 percent,
                 CompactMetrics.Count > 0));
         }
@@ -500,7 +554,7 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
     /// Picks the window pacing is measured on, and drops the comparison that stood beside
     /// the previous reading: the figure was computed against numbers that have just moved.
     /// </summary>
-    private void RebuildPacingMetric()
+    private void RebuildPacingMetric(bool dropPacing)
     {
         MetricViewModel? shortest = null;
         foreach (MetricViewModel metric in Metrics)
@@ -518,7 +572,11 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
 
         PacingMetric = shortest;
         PacingCaption = UsageFormat.PacingCaption(shortest?.Window);
-        ApplyPacing(null);
+
+        if (dropPacing)
+        {
+            ApplyPacing(null);
+        }
     }
 
     private void RebuildReset()
@@ -558,17 +616,32 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         TokenRows.Add(new TokenRowViewModel("Cache write", tokens.CacheWrite));
     }
 
+    /// <summary>
+    /// Replaces the session list, unless the last reading failed.
+    /// </summary>
+    /// <remarks>
+    /// The refusal is here rather than at the call sites because nothing decides the order.
+    /// Overview asks a provider for its usage and its sessions at the same time and waits for
+    /// both, so which of the two lands last is up to the thread pool; and a provider whose
+    /// usage read <em>threw</em> still holds whatever sessions it last saw, so asking it again
+    /// hands those back. Either way the page would end up saying "Unable to retrieve usage"
+    /// over a list of what that provider is doing, which is the stale-row-beside-an-error
+    /// reading the metric rows already refuse.
+    /// </remarks>
     private void ApplySessions(IReadOnlyList<AgentSession> sessions)
     {
         Sessions.Clear();
 
-        List<AgentSession> ordered = [.. sessions];
-        ordered.Sort(static (left, right) =>
-            (right.LastActivityAt ?? right.StartedAt).CompareTo(left.LastActivityAt ?? left.StartedAt));
-
-        foreach (AgentSession session in ordered)
+        if (!HasError)
         {
-            Sessions.Add(new AgentSessionViewModel(session, DisplayName, _timeProvider));
+            List<AgentSession> ordered = [.. sessions];
+            ordered.Sort(static (left, right) =>
+                (right.LastActivityAt ?? right.StartedAt).CompareTo(left.LastActivityAt ?? left.StartedAt));
+
+            foreach (AgentSession session in ordered)
+            {
+                Sessions.Add(new AgentSessionViewModel(session, DisplayName, _timeProvider));
+            }
         }
 
         HasSessions = Sessions.Count > 0;

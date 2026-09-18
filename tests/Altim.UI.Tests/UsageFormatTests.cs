@@ -78,12 +78,49 @@ public sealed class UsageFormatTests
     public void SaysWhenNothingHasBeenRead() =>
         Assert.Equal(UsageFormat.NotRefreshedYet, UsageFormat.LastRefreshed(null));
 
+    /// <summary>
+    /// Two windows of one length are not named the same thing.
+    /// </summary>
+    /// <remarks>
+    /// The shorthand was keyed on the window's length alone, and Claude Code reports Weekly,
+    /// Weekly (Opus) and Weekly (Sonnet), all seven days long. The tray panel's one line
+    /// therefore printed "7d" three times with three different figures beside it: three
+    /// readings under one name, on the surface with the least room to sort it out.
+    /// </remarks>
+    [Fact]
+    public void NamesTwoWindowsOfOneLengthApart()
+    {
+        var week = new LimitWindow(TimeSpan.FromDays(7), null);
+
+        Assert.Equal("7d", UsageFormat.MetricShort(week, "Weekly"));
+        Assert.Equal("7d Opus", UsageFormat.MetricShort(week, "Weekly (Opus)"));
+        Assert.Equal("7d Sonnet", UsageFormat.MetricShort(week, "Weekly (Sonnet)"));
+
+        // The plain cases are untouched, and a window nobody reported still has no shorthand.
+        Assert.Equal("5h", UsageFormat.MetricShort(new LimitWindow(TimeSpan.FromHours(5), null), "Session"));
+        Assert.Equal("30d", UsageFormat.MetricShort(new LimitWindow(TimeSpan.FromDays(30), null), "Monthly"));
+        Assert.Null(UsageFormat.MetricShort(null, "Weekly"));
+        Assert.Null(UsageFormat.MetricShort(new LimitWindow(TimeSpan.Zero, null), "Weekly"));
+
+        // A label with nothing between the brackets adds nothing rather than a trailing space.
+        Assert.Equal("7d", UsageFormat.MetricShort(week, "Weekly ()"));
+        Assert.Equal("7d", UsageFormat.MetricShort(week, "Weekly ("));
+        Assert.Equal("7d", UsageFormat.MetricShort(week, null));
+    }
+
     /// <summary>The unavailable sentences are the ones DESIGN.md prescribes, exactly.</summary>
     [Fact]
     public void KeepsTheWording()
     {
         Assert.Equal("Not reported by this provider", UsageFormat.MetricUnavailable);
+        Assert.Equal("Waiting for the first reading.", UsageFormat.WaitingForFirstReading);
         Assert.Equal("Unable to retrieve usage", UsageFormat.ProviderUnavailable);
+
+        // The metric block and the integration section say the fourth state in one voice,
+        // which is only true while they read the same constant.
+        Assert.Equal(
+            UsageFormat.WaitingForFirstReading,
+            UsageFormat.IntegrationSentence(ProviderStatus.Unknown));
         Assert.Equal("Retry", UsageFormat.RetryLabel);
         Assert.Equal(
             "No usage recorded yet. Altim starts collecting when an agent runs.",

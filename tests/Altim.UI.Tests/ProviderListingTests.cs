@@ -126,9 +126,12 @@ public sealed class ProviderListingTests
     }
 
     /// <summary>
-    /// A provider nobody has probed yet is listed. The panel is built before the first
-    /// reading, so hiding this state would put every row on screen a moment after the panel
-    /// opened and push whatever the reader was pointing at down the panel.
+    /// A provider nobody has probed yet is listed, <b>and says that rather than saying it
+    /// reported nothing</b>. The panel is built before the first reading, so hiding this
+    /// state would put every row on screen a moment after the panel opened and push whatever
+    /// the reader was pointing at down the panel; saying "Not reported by this provider"
+    /// instead is the panel answering a question it has not asked, and on the verification
+    /// machine the first reading took seven seconds to arrive.
     /// </summary>
     [AvaloniaFact]
     public void ThePanelListsAProviderItHasNotProbedYet()
@@ -148,7 +151,8 @@ public sealed class ProviderListingTests
         Surface.Show(new PopupView { DataContext = panel }, window =>
         {
             Assert.True(Surface.Shows(window, "Gemini CLI"));
-            Assert.True(Surface.Shows(window, UsageFormat.MetricUnavailable));
+            Assert.True(Surface.Shows(window, UsageFormat.WaitingForFirstReading));
+            Assert.False(Surface.Shows(window, UsageFormat.MetricUnavailable));
         }, width: 320d, height: 900d);
     }
 

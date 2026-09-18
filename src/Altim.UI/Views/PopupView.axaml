@@ -103,7 +103,10 @@
            the convention; the rows stand in the same order as the rings. A provider that
            reported no figure keeps its row and shows an em dash, because unknown is not
            zero and a ring missing from the legend would be a provider missing from the
-           panel.
+           panel. That covers a window with no percentage, a provider whose reading failed
+           and a provider nothing has been read from yet: all three are listed under the
+           face, so all three are named on it. The last two have no window to name, so their
+           row carries the provider's own name instead.
 
            It is handed the face rather than the same list the face was handed: the rows are
            the face's own arcs, so the legend cannot end up naming a different set. Pointing
@@ -207,9 +210,14 @@
                           Margin="12,2,0,0"
                           IsVisible="{Binding HasCompactMetrics}"
                           ItemsSource="{Binding CompactMetrics}">
+              <!-- A WrapPanel rather than a horizontal StackPanel. The panel is 320 wide
+                   and one provider can report five windows: on a StackPanel the line simply
+                   kept going, out of the panel and into the shadow margin. Wrapping keeps
+                   every figure, which trimming would not - a summary with the last two
+                   windows cut off is a summary that reads as the whole list. -->
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
-                  <StackPanel Orientation="Horizontal" />
+                  <WrapPanel Orientation="Horizontal" />
                 </ItemsPanelTemplate>
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
@@ -240,6 +248,18 @@
                       Content="{Binding RetryLabel}"
                       Command="{Binding RetryCommand}" />
             </StackPanel>
+
+            <!-- Nothing has been read from this provider yet. The panel is built and shown
+                 before the first reading lands, and the first read spawns a vendor command
+                 line, so this is seconds rather than a frame. -->
+            <TextBlock Grid.Row="1"
+                       Grid.Column="1"
+                       Margin="12,2,0,0"
+                       IsVisible="{Binding ShowsWaitingNotice}"
+                       Theme="{DynamicResource AltimBodyText}"
+                       Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                       TextWrapping="Wrap"
+                       Text="{Binding WaitingText}" />
 
             <!-- A reading that carried no figure at all says so, rather than showing nothing. -->
             <TextBlock Grid.Row="1"
