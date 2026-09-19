@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Altim.App.Composition;
 using Altim.App.Diagnostics;
 using Altim.App.Monitoring;
@@ -428,7 +429,10 @@ internal sealed class AltimRuntime : IAsyncDisposable
 
             _settings.Changed += OnSettingsChanged;
 
-            await Dispatcher.UIThread.InvokeAsync(() => BuildWindows(loaded)).GetTask().ConfigureAwait(false);
+            bool firstRun = await IsFirstRunAsync(ct).ConfigureAwait(false);
+
+            await Dispatcher.UIThread.InvokeAsync(() => BuildWindows(loaded, firstRun)).GetTask()
+                .ConfigureAwait(false);
 
             scheduler.Start();
 
@@ -476,7 +480,9 @@ internal sealed class AltimRuntime : IAsyncDisposable
         return ids;
     }
 
-    private void BuildWindows(AltimSettings settings)
+    /// <param name="settings">The settings the windows are built against.</param>
+    /// <param name="firstRun">True when Altim has never shown itself to this user.</param>
+    private void BuildWindows(AltimSettings settings, bool firstRun)
     {
         // The theme is settled before the first view exists, so nothing is built against
         // one palette and restyled into another.
@@ -513,9 +519,18 @@ internal sealed class AltimRuntime : IAsyncDisposable
         // The one thing "Start minimised" can mean for a process whose main surface is a
         // tray icon: off, launching opens the dashboard as well. It was persisted and shown
         // in Settings and read by nothing at all, which is a control that lies.
-        if (!settings.StartMinimised)
+        //
+        // A first run opens it whatever that setting says, because the setting defaults to
+        // on and a user who has never seen Altim cannot have chosen it. Without this the
+        // installer finishes and nothing visible happens: the process has no main window by
+        // design, and Windows puts a tray icon nobody has seen before into the overflow, so
+        // the whole application is behind a chevron the user has no reason to click.
+        if (StartupWindows.ShouldOpenDashboard(firstRun, settings.StartMinimised))
         {
-            AltimLog.Write("startup", "Start minimised is off; opening the dashboard.");
+            AltimLog.Write(
+                "startup",
+                firstRun ? "First run; opening the dashboard."
+                         : "Start minimised is off; opening the dashboard.");
             _dashboard.Open();
         }
     }
@@ -938,6 +953,58 @@ internal sealed class AltimRuntime : IAsyncDisposable
     /// extra backfill rather than none at all. Not being able to remember when something
     /// last happened is no reason to stop doing it.
     /// </remarks>
+    /// <summary>
+    /// Whether Altim has ever shown itself to this user, and records that it has.
+    /// </summary>
+    /// <param name="ct">Cancels the read and the write.</param>
+    /// <returns>True the first time this is asked on a machine, false every time after.</returns>
+    /// <remarks>
+    /// <para>
+    /// The mark is written here rather than after the window opens, so a crash between the
+    /// two does not greet the user again on every start. Showing the dashboard once too few
+    /// costs somebody one visit to the tray; showing it once per launch for ever is the
+    /// behaviour people uninstall over.
+    /// </para>
+    /// <para>
+    /// A machine with no database gets false. There is nowhere to record the answer, so
+    /// every launch would otherwise be a first run, and opening the dashboard on each of
+    /// them is exactly the failure above. The tray message already says storage is
+    /// unavailable.
+    /// </para>
+    /// </remarks>
+    private async ValueTask<bool> IsFirstRunAsync(CancellationToken ct)
+    {
+        if (_storage?.Scalars is not { } scalars)
+        {
+            return false;
+        }
+
+        if (await ReadScalarAsync(scalars, StartupWindows.FirstRunKey, ct).ConfigureAwait(false) is not null)
+        {
+            return false;
+        }
+
+        try
+        {
+            await scalars.SetValueAsync(
+                StartupWindows.FirstRunKey,
+                DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture),
+                ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The mark could not be written, so the next launch will greet the user again.
+            // That is better than not greeting them at all, and it is worth a line.
+            AltimLog.Write("startup", "The first-run mark could not be written", ex);
+        }
+
+        return true;
+    }
+
     private static async ValueTask<string?> ReadScalarAsync(SqliteSettingsStore scalars, string key,
                                                             CancellationToken ct)
     {
