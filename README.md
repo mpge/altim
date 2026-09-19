@@ -320,14 +320,17 @@ unverified. The same is true of Linux, for the same reason.
 |---|---|---|
 | Windows | `Setup.exe`, portable zip, delta updates | built, installed, run and uninstalled on Windows 11 |
 | Linux | AppImage, `.deb`, `.rpm` | packages built and their metadata checked; **never installed or run** |
-| macOS | universal `.app`, DMG | assembled on a macOS runner and read back by `packaging/macos/verify-bundle.sh`; **never installed, launched or signed on a Mac** |
+| macOS | `.app` and DMG, one per architecture | **no artefact has ever been produced**: the bundle job failed every one of its first eleven runs at the code signature step |
 
-The macOS row describes what continuous integration does, not a report from a Mac. It says the
-bundle assembles, that both architecture slices are present, that the `Info.plist` substitution
-happened and that the DMG mounts with an application inside it. It does not say Altim runs: nobody
-has launched it on macOS, and the menu bar presence, notifications and start at login are all still
-unverified. `build.yml` uploads the unsigned bundle as an artefact so that somebody with a Mac can
-close that gap.
+The macOS row is the one to read carefully, because an earlier version of it claimed more than was
+true. Nothing macOS has ever been packaged successfully. `codesign` treats `Contents/MacOS` as a
+nested-code location, a normal .NET publish fills it with managed assemblies, and sealing the
+bundle therefore failed on every run. The fix is a single-file publish, which leaves that
+directory holding the host and four dylibs and nothing else; it has been verified as far as a
+Windows machine reaches and has not yet run on a macOS runner. Until it does, the bundle job
+uploads an explicitly unsealed bundle rather than failing, so that something exists to try, and
+says so on the run page. An unsealed bundle has no start at login and is refused outright by
+Gatekeeper. `packaging/README.md`, "The bundle seal", is the full account.
 
 Scripts live in [`packaging/`](packaging/), with a README covering how to produce each artefact by
 hand and what a maintainer needs in order to sign them. A version tag builds all three through

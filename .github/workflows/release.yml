@@ -5,8 +5,8 @@ name: Release
 # moves a tag, or writes to the repository.
 #
 # build.yml is the pull-request gate and stays separate on purpose: it must stay
-# fast and run on every push, and this one takes an ahead-of-time compile and two
-# macOS publishes. They share no steps worth merging.
+# fast and run on every push, and this one takes an ahead-of-time compile and a
+# macOS publish per architecture. They share no steps worth merging.
 #
 # What this workflow does NOT do, and does not pretend to do:
 #   - sign anything on Windows unless WINDOWS_SIGN_PARAMS is set
@@ -36,7 +36,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # One job whose only output is the version string, so that three builders and a
+  # One job whose only output is the version string, so that the builders and the
   # release job cannot disagree about what they are building.
   version:
     name: Resolve version
@@ -68,7 +68,7 @@ jobs:
     needs: version
     runs-on: ${{ matrix.runs-on }}
     strategy:
-      # One platform failing must not throw away the other two; a partial draft
+      # One builder failing must not throw away the others; a partial draft
       # release is still worth inspecting, and the missing job can be re-run.
       fail-fast: false
       matrix:
@@ -81,10 +81,20 @@ jobs:
             platform: linux
             runs-on: ubuntu-latest
             artifact: linux-x64
-          - name: macOS (universal)
+          # Two macOS rows rather than one universal one. .NET cannot emit a
+          # universal binary, and merging two single-file hosts with lipo is an
+          # unobserved behaviour; packaging/README.md, "Why there is no universal
+          # build", has the reasoning. The release page carries both.
+          - name: macOS (Apple silicon)
             platform: macos
+            arch: arm64
             runs-on: macos-latest
-            artifact: macos-universal
+            artifact: macos-arm64
+          - name: macOS (Intel)
+            platform: macos
+            arch: x64
+            runs-on: macos-latest
+            artifact: macos-x64
 
     env:
       VERSION: ${{ needs.version.outputs.version }}
@@ -186,13 +196,21 @@ jobs:
 
       - name: Build the app bundle and DMG
         if: matrix.platform == 'macos'
-        run: bash packaging/macos/build-macos.sh --version "$VERSION" --arch universal
+        run: bash packaging/macos/build-macos.sh --version "$VERSION" --arch "${{ matrix.arch }}"
 
       # The script finishing is not the same as the bundle being an application. A
       # release that ships one with an unsubstituted version, no bundle identifier
-      # or a single architecture slice is worse than one that stops here, because
+      # or the wrong architecture is worse than one that stops here, because
       # nothing downstream would notice: the DMG still mounts and the .app still
       # has the right shape. This is the same script build.yml runs on every push.
+      #
+      # Deliberately WITHOUT --allow-unsealed, which build.yml does pass. A bundle
+      # with no code signature seal has no _CodeSignature/CodeResources, cannot
+      # register with SMAppService, and is refused outright by Gatekeeper; that is
+      # a thing to upload as a CI artefact for somebody to look at, and not a thing
+      # to attach to a release. If this step fails, the draft release comes out
+      # with no macOS download and the other platforms still arrive, which is the
+      # intended outcome. See packaging/README.md, "The bundle seal".
       - name: Check the app bundle
         if: matrix.platform == 'macos'
         run: |
@@ -201,7 +219,8 @@ jobs:
           # or build suffix removed, which is what build-macos.sh substitutes.
           short="${VERSION%%-*}"
           short="${short%%+*}"
-          bash packaging/macos/verify-bundle.sh dist/.macos-stage/Altim.app "$short" universal
+          bash packaging/macos/verify-bundle.sh \
+            "dist/.macos-stage/${{ matrix.arch }}/Altim.app" "$short" "${{ matrix.arch }}"
 
       - name: Note that the macOS artefacts are unsigned
         if: matrix.platform == 'macos' && env.MACOS_SIGNING_IDENTITY == ''
@@ -280,7 +299,8 @@ jobs:
             echo "| Linux | \`Altim-*-x86_64.AppImage\` | \`chmod +x\` and run. Works on any glibc desktop with X11. |"
             echo "| Linux | \`altim_*_amd64.deb\` | Debian and Ubuntu. |"
             echo "| Linux | \`altim-*.x86_64.rpm\` | Fedora and RHEL. |"
-            echo "| macOS | \`Altim-*-universal.dmg\` | Universal, Apple silicon and Intel. |"
+            echo "| macOS | \`Altim-*-arm64.dmg\` | Apple silicon: M1 and later. |"
+            echo "| macOS | \`Altim-*-x64.dmg\` | Intel Macs. |"
             echo
             echo "\`.nupkg\` and \`RELEASES\` are the Velopack update feed for installed Windows copies. You do not need to download them."
             echo

@@ -7,7 +7,7 @@ all three platforms, by hand or from CI.
 |---|---|---|---|
 | Windows | `Altim-win-Setup.exe`, `Altim-win-Portable.zip`, `*.nupkg` + `RELEASES` | [Velopack](https://velopack.io) 1.2.0 | in-app, delta |
 | Linux | `Altim-<version>-x86_64.AppImage`, `altim_<version>_amd64.deb`, `altim-<version>.x86_64.rpm` | [appimagetool](https://github.com/AppImage/appimagetool) 1.9.1, [nfpm](https://nfpm.goreleaser.com) 2.47.0 | none |
-| macOS | `Altim-<version>-universal.dmg`, `Altim.app` (zipped) | `lipo`, `iconutil`, `hdiutil` | none |
+| macOS | `Altim-<version>-arm64.dmg`, `Altim-<version>-x64.dmg`, `Altim.app` (zipped) | `iconutil`, `hdiutil` | none |
 
 `.github/workflows/release.yml` runs all three on a `v*` tag and leaves a **draft**
 release for a human to publish. The scripts below are what that workflow calls, so
@@ -24,19 +24,26 @@ a local run and a CI run produce the same thing.
 | Linux: AppImage | **never executed** — `appimagetool` is itself an AppImage |
 | Linux: installing or running any of the three | **never executed** |
 | macOS: `dotnet build` and the full test suite | **run on every push** — `build.yml` has a `macos-latest` job; Apple silicon, so this is also the only arm64 run of the suite |
-| macOS: `build-macos.sh`, the `.app`, the universal merge and the DMG | **run on every push** — `build.yml`'s `macos-bundle` job assembles it and `verify-bundle.sh` reads it back |
+| macOS: `build-macos.sh`, the `.app` and the DMG | **has never completed once.** The `macos-bundle` job failed all eleven times it ran, every one of them at the `codesign` bundle seal, so no `.app`, no DMG and no artefact has ever existed, and `verify-bundle.sh` has never read a bundle back. See "The bundle seal" below. |
 | macOS: installing, launching or signing anything | **never executed** — no Apple Developer account, and a runner has no menu bar |
-| `release.yml`, `build.yml` | `actionlint` clean |
-| the three shell scripts | `shellcheck --severity=style` clean |
+| `release.yml`, `build.yml` | `actionlint` clean as of the last run that had it. The macOS changes of 2026-09-19 have not been through it; they do parse as YAML. |
+| `build-linux.sh` | `shellcheck --severity=style` clean |
+| `build-macos.sh`, `verify-bundle.sh` | `bash -n` only. shellcheck was not installed on the machine they were last changed on, so the row above does not cover them. |
 
-Lint-clean is not the same as correct, and neither is assembled-in-CI. The macOS
-rows say a bundle is produced and that reading it back finds an application in it.
-They do not say Altim runs on a Mac: nobody has launched it, nothing is signed with
-a real identity, and nothing is notarised. Nothing that installs or launches on
-Linux has been observed working either.
+Lint-clean is not the same as correct. The macOS rows used to say a bundle was
+produced on every push and read back; that was never true, and it is corrected
+above. What is true today is that the scripts have been read, `bash -n` checked,
+and exercised as far as a Windows machine reaches: the `osx-arm64` single-file
+publish, the bundle assembly and the Mach-O-only check all run here. Everything
+that needs `sips`, `iconutil`, `codesign`, `ditto` or `hdiutil` is unobserved.
 
-`build.yml` uploads the unsigned macOS bundle as an artefact with a fourteen-day
-retention, which is the shortest path from here to somebody actually trying it.
+Nobody has launched Altim on a Mac, nothing is signed with a real identity, and
+nothing is notarised. Nothing that installs or launches on Linux has been
+observed working either.
+
+`build.yml` uploads the macOS bundle as an artefact with a fourteen-day
+retention, and that upload now runs even when a step above it failed, because a
+red job with nothing attached is exactly what the first eleven runs were.
 
 ---
 
@@ -462,40 +469,148 @@ mode explicitly with `file_info`.
 ### By hand
 
 ```bash
-./packaging/macos/build-macos.sh --version 0.1.0                # universal
 ./packaging/macos/build-macos.sh --version 0.1.0 --arch arm64
+./packaging/macos/build-macos.sh --version 0.1.0 --arch x64
 ```
 
-Output lands in `dist/macos/`: a DMG, and the bundle again as a `ditto` archive.
+One invocation, one architecture, one DMG. Output lands in `dist/macos/`: the DMG,
+and the bundle again as a `ditto` archive. The staged bundle stays behind at
+`dist/.macos-stage/<arch>/Altim.app`, which is what `verify-bundle.sh` is pointed
+at. Without `--arch` the script builds for the machine it is running on.
 
-**Universal needs two publishes.** .NET cannot emit a universal binary — a runtime
-identifier names exactly one architecture — so `osx-arm64` and `osx-x64` are
-published separately and every Mach-O file present in both is merged with `lipo`.
-Managed assemblies are architecture-neutral and are taken from the arm64 tree
-unchanged. A file that exists in only one of the two publishes is treated as an
-error, not skipped: it would produce a bundle that works on one Mac and not the
-other.
+### The bundle seal
 
-**Three of the native libraries are already universal, and `lipo` will not take
-them.** SkiaSharp, HarfBuzzSharp and Avalonia each ship one fat `.dylib` under
-`runtimes/osx/native/`, which is the architecture-neutral `osx` runtime identifier
-rather than `osx-arm64` or `osx-x64`. Runtime identifier fallback resolves that same
-file for both publishes, so both sides of the merge are the identical binary and
-both already carry `x86_64` and `arm64`. `lipo -create` refuses two inputs that
-share an architecture — cctools fatals with "... have the same architectures
-(x86_64) and can't be in the same fat output file" — and under `set -e` that ended
-the build. The script now skips a pair whose architecture sets already match, and
-then reads every Mach-O in the finished bundle back to confirm it carries both
-slices, because a merge that was skipped for a good reason and one skipped for a
-bad reason look identical in a count.
+This is why there were no macOS artefacts for eleven runs, and it is worth reading
+before changing anything under `packaging/macos/`.
+
+When `codesign` **seals** a bundle it applies a set of default resource rules, and
+in those rules `Contents/MacOS/` is a *nested-code* location. Every file in that
+directory other than the main executable has to already be an independently signed
+code object. A normal `dotnet publish` lays every managed assembly down right
+there, and a managed `.dll` is a PE file that can never carry a Mach-O signature,
+so the seal fails:
+
+```
+dist/.macos-stage/Altim.app: replacing existing signature
+dist/.macos-stage/Altim.app: code object is not signed at all
+In subcomponent: .../Altim.app/Contents/MacOS/System.Diagnostics.Contracts.dll
+```
+
+The failure is at **sign** time, not verify time. Five things were tried against
+it, and none of them can work. Do not spend a sixth attempt:
+
+| Tried | Why it cannot work |
+|---|---|
+| dropping `--deep` | `--deep` was never the cause; sealing walks the resource rules either way |
+| dropping `--strict` | same; `--strict` tightens verification, and this fails before verification |
+| `--resource-rules` | removed from `codesign` in OS X 10.10 |
+| signing the `.dll` files individually | a PE file cannot carry a Mach-O signature |
+| moving only the managed assemblies to `Resources` and probing back | the apphost resolves `Altim.dll`, `Altim.runtimeconfig.json` and `Altim.deps.json` from its own directory, and those are exactly the files that break it |
+
+**The fix is `PublishSingleFile=true`.** With the assemblies embedded in the host,
+`Contents/MacOS/` holds nothing but Mach-O. Measured from a real `osx-arm64`
+cross-publish on 2026-09-19, the whole directory is five files:
+
+```
+Altim                     88.8MB  Mach-O arm64 executable, ad-hoc signed by the SDK
+libSkiaSharp.dylib        14.5MB  Mach-O universal (x86_64 + arm64)
+libHarfBuzzSharp.dylib     2.8MB  Mach-O universal
+libe_sqlite3.dylib         1.6MB  Mach-O arm64
+libAvaloniaNative.dylib    1.5MB  Mach-O universal
+```
+
+Self-contained single-file uses the `singlefilehost`, which statically links the
+runtime, so `libcoreclr`, `libhostfxr`, `libhostpolicy`, `createdump` and the
+`System.*.Native` shims are gone as well as the managed assemblies.
+`Altim.deps.json` and `Altim.runtimeconfig.json` are carried inside the bundle by
+the bundler, which is what makes this different from every earlier attempt to move
+files out of `Contents/MacOS/`.
+
+`IncludeNativeLibrariesForSelfExtract` is deliberately left at its default of
+`false`. Setting it would embed those four dylibs and make the host extract them to
+a temporary directory on every start, and extracted copies are not covered by any
+bundle seal.
+
+**The icon assets are the same problem.** Content files are not bundled by a
+single-file publish (`IncludeAllContentForSelfExtract` is `false` and stays that
+way), so all 24 of them, the seven `altim-template-*.png` renderings among them,
+land loose at `Contents/MacOS/assets/icons/`, which is nested code just as much as
+a `.dll` is. `build-macos.sh` moves the whole `assets`
+directory to `Contents/Resources/assets`. No source change is needed for that:
+`MacOSTrayAssets.DiscoverAssetDirectory` asks
+`MacOSAppBundle.FindResourcesDirectory` first, tries `Contents/Resources` itself,
+then `Contents/Resources/assets/icons`, and only then walks up from
+`AppContext.BaseDirectory`. The move lands on the second of those.
+
+**Until a run proves the seal works, the ad-hoc seal is non-fatal.** If
+`codesign --force --sign - Altim.app` fails, `build-macos.sh` reports it, re-signs
+the main executable on its own so the binary can still be executed on Apple
+silicon, and carries on to the DMG. `build.yml` passes `--allow-unsealed` to
+`verify-bundle.sh`, which turns two checks into warnings: that the bundle carries a
+seal, and that `Contents/MacOS` holds only Mach-O.
+
+That state is deliberate, labelled and temporary. **It is not a pass.** A bundle
+with no seal has:
+
+- no `Contents/_CodeSignature/CodeResources`, so nothing can tell an intact bundle
+  from a tampered one and `codesign --verify` reports the app as not signed at all
+- **no start at login.** `SMAppService.registerAndReturnError:` answers
+  `kSMErrorInvalidSignature` for an app that is not code signed as a bundle
+- a hard Gatekeeper refusal of any downloaded copy, on top of the ordinary unsigned
+  and un-notarised refusal
+
+`release.yml` does **not** pass `--allow-unsealed`. A release that cannot seal its
+bundle produces a draft with no macOS download and the other two platforms intact,
+which is the intended outcome. Remove `--allow-unsealed` from `build.yml` as soon
+as a run reports `sealed and valid, ad-hoc`.
+
+### Why there is no universal build
+
+.NET cannot emit a universal binary: a runtime identifier names exactly one
+architecture. The previous script published `osx-arm64` and `osx-x64` separately
+and merged every Mach-O present in both with `lipo`. That layer is gone, and the
+release page carries `Altim-<version>-arm64.dmg` and `Altim-<version>-x64.dmg`
+instead.
+
+The reason is that `lipo -create` over two **single-file** hosts is a behaviour
+nobody has observed. It is probably fine: .NET embeds the single-file payload
+inside the Mach-O rather than appending past the end of it, specifically so that
+`codesign` works. Read off the `osx-arm64` host built on 2026-09-19:
+
+```
+__LINKEDIT        fileoff 8372224   filesz 84697462   end 93069686
+LC_CODE_SIGNATURE dataoff 92348000  datasize 721686   end 93069686
+file size                                                 93069686
+```
+
+The 84MB `__LINKEDIT` is the embedded bundle, the segment ends exactly at the end
+of the file, and the ad-hoc signature the SDK applied is the last thing in it. So
+nothing is hanging off the end for `lipo` to drop. But "probably fine" was not
+worth keeping in the middle of a job that had never once produced an artefact, and
+removing it also deleted the already-universal special case and the both-slices
+check that existed only to serve it. Two rows on a release page is the price.
+
+If someone with a Mac wants universal back, the merge is the only part that has to
+be re-proven, and the way to prove it is to `lipo -create` two single-file hosts
+and run the result.
+
+**Three of the native libraries are already universal**, which is unchanged and
+still worth knowing. SkiaSharp, HarfBuzzSharp and Avalonia each ship one fat
+`.dylib` under `runtimes/osx/native/`, which is the architecture-neutral `osx`
+runtime identifier rather than `osx-arm64` or `osx-x64`, and runtime identifier
+fallback resolves it for both. An arm64 bundle therefore carries three dylibs that
+also hold `x86_64`. That is wasted bytes and not a fault.
 
 **Reading the bundle back.** `packaging/macos/verify-bundle.sh` takes a built
 `Altim.app` and checks the things that would otherwise only surface on somebody's
 Mac: an unsubstituted `@SHORT_VERSION@`, a missing `CFBundleIdentifier` (which is
 what silently turns off notifications and start at login), `LSUIElement` going
 missing, the menu bar template assets not reaching anywhere
-`MacOSTrayAssets.DiscoverAssetDirectory` looks, and a thin Mach-O. It also requires
-a valid code signature, and reports which kind it is.
+`MacOSTrayAssets.DiscoverAssetDirectory` looks, a file in `Contents/MacOS` that is
+not Mach-O, and a Mach-O built for the wrong architecture. It also checks the code
+signature, and reports which kind it is.
+
+It has never been run against a bundle a Mac produced.
 
 ### `LSUIElement`, and why the plist alone is not enough
 
@@ -538,7 +653,9 @@ operating system enforces that any executable must be signed before it's allowed
 run. There isn't a specific identity requirement for this signature: a simple ad-hoc
 signature is sufficient."* The same page adds that a workflow using tools that modify
 a binary after linking "might need to manually call `codesign(1)` as an additional
-build phase", and `lipo` is such a tool.
+build phase". Nothing in this packaging modifies a binary after the SDK has signed it
+any more, now that `lipo` is gone, but the bundle still has to be sealed and the
+dylibs still have to be signed individually, which is what the loop below does.
 
 `SMAppService` is the second reason. Its header states that apps using those APIs
 must be code signed, and `registerAndReturnError:` answers `kSMErrorInvalidSignature`
@@ -554,11 +671,20 @@ downloaded copy, and notarisation is still impossible. It is the difference betw
 bundle somebody can run on their own Mac and one they cannot, which matters because
 CI uploads exactly such a bundle as an artefact.
 
+Nothing in that ad-hoc path is fatal, and the identity path is fatal throughout.
+See "The bundle seal" above for why, and for what is lost when the seal does not
+happen.
+
 The .NET SDK already ad-hoc signs the apphost itself for any `osx*` runtime
 identifier, and from .NET 10 it does so when cross-building too, via a managed Mach-O
-signer rather than by shelling out to `codesign`. Per-architecture signatures survive
-`lipo` — each slice in a universal binary carries its own code directory — so the
-re-sign above is about sealing the *bundle*, not about repairing the binaries.
+signer rather than by shelling out to `codesign`. That was read back off an
+`osx-arm64` single-file host cross-published from Windows on 2026-09-19: it carries
+an `LC_CODE_SIGNATURE` of 721686 bytes ending exactly at the end of the file. So the
+signing step is about sealing the *bundle*, not about repairing the binary.
+
+What the SDK does not do is sign the four `.dylib` files beside it or seal the
+bundle, which is why the inside-out loop and the final `codesign` on `Altim.app`
+both exist.
 
 ### Windows
 
@@ -685,11 +811,14 @@ These are open, not hidden.
    ARCHITECTURE.md's risk 1 already says the native integrations behind them are
    unverified; this adds the packaging layer to that list.
 
-   macOS is now half a step further along than Linux: the `.app` and the DMG are
-   assembled on a real macOS runner on every push and read back, so "the script
-   runs and produces a bundle" is observed rather than assumed. What is still
-   missing is everything after that — nobody has copied the bundle to a Mac,
-   double-clicked it, and seen a menu bar icon.
+   macOS is **behind** Linux, not ahead of it, which an earlier version of this
+   file had the wrong way round. The `macos-bundle` job failed every one of its
+   first eleven runs at the `codesign` bundle seal, so unlike the `.deb` and the
+   `.rpm` no macOS artefact has ever been produced at all. What is unproven is
+   therefore everything: that the script completes, that the DMG mounts, that the
+   bundle seals, and that anybody has copied it to a Mac, double-clicked it and
+   seen a menu bar icon. "The bundle seal" above is the change that is meant to
+   fix the first three; none of it has run yet.
 
 3. **No update mechanism outside Windows.** Velopack supports macOS, but its
    updater replaces the `.app` in place, and an unsigned, un-notarised replacement

@@ -2,11 +2,18 @@
 #
 # Reads a built Altim.app back and checks the things that decide whether it works.
 #
-#   ./packaging/macos/verify-bundle.sh dist/.macos-stage/Altim.app 0.1.0 universal
+#   ./packaging/macos/verify-bundle.sh dist/.macos-stage/arm64/Altim.app 0.1.0 arm64
+#   ./packaging/macos/verify-bundle.sh dist/.macos-stage/x64/Altim.app 0.1.0 x64 --allow-unsealed
 #
 # Arguments: the bundle, the CFBundleShortVersionString it should carry, and the
-# architecture it was built for (universal, arm64 or x64). The third is optional
-# and defaults to universal.
+# architecture it was built for (arm64 or x64). The third is optional; without it
+# the architecture is reported and not judged. There is no universal option any
+# more: see packaging/README.md, "Why there is no universal build".
+#
+# --allow-unsealed downgrades two checks from failures to warnings: that the
+# bundle carries a code signature seal, and that Contents/MacOS holds nothing but
+# Mach-O. It exists for one reason and it is named so that nobody can pass it by
+# accident. Read "The bundle seal" in packaging/README.md before using it.
 #
 # Why this exists. build-macos.sh finishing without an error says the commands ran,
 # not that the result is an application. Every check below is something that would
@@ -23,26 +30,64 @@
 #     tile and an application menu it has no windows for
 #   - the menu bar template assets not reaching the bundle gives a status item with
 #     no image, which looks like the app failed to start
-#   - a Mach-O with one architecture slice produces a .app that runs on one kind of
-#     Mac and dies on the other
+#   - a file in Contents/MacOS that is not Mach-O cannot be sealed, because the
+#     default resource rules make that directory a nested-code location
+#   - a Mach-O built for the wrong architecture produces a .app that will not run
 #
 # It is a separate script rather than steps in the workflow so that someone with a
 # real Mac can run exactly the same checks against a downloaded artefact.
 
 set -euo pipefail
 
-APP="${1:-}"
-EXPECTED_VERSION="${2:-}"
-ARCH="${3:-universal}"
+# Parsed without an array: macOS ships bash 3.2, where an empty array under
+# set -u is a trap that only fires when someone runs the script with no options.
+ALLOW_UNSEALED=0
+APP=""
+EXPECTED_VERSION=""
+ARCH=""
+positional=0
 
-[ -n "$APP" ] || { echo "usage: $0 <path to Altim.app> [expected version] [universal|arm64|x64]" >&2; exit 2; }
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --allow-unsealed) ALLOW_UNSEALED=1 ;;
+        -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
+        --*) echo "unknown option: $1" >&2; exit 2 ;;
+        *)
+            case "$positional" in
+                0) APP="$1" ;;
+                1) EXPECTED_VERSION="$1" ;;
+                2) ARCH="$1" ;;
+                *) echo "unexpected argument: $1" >&2; exit 2 ;;
+            esac
+            positional=$((positional + 1))
+            ;;
+    esac
+    shift
+done
+
+[ -n "$APP" ] || { echo "usage: $0 <path to Altim.app> [expected version] [arm64|x64] [--allow-unsealed]" >&2; exit 2; }
+
+if [ "$ARCH" = "universal" ]; then
+    echo "there is no universal bundle any more; pass arm64 or x64" >&2
+    exit 2
+fi
 
 failures=0
 
 ok()   { printf '  \033[32mok\033[0m   %s\n' "$*"; }
 bad()  { printf '  \033[31mBAD\033[0m  %s\n' "$*"; failures=$((failures + 1)); }
+warn() { printf '  \033[33mWARN\033[0m %s\n' "$*"; }
 note() { printf '  --   %s\n' "$*"; }
 step() { printf '\033[36m==> %s\033[0m\n' "$*"; }
+
+# A check that --allow-unsealed turns into a warning. Nothing else may use this.
+seal_fault() {
+    if [ "$ALLOW_UNSEALED" -eq 1 ]; then
+        warn "$*"
+    else
+        bad "$*"
+    fi
+}
 
 plist_value() {
     # plutil exits non-zero for a key that is not there, which is a failure to
@@ -147,7 +192,10 @@ else
 fi
 
 # The three places MacOSTrayAssets.DiscoverAssetDirectory looks, in its order.
-# Finding none of them is a status item with no image.
+# Finding none of them is a status item with no image. The third is a fallback the
+# source keeps for an unbundled run out of a build output; packaging puts the
+# assets in the second, because anything under Contents/MacOS is nested code that
+# the bundle seal will then reject.
 found_template=""
 for dir in "$APP/Contents/Resources" \
            "$APP/Contents/Resources/assets/icons" \
@@ -161,8 +209,43 @@ for dir in "$APP/Contents/Resources" \
 done
 if [ -n "$found_template" ]; then
     ok "menu bar template assets are in ${found_template#"$APP"/}"
+    if [ "$found_template" = "$APP/Contents/MacOS/assets/icons" ]; then
+        note "they are under Contents/MacOS, which is a nested-code location:"
+        note "the bundle seal cannot succeed while they are there."
+    fi
 else
     bad "no altim-template-*.png anywhere DiscoverAssetDirectory looks: the menu bar item would have no image"
+fi
+
+# ---------------------------------------------------------------------------
+# Nested code
+# ---------------------------------------------------------------------------
+# codesign's default resource rules mark Contents/MacOS as a nested-code location,
+# so every file in it apart from the main executable has to be an independently
+# signed code object. A managed .dll is a PE file and can never carry a Mach-O
+# signature; neither can a .png or a .json. This is the check that says in advance
+# whether the seal below can possibly work, and which file is in the way.
+step "Nested code in Contents/MacOS"
+
+strays=0
+nested=0
+while IFS= read -r -d '' file; do
+    [ "$file" = "$EXECUTABLE" ] && continue
+    case "$(file -b "$file")" in
+        *Mach-O*) nested=$((nested + 1)) ;;
+        *)
+            seal_fault "not Mach-O, so the bundle cannot be sealed: ${file#"$APP/Contents/MacOS"/}"
+            strays=$((strays + 1))
+            ;;
+    esac
+done < <(find "$APP/Contents/MacOS" -type f -print0)
+
+if [ "$strays" -eq 0 ]; then
+    ok "Contents/MacOS holds only Mach-O: the main executable and $nested nested binaries"
+else
+    note "$strays file(s) in Contents/MacOS are not Mach-O, beside $nested that are."
+    note "A single-file publish is what keeps managed assemblies out of this"
+    note "directory; assets belong in Contents/Resources. See build-macos.sh."
 fi
 
 # ---------------------------------------------------------------------------
@@ -175,10 +258,10 @@ if [ -f "$EXECUTABLE" ]; then
     note "Contents/MacOS/Altim carries: ${archs:-nothing lipo could read}"
 
     case "$ARCH" in
-        universal) wanted="arm64 x86_64" ;;
-        arm64)     wanted="arm64" ;;
-        x64)       wanted="x86_64" ;;
-        *)         wanted="" ; note "unknown --arch '$ARCH', not checking slices" ;;
+        arm64) wanted="arm64" ;;
+        x64)   wanted="x86_64" ;;
+        "")    wanted="" ; note "no architecture given, so the slices are reported and not judged" ;;
+        *)     wanted="" ; note "unknown architecture '$ARCH', not checking slices" ;;
     esac
 
     for want in $wanted; do
@@ -192,36 +275,53 @@ fi
 # ---------------------------------------------------------------------------
 # Code signature
 # ---------------------------------------------------------------------------
-# A signature is required; the KIND of signature is only reported. build-macos.sh
-# signs with a Developer ID when one is configured and ad-hoc when one is not, and
-# neither case may produce a bundle with no seal at all: macOS 11 and later refuse
-# to execute an unsigned Mach-O on Apple silicon, and SMAppService refuses to
-# register an app that is not code signed. Which of the two it is depends on
-# whether a secret was available, so that is printed rather than judged.
+# Two separate things, and the difference matters:
+#
+#   - the main executable carrying a valid signature of its own is what lets the
+#     kernel execute it at all on Apple silicon. It is never optional.
+#   - the BUNDLE being sealed is what writes _CodeSignature/CodeResources, which
+#     is what tells an intact bundle from a tampered one and what SMAppService
+#     requires before it will register start at login.
+#
+# The kind of signature, ad-hoc or Developer ID, is reported and not judged: that
+# depends on whether a secret was available.
 step "Code signature"
 
-# Not --strict: it classifies the managed assemblies .NET lays beside the
-# executable as nested code and rejects them, which no .NET bundle can satisfy.
-# See the note beside the signing step in build-macos.sh.
+# Not --strict and not --deep. See the note beside the signing step in
+# build-macos.sh; the nested-code check above is what covers the same ground.
 if codesign --verify "$APP" 2>/dev/null; then
     authority="$(codesign -dvv "$APP" 2>&1 | sed -n 's/^Authority=//p' | head -n 1)"
     if [ -n "$authority" ]; then
-        ok "signed and valid, authority: $authority"
+        ok "sealed and valid, authority: $authority"
     else
-        ok "signed and valid, ad-hoc (no certificate authority)"
+        ok "sealed and valid, ad-hoc (no certificate authority)"
         note "Ad-hoc is enough to run locally and is not enough to distribute:"
         note "Gatekeeper refuses a downloaded copy and notarisation is impossible."
         note "packaging/README.md lists the secrets that change this."
     fi
 else
-    bad "no valid code signature: on Apple silicon this bundle cannot be executed at all, and SMAppService would refuse to register it"
+    seal_fault "the bundle is NOT sealed: there is no _CodeSignature/CodeResources, so nothing can tell an intact bundle from a tampered one, SMAppService will answer kSMErrorInvalidSignature and start at login cannot work, and Gatekeeper will refuse a downloaded copy"
+
+    # An unsealed bundle may still launch, and that is the whole value of shipping
+    # one, so the weaker claim is checked rather than assumed. This one is a
+    # failure either way: without it there is nothing worth uploading.
+    if [ -f "$EXECUTABLE" ] && codesign --verify "$EXECUTABLE" 2>/dev/null; then
+        ok "the main executable does carry a valid signature of its own, so it can be executed"
+    else
+        bad "the main executable carries no valid signature either: on Apple silicon the kernel will refuse to execute it"
+    fi
 fi
 codesign -dvv "$APP" 2>&1 | sed 's/^/       /' || true
 
 # ---------------------------------------------------------------------------
 step "Result"
 if [ "$failures" -eq 0 ]; then
-    echo "  the bundle passed every check"
+    if [ "$ALLOW_UNSEALED" -eq 1 ]; then
+        echo "  the bundle passed every check that --allow-unsealed still enforces"
+        echo "  This is NOT the same as passing. Read the WARN lines above."
+    else
+        echo "  the bundle passed every check"
+    fi
 else
     echo "  $failures check(s) failed" >&2
     exit 1

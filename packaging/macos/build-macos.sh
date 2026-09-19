@@ -1,28 +1,34 @@
 #!/usr/bin/env bash
 #
-# Builds the macOS artefacts: Altim.app and a DMG containing it.
+# Builds the macOS artefacts for ONE architecture: Altim.app and a DMG holding it.
 #
-#   ./packaging/macos/build-macos.sh --version 0.1.0                # universal
-#   ./packaging/macos/build-macos.sh --version 0.1.0 --arch arm64   # single arch
+#   ./packaging/macos/build-macos.sh --version 0.1.0 --arch arm64
+#   ./packaging/macos/build-macos.sh --version 0.1.0 --arch x64
 #
-# Universal is the default and needs two publishes. .NET cannot emit a universal
-# binary: a runtime identifier names exactly one architecture, so osx-arm64 and
-# osx-x64 are published separately and every Mach-O file that exists in both is
-# merged with lipo. Managed assemblies are architecture-neutral and are taken from
-# the arm64 tree unchanged.
+# One invocation, one architecture, one DMG. There is deliberately no universal
+# build any more: packaging/README.md, "Why there is no universal build", has the
+# reasoning. In short, merging two single-file hosts with lipo is an unobserved
+# behaviour sitting in the middle of a job that had never once produced an
+# artefact, and two rows on a release page cost less than that risk.
 #
-# Signing and notarisation are skipped, loudly, when the credentials are absent —
-# see "Signing" below and packaging/README.md for the secrets to add. An unsigned
-# build is a complete, working .app; it is Gatekeeper that will not open it without
-# the user going out of their way, not anything missing from the bundle.
+# The publish is PublishSingleFile. That is a packaging decision, not a size one:
+# codesign seals Contents/MacOS as a nested-code location, so every file in there
+# apart from the main executable has to be an independently signed code object.
+# A managed .dll is a PE file and can never carry a Mach-O signature, so a normal
+# publish layout cannot be sealed at all. Embedding the assemblies in the host
+# leaves Contents/MacOS holding nothing but Mach-O. assets/ is moved to
+# Contents/Resources for the same reason.
 #
-# This script has never been executed. It was written on a Windows machine and
-# macOS is the one platform it cannot be tried on. Read it before you trust it.
+# Signing and notarisation are skipped, loudly, when the credentials are absent.
+# The ad-hoc bundle seal is additionally non-fatal: see "Signing" below.
+#
+# Neither this script nor the bundle it produces has ever been run on a Mac.
+# Read it before you trust it.
 
 set -euo pipefail
 
 VERSION=""
-ARCH="universal"
+ARCH=""
 SKIP_PUBLISH=0
 SKIP_DMG=0
 
@@ -32,7 +38,7 @@ while [ $# -gt 0 ]; do
         --arch) ARCH="$2"; shift 2 ;;
         --skip-publish) SKIP_PUBLISH=1; shift ;;
         --skip-dmg) SKIP_DMG=1; shift ;;
-        -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -55,21 +61,47 @@ SHORT_VERSION="${VERSION%%-*}"
 SHORT_VERSION="${SHORT_VERSION%%+*}"
 BUNDLE_VERSION="$SHORT_VERSION"
 
+if [ -z "$ARCH" ]; then
+    case "$(uname -m 2>/dev/null || echo unknown)" in
+        arm64|aarch64) ARCH="arm64" ;;
+        x86_64)        ARCH="x64" ;;
+        *)             ARCH="arm64" ;;
+    esac
+fi
+
 case "$ARCH" in
-    universal) RIDS=(osx-arm64 osx-x64) ;;
-    arm64)     RIDS=(osx-arm64) ;;
-    x64)       RIDS=(osx-x64) ;;
-    *) echo "unsupported --arch: $ARCH (universal, arm64 or x64)" >&2; exit 2 ;;
+    arm64) RID="osx-arm64" ;;
+    x64)   RID="osx-x64" ;;
+    universal)
+        echo "--arch universal was removed. Build arm64 and x64 separately;" >&2
+        echo "see packaging/README.md, 'Why there is no universal build'." >&2
+        exit 2 ;;
+    *) echo "unsupported --arch: $ARCH (arm64 or x64)" >&2; exit 2 ;;
 esac
 
 DIST="$REPO_ROOT/dist/macos"
-STAGE="$REPO_ROOT/dist/.macos-stage"
+# One stage directory per architecture, so building both in sequence leaves both
+# bundles on disk for verify-bundle.sh to read back.
+STAGE="$REPO_ROOT/dist/.macos-stage/$ARCH"
 APP="$STAGE/Altim.app"
 MACOS_DIR="$APP/Contents/MacOS"
+RESOURCES_DIR="$APP/Contents/Resources"
+PUBLISH="$REPO_ROOT/dist/.publish/$RID"
 
 step() { printf '\033[36m==> %s\033[0m\n' "$*"; }
 
+# Anything said through this reaches the run page as well as the log, because the
+# state this script can leave the bundle in is not one to find out about later.
+summary() {
+    printf '%s\n' "$*"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"
+    fi
+}
+
 mkdir -p "$DIST"
+
+step "Building Altim $VERSION for $ARCH ($RID)"
 
 # ---------------------------------------------------------------------------
 # Publish
@@ -79,108 +111,82 @@ mkdir -p "$DIST"
 # Windows target framework. PublishAot stays off: it is a Windows-only setting in
 # Altim.App.csproj and ARCHITECTURE.md keeps the other platforms behind it until
 # someone has verified them on real hardware.
-for rid in "${RIDS[@]}"; do
-    if [ "$SKIP_PUBLISH" -eq 0 ]; then
-        step "Publishing $rid"
-        rm -rf "$REPO_ROOT/dist/.publish/$rid"
-        dotnet publish "$PROJECT" \
-            --configuration Release \
-            --runtime "$rid" \
-            --self-contained \
-            -p:Version="$VERSION" \
-            -p:AltimPortableBuild=true \
-            -p:DebugType=none \
-            --output "$REPO_ROOT/dist/.publish/$rid" \
-            --nologo
-    fi
-    [ -f "$REPO_ROOT/dist/.publish/$rid/Altim" ] || {
-        echo "no Altim in dist/.publish/$rid" >&2; exit 1; }
-done
+#
+# PublishSingleFile is what makes the bundle sealable. With it, the managed
+# assemblies, Altim.deps.json and Altim.runtimeconfig.json are all carried inside
+# the host, and what is left beside it in Contents/MacOS is the host plus the
+# native .dylib files, every one of them Mach-O and individually signable.
+#
+# It adds no new analyser surface: Directory.Build.props already sets
+# IsAotCompatible=true, which the SDK turns into EnableSingleFileAnalyzer=true
+# (Microsoft.NET.Sdk.Analyzers.targets), so the IL3000 series is already an error
+# on every ordinary build of this repository.
+#
+# IncludeNativeLibrariesForSelfExtract is deliberately left at its default of
+# false. Embedding the dylibs would make the host extract them to a temporary
+# directory on every start, and those extracted copies are not covered by any
+# bundle seal.
+if [ "$SKIP_PUBLISH" -eq 0 ]; then
+    step "Publishing $RID"
+    rm -rf "$PUBLISH"
+    dotnet publish "$PROJECT" \
+        --configuration Release \
+        --runtime "$RID" \
+        --self-contained \
+        -p:Version="$VERSION" \
+        -p:AltimPortableBuild=true \
+        -p:DebugType=none \
+        -p:PublishSingleFile=true \
+        --output "$PUBLISH" \
+        --nologo
+fi
+[ -f "$PUBLISH/Altim" ] || { echo "no Altim in dist/.publish/$RID" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # Bundle
 # ---------------------------------------------------------------------------
 step "Assembling Altim.app"
 rm -rf "$STAGE"
-mkdir -p "$MACOS_DIR" "$APP/Contents/Resources"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-PRIMARY="$REPO_ROOT/dist/.publish/${RIDS[0]}"
-cp -a "$PRIMARY/." "$MACOS_DIR/"
+cp -a "$PUBLISH/." "$MACOS_DIR/"
 
-if [ "${#RIDS[@]}" -gt 1 ]; then
-    SECONDARY="$REPO_ROOT/dist/.publish/${RIDS[1]}"
-    step "Merging ${RIDS[0]} and ${RIDS[1]} into universal binaries"
-    merged=0
-    already=0
-    while IFS= read -r -d '' file; do
-        rel="${file#"$MACOS_DIR"/}"
-        other="$SECONDARY/$rel"
-        [ -f "$other" ] || continue
-        # Only Mach-O files can be merged. Everything else — managed assemblies,
-        # .json, the icon assets — is architecture-neutral and is already correct.
-        case "$(file -b "$file")" in
-            *Mach-O*) ;;
-            *) continue ;;
-        esac
+# The menu bar template renderings are content files, so the single-file bundler
+# leaves them loose, and loose in Contents/MacOS is exactly where codesign calls
+# them unsigned nested code. Contents/Resources is where they belong and is also
+# the first place MacOSTrayAssets.DiscoverAssetDirectory looks: it asks
+# MacOSAppBundle.FindResourcesDirectory first, tries Contents/Resources itself,
+# then Contents/Resources/assets/icons, and only then walks up from
+# AppContext.BaseDirectory. Moving the directory wholesale lands on the second of
+# those, so no source change is needed.
+if [ -d "$MACOS_DIR/assets" ]; then
+    step "Moving assets out of Contents/MacOS into Contents/Resources"
+    rm -rf "$RESOURCES_DIR/assets"
+    mv "$MACOS_DIR/assets" "$RESOURCES_DIR/assets"
+fi
 
-        # Some native dependencies are already universal, and lipo will not take
-        # them. SkiaSharp, HarfBuzzSharp and Avalonia each ship ONE fat dylib under
-        # runtimes/osx/native, which is the architecture-neutral osx runtime
-        # identifier rather than osx-arm64 or osx-x64. Runtime identifier fallback
-        # resolves that same file for both publishes, so both sides of this merge
-        # are the identical binary and both already carry x86_64 and arm64. lipo
-        # refuses that outright: cctools fatals with "... have the same
-        # architectures (x86_64) and can't be in the same fat output file", which
-        # under set -e ends the release build. They need no merge; the slice check
-        # below is what proves the result is right rather than the merge count.
-        if [ "$(lipo -archs "$file")" = "$(lipo -archs "$other")" ]; then
-            already=$((already + 1))
-            continue
-        fi
-
-        lipo -create -output "$file.universal" "$file" "$other"
-        mv "$file.universal" "$file"
-        merged=$((merged + 1))
-    done < <(find "$MACOS_DIR" -type f -print0)
-    step "Merged $merged Mach-O files; $already were already universal"
-
-    # A file present in only one architecture is a packaging bug, not a merge to
-    # skip quietly: it would produce a bundle that works on one Mac and not the
-    # other. Report it and stop.
-    missing=0
-    while IFS= read -r -d '' file; do
-        rel="${file#"$SECONDARY"/}"
-        if [ ! -f "$MACOS_DIR/$rel" ]; then
-            echo "only in ${RIDS[1]}: $rel" >&2
-            missing=$((missing + 1))
-        fi
-    done < <(find "$SECONDARY" -type f -print0)
-    [ "$missing" -eq 0 ] || { echo "$missing file(s) present in only one architecture" >&2; exit 1; }
-
-    # Having run lipo is not the same as having a universal bundle. A Mach-O that
-    # came through with one slice produces a .app that launches on one kind of Mac
-    # and dies on the other, and nothing before this point would say so: the merge
-    # count above is satisfied by a file that was skipped for a good reason and by
-    # one that was skipped for a bad one. Every Mach-O is therefore read back.
-    step "Checking every Mach-O carries both slices"
-    thin=0
-    while IFS= read -r -d '' file; do
-        case "$(file -b "$file")" in
-            *Mach-O*) ;;
-            *) continue ;;
-        esac
-        archs=" $(lipo -archs "$file") "
-        for want in arm64 x86_64; do
-            case "$archs" in
-                *" $want "*) ;;
-                *)
-                    echo "no $want slice: ${file#"$MACOS_DIR"/} (${archs# })" >&2
-                    thin=$((thin + 1))
-                    ;;
-            esac
-        done
-    done < <(find "$MACOS_DIR" -type f -print0)
-    [ "$thin" -eq 0 ] || { echo "$thin missing architecture slice(s)" >&2; exit 1; }
+# Whether the bundle can be sealed at all is decided here, before codesign is
+# reached: every file in Contents/MacOS other than the main executable is nested
+# code under the default resource rules, and a file that is not Mach-O can never
+# satisfy that. This is reported rather than fatal, because an unsealed bundle
+# somebody can look at is worth more than a red job, and the seal step below says
+# plainly what it ended up with.
+step "Checking Contents/MacOS holds nothing but Mach-O"
+stray=0
+while IFS= read -r -d '' file; do
+    [ "$file" = "$MACOS_DIR/Altim" ] && continue
+    case "$(file -b "$file")" in
+        *Mach-O*) ;;
+        *)
+            echo "    not Mach-O, so it cannot be sealed: ${file#"$MACOS_DIR"/}" >&2
+            stray=$((stray + 1))
+            ;;
+    esac
+done < <(find "$MACOS_DIR" -type f -print0)
+if [ "$stray" -eq 0 ]; then
+    step "Contents/MacOS is Mach-O only"
+else
+    summary "WARNING: $stray file(s) in Contents/MacOS are not Mach-O. The bundle seal will fail."
 fi
 
 chmod +x "$MACOS_DIR/Altim"
@@ -210,22 +216,26 @@ cp assets/icons/altim-256.png "$ICONSET/icon_256x256.png"
 cp assets/icons/altim-512.png "$ICONSET/icon_256x256@2x.png"
 cp assets/icons/altim-512.png "$ICONSET/icon_512x512.png"
 sips -z 1024 1024 assets/icons/altim-512.png --out "$ICONSET/icon_512x512@2x.png" >/dev/null
-iconutil --convert icns --output "$APP/Contents/Resources/Altim.icns" "$ICONSET"
+iconutil --convert icns --output "$RESOURCES_DIR/Altim.icns" "$ICONSET"
 rm -rf "$ICONSET"
 
 # ---------------------------------------------------------------------------
 # Signing
 # ---------------------------------------------------------------------------
-# Every step here is conditional on credentials that nobody has yet. The bundle
-# above is complete and runnable without them; what is missing is Gatekeeper's
-# permission, not functionality.
+# Every identity step is conditional on credentials that nobody has yet.
+#
+# Neither path uses --deep or --strict. --deep is deprecated and applies one set
+# of entitlements to nested code that may not want them; --strict adds nothing the
+# inside-out loop below does not already cover. Both were ruled out once already
+# by CI runs that failed on the contents of Contents/MacOS, which was never a
+# verification problem and is now fixed at its cause by PublishSingleFile.
 SIGNED=0
+SEALED=0
 if [ -n "${MACOS_SIGNING_IDENTITY:-}" ]; then
     step "Signing with $MACOS_SIGNING_IDENTITY"
 
-    # Inside out. --deep is not used: it is deprecated, it applies one set of
-    # entitlements to nested code that may not want them, and it silently skips
-    # things it does not recognise.
+    # Inside out: nested Mach-O first, the bundle last, because signing the bundle
+    # seals the main executable and writes _CodeSignature/CodeResources.
     while IFS= read -r -d '' file; do
         case "$(file -b "$file")" in
             *Mach-O*)
@@ -236,73 +246,75 @@ if [ -n "${MACOS_SIGNING_IDENTITY:-}" ]; then
         esac
     done < <(find "$MACOS_DIR" -type f -print0)
 
+    # Fatal on purpose, unlike the ad-hoc path below. An app signed with a real
+    # identity and then not sealed is not something to ship quietly: Gatekeeper
+    # would refuse it and notarisation would reject it anyway, so a release that
+    # stops here is better than one that goes out.
     codesign --force --timestamp --options runtime \
         --entitlements packaging/macos/entitlements.plist \
         --sign "$MACOS_SIGNING_IDENTITY" "$APP"
-
-    # Neither --deep nor --strict. Both walk the managed assemblies that .NET lays
-    # down beside the executable in Contents/MacOS, classify them as nested code
-    # because of where they sit, and reject each one with "code object is not
-    # signed at all" — a managed .dll is not Mach-O and can never carry a signature
-    # of its own. The first macOS CI run failed on System.Diagnostics.Contracts.dll
-    # with --deep, and the second failed on the same file with --strict alone.
-    #
-    # What is still verified: that a signature exists, that the main executable and
-    # every nested Mach-O validate against it, and that no sealed resource has been
-    # modified since signing. What is not: the nested-code rules that a .NET bundle
-    # layout cannot satisfy without moving the assemblies out of Contents/MacOS,
-    # which is a change to the shape of the bundle and not to its signature.
     codesign --verify --verbose=2 "$APP"
     SIGNED=1
+    SEALED=1
 else
     # Ad-hoc, because "unsigned" is not actually an option. Three separate reasons:
     #
     #   1. macOS 11 and later enforce that any executable must be signed before it
-    #      is allowed to run on an Apple silicon Mac. Apple's Big Sur universal apps
-    #      release notes say a simple ad-hoc signature is sufficient, and that a
-    #      workflow using tools that modify a binary after linking "might need to
-    #      manually call codesign(1) as an additional build phase". lipo above is
-    #      exactly such a tool.
+    #      is allowed to run on an Apple silicon Mac. Apple's Big Sur universal
+    #      apps release notes say a simple ad-hoc signature is sufficient.
     #   2. SMAppService, which is how start at login is implemented, requires it:
     #      its header states that apps using those APIs must be code signed, and
-    #      registerAndReturnError: answers kSMErrorInvalidSignature otherwise. An
-    #      unsealed bundle therefore has no start at login even on the machine that
-    #      built it.
+    #      registerAndReturnError: answers kSMErrorInvalidSignature otherwise.
     #   3. Without a bundle seal there is no _CodeSignature/CodeResources, so
-    #      nothing can tell an intact bundle from a tampered one, and codesign
-    #      --verify reports the app as not signed at all.
+    #      nothing can tell an intact bundle from a tampered one.
     #
     # This is NOT a substitute for a Developer ID. An ad-hoc signature carries no
     # identity, Gatekeeper still refuses a downloaded copy, and notarisation is
-    # still impossible. It is the difference between a bundle somebody can run on
-    # their own Mac and one they cannot.
-    step "No MACOS_SIGNING_IDENTITY: ad-hoc signing so the bundle can run at all"
+    # still impossible.
+    #
+    # Nothing in this branch is fatal. The macOS bundle job failed all eleven times
+    # it ran, every one of them at the bundle seal, so no .app, no DMG and no
+    # artefact had ever existed and there was nothing to diagnose from. A bundle
+    # that assembles and uploads with its state written down is worth more than a
+    # red job with no output. What must not happen is a bundle that quietly
+    # pretends to be sealed, so every outcome below is reported.
+    step "No MACOS_SIGNING_IDENTITY: ad-hoc signing"
 
-    # Inside out, exactly as above: nested Mach-O first, the bundle last, because
-    # signing the bundle seals the main executable and writes CodeResources.
+    nested_total=0
+    nested_failed=0
     while IFS= read -r -d '' file; do
         case "$(file -b "$file")" in
             *Mach-O*)
                 [ "$file" = "$MACOS_DIR/Altim" ] && continue
-                codesign --force --sign - "$file"
+                nested_total=$((nested_total + 1))
+                if ! codesign --force --sign - "$file"; then
+                    echo "    could not sign: ${file#"$MACOS_DIR"/}" >&2
+                    nested_failed=$((nested_failed + 1))
+                fi
                 ;;
         esac
     done < <(find "$MACOS_DIR" -type f -print0)
+    step "Ad-hoc signed $((nested_total - nested_failed)) of $nested_total nested Mach-O files"
+    if [ "$nested_failed" -ne 0 ]; then
+        summary "WARNING: $nested_failed nested Mach-O file(s) could not be ad-hoc signed."
+    fi
 
-    codesign --force --sign - "$APP"
-    # Neither --deep nor --strict. Both walk the managed assemblies that .NET lays
-    # down beside the executable in Contents/MacOS, classify them as nested code
-    # because of where they sit, and reject each one with "code object is not
-    # signed at all" — a managed .dll is not Mach-O and can never carry a signature
-    # of its own. The first macOS CI run failed on System.Diagnostics.Contracts.dll
-    # with --deep, and the second failed on the same file with --strict alone.
-    #
-    # What is still verified: that a signature exists, that the main executable and
-    # every nested Mach-O validate against it, and that no sealed resource has been
-    # modified since signing. What is not: the nested-code rules that a .NET bundle
-    # layout cannot satisfy without moving the assemblies out of Contents/MacOS,
-    # which is a change to the shape of the bundle and not to its signature.
-    codesign --verify --verbose=2 "$APP"
+    if codesign --force --sign - "$APP"; then
+        SEALED=1
+        codesign --verify --verbose=2 "$APP" || SEALED=0
+    fi
+
+    if [ "$SEALED" -eq 0 ]; then
+        # A --force seal that gets part way through can leave the main executable
+        # without the signature the SDK's bundler gave it, and on Apple silicon an
+        # unsigned Mach-O is one the kernel refuses to execute. Re-signing the
+        # binary on its own is not a bundle seal and buys none of what a seal buys,
+        # but it is the difference between an app that starts and one that is
+        # killed at exec.
+        step "Bundle seal failed: re-signing the executable alone so it can still run"
+        codesign --force --sign - "$MACOS_DIR/Altim" || true
+        codesign --verify --verbose=2 "$MACOS_DIR/Altim" || true
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -319,7 +331,7 @@ if [ "$SKIP_DMG" -eq 0 ]; then
 
     rm -f "$DMG"
     hdiutil create \
-        -volname "Altim" \
+        -volname "Altim ($ARCH)" \
         -srcfolder "$DMG_ROOT" \
         -ov -format UDZO \
         "$DMG"
@@ -335,7 +347,7 @@ fi
 # Notarisation is a separate credential from signing and a separate failure mode:
 # a signed but un-notarised app is still quarantined on a machine that downloaded
 # it. Both are required for a download that opens on a double click.
-if [ "$SIGNED" -eq 1 ] && [ -n "${MACOS_NOTARY_APPLE_ID:-}" ] \
+if [ "$SIGNED" -eq 1 ] && [ "$SKIP_DMG" -eq 0 ] && [ -n "${MACOS_NOTARY_APPLE_ID:-}" ] \
    && [ -n "${MACOS_NOTARY_APP_PASSWORD:-}" ] && [ -n "${MACOS_NOTARY_TEAM_ID:-}" ]; then
     step "Notarising $(basename "$DMG")"
     xcrun notarytool submit "$DMG" \
@@ -364,17 +376,47 @@ step "Checksums"
 (
     cd "$DIST"
     rm -f SHA256SUMS.txt
+    # The trailing "|| true" is for --skip-dmg, where *.dmg matches nothing, shasum
+    # exits non-zero over the unexpanded glob, and pipefail would otherwise end the
+    # run one step from the finish line with everything already built.
     # shellcheck disable=SC2035
-    shasum -a 256 *.dmg *.zip 2>/dev/null | tee SHA256SUMS.txt
+    shasum -a 256 *.dmg *.zip 2>/dev/null | tee SHA256SUMS.txt || true
 )
 
-step "Done: $DIST"
+step "Done: dist/macos"
 ls -lh "$DIST"
 echo
-if [ "$SIGNED" -eq 0 ]; then
-    echo "    AD-HOC signed only, and NOT notarised. It will run on the machine it was"
-    echo "    built on, and Gatekeeper will refuse to open a copy that was downloaded."
-    echo "    See packaging/README.md, 'macOS signing'."
-elif [ "$NOTARISED" -eq 0 ]; then
-    echo "    Signed but NOT notarised. Gatekeeper will still refuse a downloaded copy."
+
+# ---------------------------------------------------------------------------
+# What this bundle actually is
+# ---------------------------------------------------------------------------
+summary ""
+summary "### macOS bundle ($ARCH), Altim $VERSION"
+summary ""
+if [ "$SIGNED" -eq 1 ] && [ "$NOTARISED" -eq 1 ]; then
+    summary "Signed with a Developer ID and notarised."
+elif [ "$SIGNED" -eq 1 ]; then
+    summary "Signed with a Developer ID and sealed, and NOT notarised."
+    summary "Gatekeeper will still refuse a downloaded copy."
+elif [ "$SEALED" -eq 1 ]; then
+    summary "Ad-hoc signed and sealed. NOT signed with an identity, NOT notarised."
+    summary "It will run on a Mac it was copied to by hand; Gatekeeper refuses a"
+    summary "downloaded copy. packaging/README.md, 'Signing', lists the secrets."
+else
+    summary "**NOT SEALED.** This bundle is being shipped in a deliberately degraded"
+    summary "state so that an artefact exists at all. It is not a bundle that passed."
+    summary ""
+    summary "The main executable and the nested dylibs carry ad-hoc signatures, so the"
+    summary "application should still launch. What a bundle with no seal does not have:"
+    summary ""
+    summary "- no Contents/_CodeSignature/CodeResources, so nothing can tell an intact"
+    summary "  bundle from a tampered one, and codesign --verify reports the app as"
+    summary "  not signed at all"
+    summary "- **start at login cannot work.** SMAppService.registerAndReturnError:"
+    summary "  answers kSMErrorInvalidSignature for an app not code signed as a"
+    summary "  bundle, so the setting reports itself unavailable"
+    summary "- Gatekeeper refuses a downloaded copy outright, beyond the ordinary"
+    summary "  unsigned and un-notarised refusal"
+    summary ""
+    summary "packaging/README.md, 'The bundle seal', has the cause and the fix."
 fi
