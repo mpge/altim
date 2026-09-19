@@ -287,10 +287,29 @@ public static class JsonValues
     /// </summary>
     /// <param name="text">The candidate.</param>
     /// <remarks>
-    /// Permits letters, digits, <c>-</c>, <c>_</c>, <c>.</c>, <c>+</c>, <c>@</c> and square
-    /// brackets, which covers message ids, UUIDs, plan names and model ids including the
-    /// <c>[1m]</c> long-context suffix. It rejects whitespace, slashes, backslashes, colons
-    /// and quotes, which is what excludes paths, URLs and prose.
+    /// <para>
+    /// Permits letters, digits, <c>-</c>, <c>_</c>, <c>.</c>, <c>+</c> and square brackets,
+    /// which covers message ids, UUIDs, plan names and model ids including the <c>[1m]</c>
+    /// long-context suffix. It rejects whitespace, slashes, backslashes, colons and quotes,
+    /// which is what excludes paths, URLs and prose.
+    /// </para>
+    /// <para>
+    /// <c>@</c> used to be permitted, on the stated grounds that those four kinds of value
+    /// needed it. None of them does — no value anywhere in this repository contains one —
+    /// and it made every email address a valid identifier, which reached a visible metric
+    /// label. A vendor value that really does carry one now goes unavailable, which is the
+    /// right way for this to fail.
+    /// </para>
+    /// <para>
+    /// <b>What this cannot do.</b> A bare filename or project name is letters, digits,
+    /// hyphens and a dot, so it is indistinguishable from a model id by shape and this
+    /// admits it. Rule 5 names filenames and project names, and no character rule can
+    /// enforce that part: <c>AltimRuntime.cs</c> and <c>gpt-5-codex</c> are the same string
+    /// to any test written here. The defence against those is upstream — readers take only
+    /// the fields that are meant to hold identifiers, and the shape tests refuse a reader
+    /// that grows a field which is not. This is the second layer, and it is the layer that
+    /// stops a path, a URL or a sentence.
+    /// </para>
     /// </remarks>
     public static bool IsIdentifier(string? text)
     {
@@ -302,7 +321,7 @@ public static class JsonValues
         foreach (char c in text)
         {
             bool permitted = char.IsAsciiLetterOrDigit(c)
-                || c is '-' or '_' or '.' or '+' or '@' or '[' or ']';
+                || c is '-' or '_' or '.' or '+' or '[' or ']';
             if (!permitted)
             {
                 return false;

@@ -139,7 +139,7 @@ public sealed class JsonValuesIdentifierTests
         // The expectation is spelled out rather than borrowed from the implementation's
         // char.IsAsciiLetterOrDigit, so adding one character to the permitted punctuation
         // fails here instead of moving both sides together.
-        const string Punctuation = "-_.+@[]";
+        const string Punctuation = "-_.+[]";
 
         var admittedButShouldNotBe = new List<string>();
         var refusedButShouldNotBe = new List<string>();
@@ -458,18 +458,14 @@ public sealed class JsonValuesIdentifierTests
     // ---- Known gaps, pinned rather than widened -----------------------------------
 
     [Fact]
-    public void KnownGapAnEmailAddressIsAdmittedAndDoesReachTheVisibleLabel()
+    public void AnEmailAddressIsRefusedAndNeverReachesTheVisibleLabel()
     {
-        // Pinned, not endorsed. "@" and "." are both permitted, so an address is a valid
-        // identifier by this guard's rules and arrives on screen intact.
-        //
-        // The class documentation says the set "excludes whitespace, path separators,
-        // quotes and URL punctuation" and that "a file path, a URL or a sentence of prose
-        // cannot survive it". An email address is none of those three, and it survives.
-        // ParsedResultShapeTests already lists "email" among its content-bearing words, so
-        // a property named Email is refused while an email value is not.
-        Assert.True(JsonValues.IsIdentifier("someone@example.com"));
-        Assert.True(JsonValues.IsIdentifier("someone+tag@example.co.uk"));
+        // It used to be admitted: "@" and "." were both permitted, so an address was a
+        // valid identifier by this guard's own rules and arrived on screen intact. "@" was
+        // documented as covering message ids, UUIDs, plan names and model ids; no value in
+        // this repository contains one, so removing it cost nothing and closed this.
+        Assert.False(JsonValues.IsIdentifier("someone@example.com"));
+        Assert.False(JsonValues.IsIdentifier("someone+tag@example.co.uk"));
 
         IReadOnlyList<CodexLimitWindow> windows = ParseWindows(
             """
@@ -485,16 +481,26 @@ public sealed class JsonValuesIdentifierTests
 
         UsageMetric metric = Assert.Single(CodexMetricFactory.Build(windows, MetricConfidence.BestEffort));
 
-        Assert.Equal("someone@example.com 5 hour", metric.Label);
+        // The window keeps its figure and its own id; only the vendor's name for it is
+        // dropped, and the label falls back to the limit id, which is an identifier in its
+        // own right. Refusing a value costs the nicer word for a window, never the window.
+        Assert.Equal("premium 5 hour", metric.Label);
+        Assert.DoesNotContain("someone", metric.Label, StringComparison.Ordinal);
     }
 
     [Fact]
     public void KnownGapABareFilenameOrProjectNameIsAdmitted()
     {
-        // Pinned, not endorsed. AGENTS.md rule 5 and PRIVACY.md both say filenames and
-        // project names never leave the machine. The guard stops a path, because a
-        // separator is refused, but the leaf on its own is letters, digits, hyphens and a
-        // dot, which is exactly what an identifier looks like.
+        // Pinned, and no character rule can close it. AGENTS.md rule 5 and PRIVACY.md both
+        // say filenames and project names never leave the machine. The guard stops a path,
+        // because a separator is refused, but the leaf on its own is letters, digits,
+        // hyphens and a dot — the same string as a model id to anything written here:
+        // AltimRuntime.cs and gpt-5-codex are indistinguishable by shape.
+        //
+        // So this is the second layer, not the first. The defence that does cover rule 5 is
+        // upstream: readers take only the fields meant to hold identifiers, and the shape
+        // tests refuse a reader that grows one that is not. Closing this here would mean
+        // refusing dots, which refuses every model id and version string with one.
         //
         // ParsedResultShapeTests.AStatusLineStateCannotCarryTheWorkingDirectoryItWasGiven
         // passes because the reader never reads project_dir, not because the guard would
