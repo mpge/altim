@@ -480,6 +480,19 @@ at. Without `--arch` the script builds for the machine it is running on.
 
 ### The bundle seal
 
+**It seals.** The first run that reached this point reported
+`Altim.app: valid on disk` and `satisfies its Designated Requirement` on both
+architectures. Publishing as a single file was the fix: with no managed assemblies beside
+the executable there is nothing in `Contents/MacOS` that cannot carry a signature.
+
+The x64 job then failed at `hdiutil` with `No space left on device`, which is a runner
+capacity problem and not a signing one — arm64 finished. The image step now deletes the
+publish output first, since it was copied into the bundle long ago and nothing reads it
+again, and stages the bundle into the image root with hard links rather than a third full
+copy. Free space is printed before the image so the next failure of this kind says so.
+
+
+
 This is why there were no macOS artefacts for eleven runs, and it is worth reading
 before changing anything under `packaging/macos/`.
 

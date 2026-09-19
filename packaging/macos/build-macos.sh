@@ -324,10 +324,22 @@ DMG="$DIST/Altim-${VERSION}-${ARCH}.dmg"
 if [ "$SKIP_DMG" -eq 0 ]; then
     step "Building $(basename "$DMG")"
     DMG_ROOT="$STAGE/dmg"
+    # The publish output was copied into the bundle long ago and nothing reads it again.
+    # Keeping it costs another copy of a ninety megabyte single-file host at the exact
+    # moment hdiutil wants room for an uncompressed image plus the compressed result: the
+    # x64 runner ran out here on the first run that got this far, while arm64 finished.
+    rm -rf "$PUBLISH"
+
     rm -rf "$DMG_ROOT"
     mkdir -p "$DMG_ROOT"
-    cp -a "$APP" "$DMG_ROOT/"
+
+    # Hard links, not copies. Same volume, and hdiutil reads the tree rather than caring
+    # how its entries got there, so this stages the bundle for nothing instead of for its
+    # own size again.
+    cp -al "$APP" "$DMG_ROOT/" 2>/dev/null || cp -a "$APP" "$DMG_ROOT/"
     ln -s /Applications "$DMG_ROOT/Applications"
+
+    step "Free space before the image: $(df -h "$DIST" | awk 'NR==2 {print $4}')"
 
     rm -f "$DMG"
     hdiutil create \
