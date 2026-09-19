@@ -485,11 +485,13 @@ at. Without `--arch` the script builds for the machine it is running on.
 architectures. Publishing as a single file was the fix: with no managed assemblies beside
 the executable there is nothing in `Contents/MacOS` that cannot carry a signature.
 
-The x64 job then failed at `hdiutil` with `No space left on device`, which is a runner
-capacity problem and not a signing one — arm64 finished. The image step now deletes the
-publish output first, since it was copied into the bundle long ago and nothing reads it
-again, and stages the bundle into the image root with hard links rather than a third full
-copy. Free space is printed before the image so the next failure of this kind says so.
+The x64 job then failed at `hdiutil` with `No space left on device`. That was read as a
+runner capacity problem, and it is not one: printing the free space first showed **91GB
+available** on the run that failed, and the message names a path under `/Volumes`. It is the
+image being sized too small, and only x64 trips it because its single-file host is the larger
+of the two. The size is now stated rather than guessed by `hdiutil` — measured off the staged
+tree with a fifth again and a 64MB floor, which compression makes free. The publish output is
+still deleted first, because nothing reads it after the bundle is assembled.
 
 
 

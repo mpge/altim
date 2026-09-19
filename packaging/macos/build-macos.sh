@@ -333,16 +333,23 @@ if [ "$SKIP_DMG" -eq 0 ]; then
     rm -rf "$DMG_ROOT"
     mkdir -p "$DMG_ROOT"
 
-    # Hard links, not copies. Same volume, and hdiutil reads the tree rather than caring
-    # how its entries got there, so this stages the bundle for nothing instead of for its
-    # own size again.
-    cp -al "$APP" "$DMG_ROOT/" 2>/dev/null || cp -a "$APP" "$DMG_ROOT/"
+    cp -a "$APP" "$DMG_ROOT/"
     ln -s /Applications "$DMG_ROOT/Applications"
 
-    step "Free space before the image: $(df -h "$DIST" | awk 'NR==2 {print $4}')"
+    # "No space left on device" out of hdiutil is about the image being built, not the
+    # disk underneath it. The x64 job failed that way with 91GB free, and the message
+    # names a path under /Volumes: left to size the image itself, hdiutil lands too small
+    # for x64, whose single-file host is the larger of the two. So the size is stated,
+    # measured off the tree with a fifth again and a floor on top. Compression makes the
+    # slack free.
+    dmg_kb="$(du -sk "$DMG_ROOT" | awk '{print $1}')"
+    dmg_mb=$(( (dmg_kb / 1024) * 6 / 5 + 64 ))
+
+    step "Image source is $(( dmg_kb / 1024 ))MB, asking hdiutil for ${dmg_mb}MB"
 
     rm -f "$DMG"
     hdiutil create \
+        -size "${dmg_mb}m" \
         -volname "Altim ($ARCH)" \
         -srcfolder "$DMG_ROOT" \
         -ov -format UDZO \
