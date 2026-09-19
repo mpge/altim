@@ -1,4 +1,5 @@
 using Altim.Core.Abstractions;
+using Altim.Core.Diagnostics;
 using Altim.Core.Models;
 using Avalonia.Controls;
 using Avalonia.Threading;
@@ -303,7 +304,10 @@ public sealed class LinuxTrayHost : ITrayHost
         {
             // No StatusNotifierItem support in this session. Altim runs without a panel
             // presence; ITrayHost's contract is that this is reported, not thrown.
-            _unavailableReason = ex.Message;
+            _unavailableReason =
+                "No StatusNotifierItem host accepted the icon, so Altim has no panel presence ("
+                    + ExceptionSummary.Describe(ex)
+                    + ").";
             return false;
         }
 
@@ -336,7 +340,10 @@ public sealed class LinuxTrayHost : ITrayHost
         {
             // A missing or unreadable asset leaves whatever icon is already published. The
             // panel slot stays rather than disappearing.
-            _unavailableReason = ex.Message;
+            _unavailableReason =
+                "The panel icon image could not be read, so the icon already published is kept ("
+                    + ExceptionSummary.Describe(ex)
+                    + ").";
         }
     }
 

@@ -1,8 +1,10 @@
 #if WINDOWS
 
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Altim.Core.Diagnostics;
 
 namespace Altim.Platform.Windows.Interop;
 
@@ -58,7 +60,7 @@ internal sealed unsafe class TrayWindow : IDisposable
     private IntPtr _shellWindow;
     private IntPtr _moduleHandle;
     private uint _taskbarCreated;
-    private string? _startupError;
+    private Exception? _startupError;
     private volatile bool _disposed;
 
     /// <summary>
@@ -81,7 +83,11 @@ internal sealed unsafe class TrayWindow : IDisposable
 
         if (_startupError is not null)
         {
-            throw new InvalidOperationException(_startupError);
+            throw new InvalidOperationException(
+                "The Altim tray windows could not be created ("
+                    + ExceptionSummary.Describe(_startupError)
+                    + ").",
+                _startupError);
         }
     }
 
@@ -198,7 +204,7 @@ internal sealed unsafe class TrayWindow : IDisposable
         }
         catch (Exception ex)
         {
-            _startupError = ex.Message;
+            _startupError = ex;
             _ready.Set();
             return;
         }
@@ -238,8 +244,9 @@ internal sealed unsafe class TrayWindow : IDisposable
             _atom = NativeMethods.RegisterClassExW(&wc);
             if (_atom == 0)
             {
-                throw new InvalidOperationException(
-                    $"RegisterClassEx failed for the Altim tray window class ({Marshal.GetLastPInvokeErrorMessage()}).");
+                throw new InvalidOperationException(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"RegisterClassEx failed for the Altim tray window class (Win32 error {Marshal.GetLastWin32Error()})."));
             }
 
             // Message-only: owns the notification icon, invisible to enumeration.
@@ -249,8 +256,9 @@ internal sealed unsafe class TrayWindow : IDisposable
 
             if (_iconWindow == IntPtr.Zero)
             {
-                throw new InvalidOperationException(
-                    $"CreateWindowEx failed for the Altim message-only window ({Marshal.GetLastPInvokeErrorMessage()}).");
+                throw new InvalidOperationException(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"CreateWindowEx failed for the Altim message-only window (Win32 error {Marshal.GetLastWin32Error()})."));
             }
 
             // Hidden top-level: receives broadcasts, owns popup menus. Never shown, and
@@ -262,8 +270,9 @@ internal sealed unsafe class TrayWindow : IDisposable
 
             if (_shellWindow == IntPtr.Zero)
             {
-                throw new InvalidOperationException(
-                    $"CreateWindowEx failed for the Altim broadcast window ({Marshal.GetLastPInvokeErrorMessage()}).");
+                throw new InvalidOperationException(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"CreateWindowEx failed for the Altim broadcast window (Win32 error {Marshal.GetLastWin32Error()})."));
             }
 
             _taskbarCreated = NativeMethods.RegisterWindowMessageW(taskbarCreated);

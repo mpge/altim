@@ -1,4 +1,5 @@
 using Altim.Core.Abstractions;
+using Altim.Core.Diagnostics;
 using Altim.Platform.Linux.DBus;
 using Tmds.DBus.Protocol;
 
@@ -122,7 +123,11 @@ public sealed class LinuxNotificationService : INotificationService, IDisposable
         catch (Exception ex) when (ex is DBusExceptionBase or ObjectDisposedException or IOException
                                       or InvalidOperationException)
         {
-            Report(LinuxNotificationDelivery.Rejected, ex.Message);
+            Report(
+                LinuxNotificationDelivery.Rejected,
+                "The notification daemon refused the message, so this alert was not shown ("
+                    + ExceptionSummary.Describe(ex)
+                    + ").");
         }
     }
 
@@ -225,7 +230,10 @@ public sealed class LinuxNotificationService : INotificationService, IDisposable
         catch (Exception ex) when (ex is DBusExceptionBase or IOException or InvalidOperationException
                                       or PlatformNotSupportedException or NotSupportedException)
         {
-            _unavailableReason = ex.Message;
+            _unavailableReason =
+                "The session bus could not be reached, so Altim cannot show notifications ("
+                    + ExceptionSummary.Describe(ex)
+                    + ").";
             return null;
         }
         finally

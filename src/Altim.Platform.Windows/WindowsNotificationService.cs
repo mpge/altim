@@ -2,6 +2,7 @@
 
 using System.Security.Principal;
 using Altim.Core.Abstractions;
+using Altim.Core.Diagnostics;
 using Altim.Core.Models;
 using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
@@ -61,7 +62,10 @@ public sealed class WindowsNotificationService : INotificationService, IDisposab
         }
         catch (Exception ex)
         {
-            _registrationError = ex.Message;
+            _registrationError =
+                "The notification platform is unavailable, so usage alerts are off ("
+                    + ExceptionSummary.Describe(ex)
+                    + ").";
             LastDelivery = WindowsNotificationDelivery.NotRegistered;
         }
     }
@@ -149,7 +153,11 @@ public sealed class WindowsNotificationService : INotificationService, IDisposab
         }
         catch (Exception ex)
         {
-            Report(WindowsNotificationDelivery.Failed, ex.Message);
+            Report(
+                WindowsNotificationDelivery.Failed,
+                "The notification platform did not show the alert ("
+                    + ExceptionSummary.Describe(ex)
+                    + ").");
         }
 
         return ValueTask.CompletedTask;
