@@ -40,7 +40,7 @@ Microsoft.Data.Sqlite, xUnit v3 on Microsoft.Testing.Platform. Central package m
 |---|---|
 | `Altim.Core` | models, abstractions, usage maths, scheduling. No UI, no I/O. |
 | `Altim.Storage` | SQLite: schema, the migration ladder, history, settings |
-| `Altim.Providers`, `.Claude`, `.Codex` | reading each vendor's usage |
+| `Altim.Providers`, `.Claude`, `.Codex`, `.Gemini` | reading each vendor's usage |
 | `Altim.UI` | Avalonia controls, themes, views, view models |
 | `Altim.Platform.Windows` / `.MacOS` / `.Linux` | tray, notifications, autostart, power events |
 | `Altim.App` | composition root, runtime, maintenance pass |

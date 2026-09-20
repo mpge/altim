@@ -54,8 +54,15 @@ absolute paths of the folders that session was working in. Altim's reader never 
 directory: it starts three levels below it, at the `chats` folder the transcripts are actually in,
 and it reads token counts and timestamps out of them and nothing else. Your credential files are
 never opened, and neither the folder paths nor the project name reaches Altim's database, its logs
-or its screen. A test holds every one of those files open and unreadable and checks that Altim still
-works, which it only can if it never tried to read them.
+or its screen.
+
+What holds that up is a scoping rule rather than a filter: the only directory ever handed to the
+file walk is a `chats` directory, so there is no path through the code that arrives at the Gemini
+home in the first place. Two tests enforce it — one plants decoy transcripts in the home, in `tmp`
+and in a named project folder and proves none of them is counted, and one asserts the rule at the
+call site. A test that merely made those files unreadable would prove nothing, because the reader
+treats a file it cannot open as a file with nothing in it, so a reader that *did* touch them would
+look exactly the same from outside.
 
 You can delete everything from **Settings → Privacy → Clear usage history**, or by deleting the
 database file. Settings live alongside it.

@@ -111,11 +111,12 @@ No public tag exists yet.
 
 ## Doc corrections
 
-- `AGENTS.md`'s layout table omits `Altim.Providers.Gemini`.
-- `PRIVACY.md`'s Gemini sentence overstates the credential guarantee — `JsonlTailReader` swallows
-  a failed open, so a reader that *did* touch the file would look identical. The real guarantee is
-  `AFileOutsideAChatsDirectoryIsNeverRead`.
-- Three doc comments describe "25/50/75/100 rules" where `UsageTape.Levels` is `[0, 50, 100]`.
+- ~~`AGENTS.md`'s layout table omits `Altim.Providers.Gemini`.~~ Done.
+- ~~`PRIVACY.md`'s Gemini sentence overstates the credential guarantee.~~ Done: the paragraph now
+  names the scoping rule and the two tests that enforce it, and says why a test that made the
+  credential files unreadable would have proved nothing.
+- ~~Doc comments describing "25/50/75/100 rules" where `UsageTape.Levels` is `[0, 50, 100]`.~~
+  Done; one occurrence was left, not three.
 - Verify the three Simple Icons per-icon licence fields; the project's own disclaimer says
   project-level CC0 does not imply every icon is CC0, and the repo asserts flat CC0 in three
   places.

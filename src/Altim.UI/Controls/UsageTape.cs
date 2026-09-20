@@ -67,7 +67,7 @@ public sealed class UsageTape : Control
             nameof(Series),
             coerce: Freeze);
 
-    /// <summary>The 25/50/75/100 rules. Supplied by the control theme from tokens.</summary>
+    /// <summary>The brush for the <see cref="Levels"/> rules. Supplied by the control theme from tokens.</summary>
     public static readonly StyledProperty<IBrush?> LevelLineBrushProperty =
         AvaloniaProperty.Register<UsageTape, IBrush?>(nameof(LevelLineBrush));
 
