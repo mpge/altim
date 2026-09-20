@@ -271,11 +271,58 @@ public sealed class AltimDatabaseTests
         Assert.Null(AltimDatabase.TryOpenForeignReadOnly(temp.FilePath));
     }
 
+    /// <summary>
+    /// Asserts that a shutdown started while a write lease is held has not finished.
+    /// </summary>
+    /// <param name="shutdown">The task running <c>Dispose</c>.</param>
+    /// <remarks>
+    /// <para>
+    /// This used to be one <c>Assert.NotSame</c> against a delay, which failed on a loaded CI
+    /// runner and said only "Values are the same instance". Two quite different defects
+    /// produce that: the gate did not hold the shutdown at all, or <c>Dispose</c> threw on the
+    /// thread pool — and a faulted task is a completed one, so the race reports it as though
+    /// the wait had ended normally.
+    /// </para>
+    /// <para>
+    /// A third is not about the subject at all: <c>Task.Run</c> hands back an
+    /// already-cancelled task when the token has fired before the delegate is scheduled, and
+    /// a cancelled task is a completed one, so a test host timing out under load reports it as
+    /// a shutdown that did not wait.
+    /// </para>
+    /// <para>
+    /// All three need different responses and the old assertion could not tell them apart, so
+    /// this names which one happened and, for the second, carries the exception that caused it.
+    /// The window stays short on purpose: it is a floor under "still waiting", and lengthening
+    /// it would give a shutdown that is wrongly proceeding more time to finish, not less.
+    /// </para>
+    /// </remarks>
     private static async Task AssertStillWaiting(Task shutdown)
     {
         Task first = await Task.WhenAny(shutdown, Task.Delay(TimeSpan.FromMilliseconds(250), Ct));
 
-        Assert.NotSame(shutdown, first);
+        if (!ReferenceEquals(first, shutdown))
+        {
+            return;
+        }
+
+        if (shutdown.IsCanceled)
+        {
+            // Task.Run hands back an already-cancelled task when the token is cancelled
+            // before the delegate is scheduled, and a cancelled task is a completed one.
+            // Dispose never ran at all in that case, so nothing here is a finding about it.
+            Assert.Fail(
+                "The test's cancellation token fired before Dispose was scheduled, so this " +
+                "says nothing about whether the gate holds a shutdown.");
+        }
+
+        if (shutdown.Exception is { } faulted)
+        {
+            Assert.Fail(
+                "Dispose threw instead of waiting for the in-flight write: " +
+                faulted.GetBaseException());
+        }
+
+        Assert.Fail("Dispose returned while a write lease was still held.");
     }
 
     private static SqliteConnection OpenForeign(string path)

@@ -102,6 +102,13 @@ built for the first time. No public tag exists yet, and nothing is signed.
 
 - **`UsageMapViewModelTests.ConstructionReadsNothingAndASlowStoreDoesNotBlockIt` is a
   load-dependent flake.** It fails under a loaded machine and passes in isolation. Seen twice.
+  Its wait budget has since been raised to 60 seconds.
+- **`AltimDatabaseTests.DisposingWaitsForAWriteThatIsAlreadyInFlight` failed once on
+  `windows-latest`** and does not reproduce locally over repeated runs. Its assertion could not
+  say why, so it now names which of three things happened: the gate did not hold the shutdown,
+  `Dispose` threw on the thread pool, or the test's own token fired before `Task.Run` scheduled
+  anything. The next failure should diagnose itself. Nothing has been changed in
+  `AltimDatabase` on the strength of a single unreproduced failure.
 - **`altim-white-512.png` and `altim-template-512.png` are 1024x1024.** Waste rather than a
   broken promise — neither is installed into a size-named directory and the choosers round up
   and downscale. Rename to `-1024` and add the size, or re-render at 512.
