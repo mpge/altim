@@ -1,6 +1,6 @@
 # Working on Altim
 
-Context for coding agents. `CLAUDE.md` and `codex.md` point here; this file is the single copy.
+Context for coding agents. `codex.md` points here; this file is the single copy.
 
 Altim is a cross-platform desktop monitor for AI coding-agent usage. It sits in the tray, menu bar
 or status area and answers one question: how much of your Claude and Codex allowance is left, and
@@ -46,8 +46,8 @@ Microsoft.Data.Sqlite, xUnit v3 on Microsoft.Testing.Platform. Central package m
 | `Altim.App` | composition root, runtime, maintenance pass |
 
 Design docs are canonical. If code and `ARCHITECTURE.md`, `PROVIDERS.md`, `docs/DESIGN.md` or
-`PRIVACY.md` disagree, the doc wins or the doc gets corrected in the same commit. Specs and plans
-live in `docs/superpowers/`.
+`PRIVACY.md` disagree, the doc wins or the doc gets corrected in the same commit. Open work is
+listed in `docs/BACKLOG.md`.
 
 ## Build and test
 
