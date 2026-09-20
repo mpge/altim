@@ -94,6 +94,19 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IUsageHistorySource, I
     private bool _hasCumulative;
     private ClaudeUsageSummary _summary = ClaudeUsageSummary.Empty;
     private DateTimeOffset? _summaryReadAt;
+
+    /// <summary>
+    /// When a summary was last actually parsed, or null when none has been.
+    /// </summary>
+    /// <remarks>
+    /// <b>Not <see cref="_summaryReadAt"/>, which is when a call was last <em>permitted</em>.</b>
+    /// The two look alike and are not: the rate limiter stamps that one whether or not the call
+    /// answered, and on the gated path it is never stamped at all. A failed run keeps the
+    /// previous summary on purpose, because the last real reading beats nothing, so without an
+    /// age taken from a reading that actually happened there is no way for anything to notice
+    /// that the figure describes a window which has since ended.
+    /// </remarks>
+    private DateTimeOffset? _summaryObservedAt;
     private ClaudeStatusLineState? _lastStatusLine;
     private bool _disposed;
 
@@ -434,6 +447,23 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IUsageHistorySource, I
     /// Adds the windows the headless summary reported, for limits the status line is not
     /// currently answering for.
     /// </summary>
+    /// <param name="metrics">The list being built.</param>
+    /// <param name="now">The instant the reading is for.</param>
+    /// <remarks>
+    /// <para>
+    /// Each figure is dropped once more time has passed than the window it measures. That
+    /// bound is derived rather than chosen: these figures come out of prose and carry no reset
+    /// instant at all, so the only thing Altim can say about one is that a percentage of a
+    /// five-hour window taken more than five hours ago cannot still be describing that window.
+    /// Anything tighter would be a number nobody reported.
+    /// </para>
+    /// <para>
+    /// Before this, a failed run kept the previous summary, deliberately, and nothing ever
+    /// took it away again. A machine whose Claude CLI stopped answering went on being shown a
+    /// session percentage from a window that had ended, indefinitely, labelled best effort and
+    /// otherwise indistinguishable on screen from a current one.
+    /// </para>
+    /// </remarks>
     private void AddSummaryMetrics(List<UsageMetric> metrics, DateTimeOffset now)
     {
         bool hasFiveHour = metrics.Exists(static m => m.Key == FiveHourKey);
@@ -442,28 +472,41 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IUsageHistorySource, I
         // The summary's own windows are best-effort: they come out of prose, and they carry
         // no reset instant at all, which is why the documented source outranks them while
         // it is current.
-        if (!hasFiveHour && _summary.SessionUsedPercent is { } session)
+        if (!hasFiveHour && _summary.SessionUsedPercent is { } session && StillDescribes(FiveHourWindow, now))
         {
             metrics.Insert(0, new UsageMetric(FiveHourKey, "Session", session, new LimitWindow(FiveHourWindow, null), MetricConfidence.BestEffort));
         }
 
-        if (!hasSevenDay && _summary.WeeklyUsedPercent is { } weekly)
+        if (!hasSevenDay && _summary.WeeklyUsedPercent is { } weekly && StillDescribes(SevenDayWindow, now))
         {
             metrics.Add(new UsageMetric(SevenDayKey, "Weekly", weekly, new LimitWindow(SevenDayWindow, null), MetricConfidence.BestEffort));
         }
 
-        if (_summary.WeeklyOpusUsedPercent is { } opus)
+        if (_summary.WeeklyOpusUsedPercent is { } opus && StillDescribes(SevenDayWindow, now))
         {
             metrics.Add(new UsageMetric(SevenDayOpusKey, "Weekly (Opus)", opus, new LimitWindow(SevenDayWindow, null), MetricConfidence.BestEffort));
         }
 
-        if (_summary.WeeklySonnetUsedPercent is { } sonnet)
+        if (_summary.WeeklySonnetUsedPercent is { } sonnet && StillDescribes(SevenDayWindow, now))
         {
             metrics.Add(new UsageMetric(SevenDaySonnetKey, "Weekly (Sonnet)", sonnet, new LimitWindow(SevenDayWindow, null), MetricConfidence.BestEffort));
         }
-
-        _ = now;
     }
+
+    /// <summary>
+    /// Whether a summary figure can still be describing the window it names.
+    /// </summary>
+    /// <param name="window">The window the figure measures.</param>
+    /// <param name="now">The instant the reading is for.</param>
+    /// <returns>False once the figure is older than its own window.</returns>
+    /// <remarks>
+    /// A summary with no observation stamp is not published at all, rather than treated as
+    /// new: an unknown age is not a young one. A clock that moved backwards leaves a stamp in
+    /// the future, which is not a reason to withdraw a figure, so only elapsed time counts
+    /// against one.
+    /// </remarks>
+    private bool StillDescribes(TimeSpan window, DateTimeOffset now) =>
+        _summaryObservedAt is { } observed && now - observed < window;
 
     /// <summary>
     /// Reads the newest status-line state file across the config roots.
@@ -630,6 +673,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IUsageHistorySource, I
             // files and are unaffected.
             _summary = ClaudeUsageSummary.Empty;
             _summaryReadAt = null;
+            _summaryObservedAt = null;
             return;
         }
 
@@ -659,6 +703,7 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IUsageHistorySource, I
         if (parsed.HasAny)
         {
             _summary = parsed;
+            _summaryObservedAt = now;
         }
     }
 

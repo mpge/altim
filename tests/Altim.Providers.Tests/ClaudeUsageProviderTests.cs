@@ -2,6 +2,7 @@ using System.Globalization;
 using Altim.Core.Abstractions;
 using Altim.Core.Models;
 using Altim.Providers.Claude;
+using Altim.Providers.Cli;
 using Altim.Providers.Tests.Support;
 using Xunit;
 
@@ -135,6 +136,125 @@ public sealed class ClaudeUsageProviderTests
         // displace it or get averaged into it.
         UsageMetric fiveHour = Assert.Single(usage.Metrics, m => m.Key == "five_hour");
         Assert.Equal(MetricConfidence.Documented, fiveHour.Confidence);
+    }
+
+    /// <summary>
+    /// The defect this covers: a summary that could never go out of date.
+    /// </summary>
+    /// <remarks>
+    /// A failed <c>/usage</c> run keeps the previous summary on purpose, because the last
+    /// real reading beats nothing. Nothing ever took it away again, so a machine whose CLI
+    /// stopped answering went on being shown a session percentage from a window that had
+    /// ended — indefinitely, and on screen indistinguishable from a current one. The bound
+    /// is the window the figure measures: five hours after it was read, a five-hour
+    /// percentage cannot still be describing the window it named.
+    /// </remarks>
+    [Fact]
+    public async Task ASummaryStopsBeingPublishedOnceItIsOlderThanTheWindowItMeasures()
+    {
+        using var workspace = new TempWorkspace();
+        var runner = new FakeCliRunner { CommandExists = true };
+        runner.RespondWithJson(
+            UsageArguments,
+            """{"num_turns":0,"total_cost_usd":0,"result":"Current session: 53% used\nCurrent week (all models): 85% used"}""");
+
+        var clock = new MovableTimeProvider(Now);
+        using var provider = new ClaudeUsageProvider(
+            ClaudeOptions.Default, runner, new FakeProcessMonitor(), [workspace.Root], clock);
+
+        ProviderUsage first = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(53d, Assert.Single(first.Metrics, m => m.Key == "five_hour").UsedPercent);
+        Assert.Equal(85d, Assert.Single(first.Metrics, m => m.Key == "seven_day").UsedPercent);
+
+        // The CLI stops answering. Everything it said stands, because the last real reading
+        // beats nothing.
+        runner.Respond(UsageArguments, CliRunResult.Failed);
+
+        clock.Advance(TimeSpan.FromHours(4));
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+        ProviderUsage held = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(53d, Assert.Single(held.Metrics, m => m.Key == "five_hour").UsedPercent);
+
+        // Past five hours the session figure is about a window that has ended, so it goes.
+        clock.Advance(TimeSpan.FromHours(2));
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+        ProviderUsage expired = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(expired.Metrics, m => m.Key == "five_hour");
+
+        // And the weekly, whose window is seven days, is untouched by the same six hours.
+        // Each figure expires against its own window rather than all of them together.
+        Assert.Equal(85d, Assert.Single(expired.Metrics, m => m.Key == "seven_day").UsedPercent);
+    }
+
+    /// <summary>
+    /// The clock the expiry reads is when a summary was last <em>parsed</em>, which is not
+    /// the one the rate limiter stamps.
+    /// </summary>
+    /// <remarks>
+    /// The limiter stamps whether or not the call answered, so reading it would have made
+    /// every failed attempt look like a fresh observation and the figure would never have
+    /// aged at all while the CLI was reachable and broken.
+    /// </remarks>
+    [Fact]
+    public async Task AFailedRunDoesNotCountAsHavingReadTheSummaryAgain()
+    {
+        using var workspace = new TempWorkspace();
+        var runner = new FakeCliRunner { CommandExists = true };
+        runner.RespondWithJson(
+            UsageArguments,
+            """{"num_turns":0,"total_cost_usd":0,"result":"Current session: 53% used"}""");
+
+        var clock = new MovableTimeProvider(Now);
+        using var provider = new ClaudeUsageProvider(
+            ClaudeOptions.Default, runner, new FakeProcessMonitor(), [workspace.Root], clock);
+
+        _ = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+        runner.Respond(UsageArguments, CliRunResult.Failed);
+
+        // Nine failed attempts spread over more than five hours. Each one is permitted, so
+        // each one would have refreshed a clock stamped by the limiter.
+        for (int i = 0; i < 9; i++)
+        {
+            clock.Advance(TimeSpan.FromMinutes(40));
+            await provider.RefreshAsync(TestContext.Current.CancellationToken);
+        }
+
+        ProviderUsage usage = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(usage.Metrics, m => m.Key == "five_hour");
+    }
+
+    /// <summary>
+    /// A fresh answer restarts the clock, so a CLI that comes back keeps reporting.
+    /// </summary>
+    [Fact]
+    public async Task AFreshAnswerRestartsTheWindow()
+    {
+        using var workspace = new TempWorkspace();
+        var runner = new FakeCliRunner { CommandExists = true };
+        runner.RespondWithJson(
+            UsageArguments,
+            """{"num_turns":0,"total_cost_usd":0,"result":"Current session: 53% used"}""");
+
+        var clock = new MovableTimeProvider(Now);
+        using var provider = new ClaudeUsageProvider(
+            ClaudeOptions.Default, runner, new FakeProcessMonitor(), [workspace.Root], clock);
+
+        _ = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+
+        clock.Advance(TimeSpan.FromHours(4));
+        runner.RespondWithJson(
+            UsageArguments,
+            """{"num_turns":0,"total_cost_usd":0,"result":"Current session: 71% used"}""");
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+
+        // Four more hours: eight since the first reading, four since the one in force.
+        clock.Advance(TimeSpan.FromHours(4));
+        await provider.RefreshAsync(TestContext.Current.CancellationToken);
+        ProviderUsage usage = await provider.GetUsageAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(71d, Assert.Single(usage.Metrics, m => m.Key == "five_hour").UsedPercent);
     }
 
     [Fact]
