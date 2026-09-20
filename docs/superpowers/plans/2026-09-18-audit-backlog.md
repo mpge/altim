@@ -4,7 +4,13 @@ Two audits: what is untested, and what stands between Altim and a first release.
 was demonstrated or read out of the code, not inferred. Where something is reported rather than
 verified, it says so.
 
-**State at the time of writing:** 1,610 tests green on Windows, Ubuntu and macOS. `main` is red —
+**State 2026-09-20.** Every job green on Windows, Ubuntu and macOS, including both macOS
+bundle jobs. The release pipeline has now run: it produced a complete draft with twelve
+artefacts across three platforms, so `vpk pack`, `build-linux.sh`, the AppImage without FUSE,
+the artifact round trip and `gh release create` are all observed to work. The draft is
+`v0.0.1-rc1`, unpublished, so no public tag exists.
+
+**State when this was written, 2026-09-18:**
 the `macOS app bundle` job fails on every push. Zero tags, zero releases, zero artefacts ever
 produced by CI.
 
@@ -14,30 +20,30 @@ produced by CI.
 
 These are cheap, and each closes a class of problem rather than one instance.
 
-- [ ] **Stop writing third-party exception messages into the log.** Seven `ex.Message` sites in
+- [x] **Stop writing third-party exception messages into the log.** Seven `ex.Message` sites in
       `src/`; two reach `altim.log` today via `PlatformStack.cs:287` and `:415`, the other five are
       one wiring line away. `PRIVACY.md` says logs carry exception **types**, and `AltimLog`'s own
       doc calls this "a defect rather than a decision". A Linux `IOException` here names
       `$XDG_RUNTIME_DIR/<uid>/bus`. Replace with `ExceptionSummary.Describe(ex)`, then a
       source-shape test forbidding `\b(ex|error|e)\.Message\b` in `src/`. **~30 min.**
 
-- [ ] **Test `JsonValues.IsIdentifier` / `ReadIdentifier`.** Zero tests. It is the single chokepoint
+- [x] **Test `JsonValues.IsIdentifier` / `ReadIdentifier`.** Zero tests. It is the single chokepoint
       between vendor files full of prompts, source and command output and 20+ string fields, and the
       shape tests cannot help because `SessionId`, `ModelId`, `LimitName`, `Label` and `StatusDetail`
       are allowlisted. `CodexRateLimitParserTests` already proves vendor text reaches a visible
       label. Loosen the character set or the 96-char cap and 1,610 tests stay green. **~1h.**
 
-- [ ] **Unred `main`.** Make the ad-hoc seal non-fatal and loosen the signature assertion in
+- [x] **Unred `main`.** Make the ad-hoc seal non-fatal and loosen the signature assertion in
       `verify-bundle.sh` for that path, so a DMG is finally produced as an artefact. You cannot tag
       off a red branch, and nobody has ever run Altim on a Mac. **~30 min.**
 
-- [ ] **Cut a throwaway prerelease tag and read the run.** `release.yml` is 332 lines of
+- [x] **Cut a throwaway prerelease tag and read the run.** `release.yml` is 332 lines of
       never-executed code guarding all three platforms — `vpk pack` on a runner, `build-linux.sh`
       end to end, AppImage without FUSE, the artifact round trip, `gh release create`. One run
       teaches more than a day of reading. Push `v0.0.1-rc1`, let it fail, delete the draft.
       **~20 min plus the run.**
 
-- [ ] **First run shows the user nothing.** `StartMinimised` defaults to `true`, so a fresh install
+- [x] **First run shows the user nothing.** `StartMinimised` defaults to `true`, so a fresh install
       opens no window and Windows 11 hides a new tray icon in the overflow. A stranger runs the
       installer and nothing visible happens. Open the dashboard once when the database is new.
       **~1h.**
@@ -72,7 +78,7 @@ These are cheap, and each closes a class of problem rather than one instance.
 
 ### Packaging
 
-- [ ] **macOS bundle shape.** The failure is at **sign** time, not verify — `codesign` classifies
+- [x] **macOS bundle shape.** The failure is at **sign** time, not verify — `codesign` classifies
       `Contents/MacOS/` as a nested-code location when it seals the bundle, so every file there must
       already be signable Mach-O and a managed `.dll` never can be. No verification flag helps; three
       attempts proved that. Fix: `PublishSingleFile=true` so only the host and 18 dylibs remain, and
@@ -95,7 +101,7 @@ These are cheap, and each closes a class of problem rather than one instance.
       incompatibility in the tree. Dropping it removes that, cuts the installer by roughly two
       thirds, and costs a broken feature. **~half day. A decision, not access.**
 
-- [ ] **Correct two docs that overstate CI.** `packaging/README.md` and `README.md` both say the
+- [x] **Correct two docs that overstate CI.** `packaging/README.md` and `README.md` both say the
       macOS bundle is assembled and read back on every push. It has failed all 11 runs;
       `verify-bundle.sh` has never executed. `AGENTS.md` says docs are canonical, so this is the
       wrong kind of wrong.
