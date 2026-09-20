@@ -181,17 +181,45 @@ public sealed class DialRingPixelTests
             Ink.Near(frame.At(Polar(centre, outer, Dial.AngleFor(55d))), caution, 4),
             "The reported ring lost its caution band.");
 
-        // The unreported ring is the page: no sweep, and not a filled track either, because a
-        // filled track is what a reported nothing looks like.
-        foreach (double level in (double[])[2d, 20d, 50d, 80d, 98d])
+        // The unreported ring is the page.
+        double[] along = [2d, 20d, 50d, 80d, 98d];
+        foreach (double level in along)
         {
-            Color at = frame.At(Polar(centre, inner, Dial.AngleFor(level)));
             Assert.True(
-                Ink.Near(at, ground, 6),
+                Ink.Near(frame.At(Polar(centre, inner, Dial.AngleFor(level))), ground, 6),
                 $"The unreported ring is painted at {level}%: "
                     + frame.Describe(Dot(centre, inner, Dial.AngleFor(level))));
-            Assert.False(Ink.Near(at, normal, 6), $"A sweep reached {level}% on nothing reported.");
-            Assert.False(Ink.Near(at, track, 6), $"A track was filled at {level}% on nothing reported.");
+        }
+
+        // And not a filled track, which is what a reported nothing looks like - the product
+        // rule this whole test exists for. Asking that the page is not the track is not a way
+        // to say that: a pixel within 6 of the page cannot also be within 6 of a track 21 away
+        // from it, so the question was free and answered itself. So the same reader is sent
+        // along the same radius on a dial where that provider reported zero, and has to find
+        // the track there.
+        var reportedZero = new Dial
+        {
+            Readings =
+            [
+                new DialReading(0, "Session (Claude Code)", 62d, 80d),
+                new DialReading(1, "Session (Codex)", 0d, 80d),
+            ],
+        };
+
+        using PixelHost zeroHost = Show(reportedZero, variant);
+        Frame zero = zeroHost.Capture();
+        Point zeroCentre = Centre(zeroHost, reportedZero);
+
+        // The threshold index stands at 80 on a ring that has a reading, so that sample is
+        // left out of the control: a mark is not a track, and it is on the reported zero at
+        // all only because a reading is what an index is drawn against.
+        foreach (double level in (double[])[2d, 20d, 50d, 60d, 98d])
+        {
+            Assert.True(
+                Ink.Near(zero.At(Polar(zeroCentre, inner, Dial.AngleFor(level))), track, 6),
+                $"A reported zero left its own ring unfilled at {level}%, so it is the same "
+                    + "picture as a provider that reported nothing: "
+                    + zero.Describe(Dot(zeroCentre, inner, Dial.AngleFor(level))));
         }
 
         // Its outline is still there, so the ring has not simply vanished: the provider is on

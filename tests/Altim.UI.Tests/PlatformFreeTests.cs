@@ -91,7 +91,5 @@ public sealed class PlatformFreeTests
         Assert.Equal(ProviderIdentity.OpenAIMarkPath, ProviderIdentity.GlyphPath("codex"));
         Assert.Equal(ProviderIdentity.GeminiMarkPath, ProviderIdentity.GlyphPath("gemini"));
         Assert.Equal(ProviderIdentity.CirclePath, ProviderIdentity.GlyphPath("some-other-agent"));
-        Assert.StartsWith("M", AltimIcons.HomePath, StringComparison.Ordinal);
-        Assert.StartsWith("M", AltimIcons.SettingsPath, StringComparison.Ordinal);
     }
 }

@@ -44,12 +44,21 @@ public sealed class UsageMapScaleTests
     public void ZeroIsTheLowestLevelAndNotUnknown() => Assert.Equal(0, UsageMapScale.From([0, 5, 9]).LevelFor(0));
 
     /// <summary>Identical days collapse to one bucket instead of producing empty ranges.</summary>
+    /// <remarks>
+    /// Four identical days end four shares on the same value, so three of the four cuts bound
+    /// a range no value can fall in. Dropping the repeats is what keeps the levels contiguous
+    /// from zero: the tie is the bottom of the ramp and the first value above it is the next
+    /// step up, rather than the top of a ramp whose middle nothing can reach. Asking where the
+    /// tie itself lands cannot see any of that, because it lands on level zero either way.
+    /// </remarks>
     [Fact]
     public void IdenticalValuesAllLandOnOneLevel()
     {
         UsageMapScale scale = UsageMapScale.From([7, 7, 7, 7]);
-        Assert.Equal(scale.LevelFor(7), scale.LevelFor(7));
-        Assert.InRange(scale.LevelFor(7), 0, 4);
+
+        Assert.Equal(0, scale.LevelFor(7));
+        Assert.Equal(0, scale.LevelFor(6));
+        Assert.Equal(1, scale.LevelFor(8));
     }
 
     /// <summary>A history shorter than the ramp still produces levels that exist.</summary>

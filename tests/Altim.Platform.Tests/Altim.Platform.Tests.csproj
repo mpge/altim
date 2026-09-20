@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <!-- The Windows flavoured target framework, and only on a Windows host.
+
+       Every file in Altim.Platform.Windows sits behind #if WINDOWS, so the net10.0
+       face of that project is an assembly with no types in it whatsoever. A plain
+       net10.0 test project can reference it and gain nothing at all: there is
+       nothing to bind to, and adding the reference changes not one byte of what
+       compiles. Taking the framework Altim.App already takes on Windows is what
+       makes WindowsAutoStartService testable, and the value it builds is the
+       string the Run key is set to: a quote lost there stops Altim starting for
+       everybody whose install path contains a space, silently, on the next boot.
+
+       Off Windows the framework stays plain net10.0 from Directory.Build.props,
+       the reference resolves to that empty facade, and the Windows tests are not
+       compiled at all because they sit behind the same symbol their subjects do.
+       The Linux tests here are ordinary file system work and run on every host, so
+       the Linux and macOS jobs still have tests to run in this project rather than
+       an empty assembly the test platform would call a failure.
+
+       Host conditional rather than unconditional on purpose. The Windows face of
+       Altim.Platform.Windows carries Microsoft.WindowsAppSDK, whose MSIX and PRI
+       tooling needs the workarounds at the foot of that project file to build on a
+       Linux agent; a test host is not the place to find out whether they hold.
+
+       AltimPortableBuild is honoured for the same reason Altim.App honours it: that
+       switch exists so the shape the Linux job compiles can be compiled on a Windows
+       machine, and a test project that ignored it would leave the one project in the
+       solution whose portable face nobody had built. The command is in
+       packaging/README.md, under "Verifying the portable face on Windows". -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$(AltimPortableBuild)' != 'true'">
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The two platform layers with seams that can be exercised from anywhere: an
+         autostart directory and an executable path on one, a procfs root on the
+         other. Nothing here starts a tray, connects a bus or writes to the Run key. -->
+    <ProjectReference Include="..\..\src\Altim.Platform.Linux\Altim.Platform.Linux.csproj" />
+    <ProjectReference Include="..\..\src\Altim.Platform.Windows\Altim.Platform.Windows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+  </ItemGroup>
+
+</Project>

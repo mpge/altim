@@ -3,6 +3,8 @@ using Altim.UI.Formatting;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Automation.Peers;
+using Avalonia.Controls;
+using Avalonia.VisualTree;
 
 namespace Altim.UI.Controls;
 
@@ -219,14 +221,32 @@ internal sealed class UsageMapCellAutomationPeer : AutomationPeer
 
     /// <inheritdoc />
     /// <remarks>
+    /// <para>
     /// Read back from the map rather than remembered, so a square that has moved - a different
-    /// square size from the theme, a different scaling - reports where it actually is. The map
-    /// answers in its own coordinates and the map's peer turns those into screen ones.
+    /// square size from the theme, a different scaling - reports where it actually is.
+    /// </para>
+    /// <para>
+    /// <b>There are two steps from a square to the screen and both are needed.</b> The map
+    /// answers in its own coordinates. Up the tree to the window is where the map's own
+    /// position inside that window is added, and
+    /// <see cref="ControlAutomationPeer.ToScreen"/> takes window coordinates out to screen
+    /// ones - it does not do the first step, which is why the peer for the map itself
+    /// transforms before calling it. Handing it a square's map coordinates skipped that and
+    /// named every square short by wherever the map happened to sit: 540 points, for a panel
+    /// centred in the dashboard window.
+    /// </para>
     /// </remarks>
-    protected override Rect GetBoundingRectangleCore() =>
-        Map.CellBounds(_rowIndex, _cell.Day) is { } bounds
-            ? _map.ToScreen(bounds) ?? default
-            : default;
+    protected override Rect GetBoundingRectangleCore()
+    {
+        if (Map.CellBounds(_rowIndex, _cell.Day) is not { } bounds
+            || TopLevel.GetTopLevel(Map) is not { } window
+            || Map.TransformToVisual(window) is not { } toWindow)
+        {
+            return default;
+        }
+
+        return _map.ToScreen(bounds.TransformToAABB(toWindow)) ?? default;
+    }
 
     /// <inheritdoc />
     protected override string GetClassNameCore() => nameof(UsageMapCell);

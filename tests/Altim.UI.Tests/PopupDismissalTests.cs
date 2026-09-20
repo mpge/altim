@@ -244,11 +244,33 @@ public sealed class PopupDismissalTests
         Assert.NotEqual(PopupDismissal.Describe(owner), described);
     }
 
-    /// <summary>Every class the classifier accepts is one it reports as the tray.</summary>
+    /// <summary>
+    /// The tray is the three classes that can carry the click that toggles the panel, and it
+    /// is not the two that were in this list and had to come out.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Walking the declared list and asking the classifier about each member is true whatever
+    /// the list holds, because the classifier decides by walking the same list. It was true of
+    /// the list that carried <c>Windows.UI.Core.CoreWindow</c>, which is the class of every
+    /// packaged application's window and read Settings and Calculator as the tray, and it
+    /// would be true again tomorrow. The contents are the claim, so the contents are what is
+    /// asserted.
+    /// </para>
+    /// <para>
+    /// Which is the half a class list needs that
+    /// <see cref="AShellShapedClassThatOtherApplicationsAlsoUseIsNotTheTray"/> and
+    /// <see cref="AnybodyElsesWindowIsADismissal"/> cannot give: they name the classes that
+    /// must stay out, one at a time, and no test of that shape can notice a fourth class
+    /// going in.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void TheDeclaredTrayClassesAllClassifyAsTheTray()
+    public void TheTrayIsExactlyTheClassesThatCanCarryTheToggle()
     {
-        Assert.NotEmpty(PopupDismissal.TrayWindowClasses);
+        Assert.Equal(
+            (string[])["Shell_TrayWnd", "TopLevelWindowForOverflowXamlIsland", "NotifyIconOverflowWindow"],
+            PopupDismissal.TrayWindowClasses);
 
         foreach (string windowClass in PopupDismissal.TrayWindowClasses)
         {

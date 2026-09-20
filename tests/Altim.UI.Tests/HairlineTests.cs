@@ -118,14 +118,38 @@ public sealed class HairlineTests
         Assert.Equal(10d, Hairline.SnapDown(10.9d, scale));
 
     /// <summary>A centred rule is placed by its leading edge, still on the grid.</summary>
-    [Fact]
-    public void ACentredRuleIsPlacedByItsLeadingEdge()
+    /// <param name="centre">Where the middle of the rule wants to be.</param>
+    /// <param name="scale">The render scaling.</param>
+    /// <param name="expected">The leading edge that centre resolves to.</param>
+    /// <remarks>
+    /// <para>
+    /// The half-thickness subtraction is the whole of this method, and at 125% it is invisible:
+    /// a 0.8 weight moves the edge 0.4, which the snap puts straight back, so 20 comes out of
+    /// an implementation that subtracts nothing at all. The rows at 150%, 200% and 300% are
+    /// the ones that tell the two apart.
+    /// </para>
+    /// <para>
+    /// The tolerance on the middle is half a device pixel, which is the most the snap can
+    /// legitimately move it. A whole one - the rule's own weight at 125% - is twice that, and
+    /// is wide enough to admit the edge returned unsnapped.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(20d, 1d, 20d)]
+    [InlineData(20d, 1.25d, 20d)]
+    [InlineData(20d, 1.5d, 19d + (1d / 3d))]
+    [InlineData(20d, 2d, 19.5d)]
+    [InlineData(20d, 3d, 19d + (2d / 3d))]
+    public void ACentredRuleIsPlacedByItsLeadingEdge(double centre, double scale, double expected)
     {
-        double weight = Hairline.ThicknessFor(1.25d);
-        double edge = Hairline.SnapCentre(20d, weight, 1.25d);
+        double weight = Hairline.ThicknessFor(scale);
+        double edge = Hairline.SnapCentre(centre, weight, scale);
 
-        Assert.Equal(Math.Round(edge * 1.25d), edge * 1.25d, 9);
-        Assert.True(Math.Abs(edge + (weight / 2d) - 20d) <= weight, "The rule moved more than its own weight.");
+        Assert.Equal(expected, edge, 9);
+        Assert.Equal(Math.Round(edge * scale), edge * scale, 9);
+        Assert.True(
+            Math.Abs(edge + (weight / 2d) - centre) <= (0.5d / scale) + 1e-9d,
+            $"The rule's middle landed at {edge + (weight / 2d)} rather than {centre}.");
     }
 
     /// <summary>A visual with no root is drawn at 100% until it has one.</summary>

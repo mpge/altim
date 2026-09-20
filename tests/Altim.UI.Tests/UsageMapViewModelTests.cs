@@ -396,7 +396,10 @@ public sealed class UsageMapViewModelTests
 
         Task load = map.LoadAsync(Ct);
 
-        Assert.True(entered.Wait(TimeSpan.FromSeconds(5), Ct), "The load never reached the store.");
+        // A deadlock guard, not an assertion about speed, so it is generous: five seconds was
+        // not, and went red twice on a machine that was busy building something else while
+        // this ran. What is being asserted is that the load reaches the store at all.
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(60), Ct), "The load never reached the store.");
         Assert.False(load.IsCompleted);
         Assert.Null(map.Rows);
 

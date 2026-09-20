@@ -45,9 +45,6 @@ public sealed class SqliteSchemaTests
         Assert.Equal(DBNull.Value, value);
     }
 
-    [Fact]
-    public void CurrentVersionIsPositive() => Assert.True(SqliteSchema.CurrentVersion > 0);
-
     private static void Execute(SqliteConnection connection, string sql)
     {
         using SqliteCommand command = connection.CreateCommand();

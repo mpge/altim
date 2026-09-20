@@ -784,15 +784,23 @@ public sealed class PopupTests
                     + $"{name.Bounds.Width:0.#} wide, so it runs out of both sides of a panel "
                     + "that does not clip.");
 
-            // And the box is inside the panel, which is what makes the line above a
-            // statement about the panel rather than only about the box.
+            // And where that line of glyphs lands in the panel, which is what makes the line
+            // above a statement about the panel rather than only about the box. Asking whether
+            // the box is inside the panel is the vacuous question the comment ten lines up
+            // warns about: a centred child is arranged within the room it has, so the box fits
+            // whatever the text does. Unwrapped, this label's ink ran from -43.7 to 363.7
+            // across a 320 wide panel while its box stood tidily from 16 to 304.
+            Assert.Equal(Avalonia.Media.TextAlignment.Center, name.TextAlignment);
+
             Point? placed = name.TranslatePoint(new Point(0d, 0d), window);
             Assert.True(placed is not null, "The name under the dial was never arranged.");
+
+            double ink = name.TextLayout.Width;
+            double from = placed!.Value.X + ((name.Bounds.Width - ink) / 2d);
             Assert.True(
-                placed!.Value.X >= 0d && placed.Value.X + name.Bounds.Width <= 320d,
-                $"The name is arranged from {placed.Value.X:0.#} to "
-                    + $"{placed.Value.X + name.Bounds.Width:0.#}, outside the 320 the panel "
-                    + "is wide.");
+                from >= -0.5d && from + ink <= 320.5d,
+                $"\"{label}\" paints from {from:0.#} to {from + ink:0.#}, outside the 320 the "
+                    + "panel is wide.");
         }, width: 320d, height: 1400d);
     }
 

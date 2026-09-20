@@ -458,7 +458,7 @@ public sealed class DialPixelTests
 
         var zeroDial = new Dial { Value = 0d, Threshold = 80d };
         var unknownDial = new Dial { Threshold = 80d };
-        var fullDial = new Dial { Value = 40d, Threshold = 80d };
+        var fullDial = new Dial { Value = 100d, Threshold = 80d };
 
         using PixelHost zeroHost = Show(zeroDial, variant);
         Frame zero = zeroHost.Capture();
@@ -492,19 +492,27 @@ public sealed class DialPixelTests
         // And no sweep anywhere, in any band. A dial with nothing to report must not put its
         // reading at the bottom of the scale, which is the one thing that would read as a
         // reported zero.
+        //
+        // Every band is then looked for on a dial that paints all three, so none of the three
+        // counts above is zero because the reader was hunting a colour this dial never wears.
+        // The control is the band's own share of the rail rather than a floor, because a floor
+        // cannot see a band bleeding over its neighbour: the sweep is painted whole and the two
+        // upper bands are laid over it, so a band whose brush went missing is not a gap in the
+        // rail but the band beneath it running on through.
         foreach (string band in (string[])
             ["AltimDialNormalBrush", "AltimDialCautionBrush", "AltimDialExceededBrush"])
         {
             Color ink = Token(variant, band);
             Assert.Equal(0, unknown.Count(Face(centre), c => Ink.Near(c, ink, 6)));
 
-            // The same reader does find the reported reading, so the count above is zero
-            // because there is nothing there rather than because it was looking for a colour
-            // nothing on this dial is ever painted in.
+            (double from, double to) = BandSpan(band, fullDial.Threshold);
+            double share = RailArea(from, to);
+            int painted = full.Count(Face(centre), c => Ink.Near(c, ink, 6));
+
             Assert.True(
-                band != "AltimDialNormalBrush"
-                    || full.Count(Face(centre), c => Ink.Near(c, ink, 6)) > 100,
-                $"{band} was not found on a dial that does report a reading.");
+                painted >= share * 0.6d && painted <= share * 1.4d,
+                $"{band} covers {painted} pixels on a dial that does report a reading, where "
+                    + $"its own {from} to {to} share of the rail comes to {share:0}.");
         }
     }
 
@@ -554,6 +562,37 @@ public sealed class DialPixelTests
     /// <summary>The radius the rail is centred on, which only the rail and the index reach.</summary>
     private static double RailCentre =>
         (Dial.Size / 2d) - Dial.ScaleDepth - Dial.ScaleGap - (Dial.RailThickness / 2d);
+
+    /// <summary>The stretch of the scale one band's brush is the ink for.</summary>
+    /// <param name="band">The token key of the band's brush.</param>
+    /// <param name="threshold">The dial's configured threshold.</param>
+    /// <returns>The levels the band runs from and to.</returns>
+    /// <remarks>
+    /// Read from <see cref="DialBands"/> rather than written out, so the two boundaries are
+    /// the control's own and a test that agreed with a stale pair of numbers cannot exist.
+    /// </remarks>
+    private static (double From, double To) BandSpan(string band, double? threshold)
+    {
+        double caution = DialBands.CautionFrom(threshold);
+        double exceeded = DialBands.ExceededFrom(threshold) ?? 100d;
+
+        return band switch
+        {
+            "AltimDialNormalBrush" => (0d, caution),
+            "AltimDialCautionBrush" => (caution, exceeded),
+            _ => (exceeded, 100d),
+        };
+    }
+
+    /// <summary>
+    /// How much of the rail a stretch of the scale covers, in square device independent pixels:
+    /// the arc it spans at the rail's own radius, times the rail's thickness.
+    /// </summary>
+    /// <param name="from">The level the stretch begins at.</param>
+    /// <param name="to">The level it ends at.</param>
+    /// <returns>The area.</returns>
+    private static double RailArea(double from, double to) =>
+        (to - from) / 100d * Dial.Sweep * Math.PI / 180d * RailCentre * Dial.RailThickness;
 
     private static PixelHost Show(Dial dial, ThemeVariant variant) =>
         PixelHost.Show(

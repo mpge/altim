@@ -61,15 +61,38 @@ public sealed class PopupCloseRuleTests
     public void AnUnknownReasonHides() =>
         Assert.Equal(PopupCloseAction.Hide, PopupCloseRule.Decide((WindowCloseReason)99));
 
-    /// <summary>Every reason has a phrase, because the log line is how this is debugged.</summary>
-    /// <param name="reason">The reason Avalonia reported.</param>
-    [Theory]
-    [InlineData(WindowCloseReason.OSShutdown)]
-    [InlineData(WindowCloseReason.ApplicationShutdown)]
-    [InlineData(WindowCloseReason.WindowClosing)]
-    [InlineData(WindowCloseReason.OwnerWindowClosing)]
-    [InlineData(WindowCloseReason.Undefined)]
-    [InlineData((WindowCloseReason)99)]
-    public void EveryReasonReadsAsASentence(WindowCloseReason reason) =>
-        Assert.False(string.IsNullOrWhiteSpace(PopupCloseRule.Describe(reason)));
+    /// <summary>
+    /// Every reason reads as its own sentence, because the log line is how this is debugged
+    /// and a phrase shared between two reasons names neither of them.
+    /// </summary>
+    /// <remarks>
+    /// Asking only that each phrase is not blank is a question one constant answers for all
+    /// six, and the five-armed switch behind it would be free to collapse into that constant
+    /// with nothing here noticing. The distinctness is the claim, as it already is for the
+    /// two own-process phrases in <see cref="PopupDismissalTests"/>.
+    /// </remarks>
+    [Fact]
+    public void EveryReasonReadsAsItsOwnSentence()
+    {
+        WindowCloseReason[] reported =
+        [
+            WindowCloseReason.OSShutdown,
+            WindowCloseReason.ApplicationShutdown,
+            WindowCloseReason.WindowClosing,
+            WindowCloseReason.OwnerWindowClosing,
+        ];
+
+        string[] phrases = [.. reported.Select(PopupCloseRule.Describe)];
+
+        Assert.All(phrases, phrase => Assert.False(string.IsNullOrWhiteSpace(phrase)));
+        Assert.Equal(reported.Length, phrases.Distinct(StringComparer.Ordinal).Count());
+
+        // A reason nothing reported falls to one phrase of its own, and never borrows a
+        // sentence that would claim the window said why it was closing.
+        string silent = PopupCloseRule.Describe(WindowCloseReason.Undefined);
+
+        Assert.False(string.IsNullOrWhiteSpace(silent));
+        Assert.Equal(silent, PopupCloseRule.Describe((WindowCloseReason)99));
+        Assert.DoesNotContain(silent, phrases, StringComparer.Ordinal);
+    }
 }

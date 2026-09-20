@@ -397,9 +397,24 @@ public sealed class PopupPlacementTests
         // The same logical screen at 150% is 1548 physical pixels and the same 1040 DIPs.
         Assert.Equal(1040d, PopupPlacement.MaxWindowHeight(new PixelRect(0, 0, 2880, 1548), 1.5d, trimmed));
 
-        // A screen with no room at all still gives a positive height rather than a negative
-        // one that would arrive at the window as a throw.
-        Assert.True(PopupPlacement.MaxWindowHeight(new PixelRect(0, 0, 320, 8), 1d, trimmed) > 0d);
+        // A screen with no room at all still leaves the panel inside the window a positive
+        // height rather than a negative one that would arrive at the window as a throw. The
+        // window's own figure is not the claim: the 24 the chrome adds keeps that above zero
+        // however far below zero the room for the panel went.
+        Assert.Equal(
+            1d + trimmed.Top + trimmed.Bottom,
+            PopupPlacement.MaxWindowHeight(new PixelRect(0, 0, 320, 8), 1d, trimmed));
+
+        foreach (PixelRect cramped in (PixelRect[])[new(0, 0, 320, 8), new(0, 0, 320, 0)])
+        {
+            double panel = PopupPlacement.MaxWindowHeight(cramped, 1d, trimmed)
+                - trimmed.Top
+                - trimmed.Bottom;
+
+            Assert.True(
+                panel >= 1d,
+                $"A {cramped.Height} tall working area leaves the panel {panel} to draw in.");
+        }
     }
 
     /// <summary>

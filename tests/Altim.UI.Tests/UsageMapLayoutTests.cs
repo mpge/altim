@@ -401,6 +401,7 @@ public sealed class UsageMapLayoutTests
 
         Assert.Equal(Square(map, Start).Size, wasFirst.Size);
         Assert.Equal(Square(map, Start.AddDays(7)).X - Square(map, Start).X, wasEighth.X - wasFirst.X, 6);
+        AssertReportedOnScreen(peer, map, first, Start);
 
         box.Width = 1400d;
         Dispatcher.UIThread.RunJobs();
@@ -415,6 +416,7 @@ public sealed class UsageMapLayoutTests
             Square(map, Start.AddDays(7)).X - Square(map, Start).X,
             eighth.GetBoundingRectangle().X - nowFirst.X,
             6);
+        AssertReportedOnScreen(peer, map, first, Start);
 
         // The same peers, not a rebuilt year of them.
         IReadOnlyList<AutomationPeer> again = peer.GetChildren();
@@ -460,6 +462,36 @@ public sealed class UsageMapLayoutTests
     /// <param name="map">The map to ask.</param>
     /// <param name="day">The day to find.</param>
     /// <param name="row">The row it is in.</param>
+    /// <summary>
+    /// Asserts a square's peer answers where the square is on the screen, not where it is on
+    /// the map.
+    /// </summary>
+    /// <param name="mapPeer">The map's own peer, whose rectangle is the map on the screen.</param>
+    /// <param name="map">The map.</param>
+    /// <param name="squarePeer">The square's peer.</param>
+    /// <param name="day">The day that square stands for.</param>
+    /// <remarks>
+    /// A size and the distance between two squares are both invariant under the translation
+    /// from map coordinates to screen ones, so a peer that dropped it would satisfy every other
+    /// assertion in this test while sending a screen reader to a point several hundred units
+    /// from the square it had just named. The panel is narrower than the window and centred in
+    /// it, which is what makes the offset large enough to be worth asserting.
+    /// </remarks>
+    private static void AssertReportedOnScreen(
+        AutomationPeer mapPeer, UsageMap map, AutomationPeer squarePeer, DateOnly day)
+    {
+        Rect onScreen = mapPeer.GetBoundingRectangle();
+        Rect square = squarePeer.GetBoundingRectangle();
+        Rect local = Square(map, day);
+
+        Assert.True(
+            onScreen.X > 1d,
+            $"The map stands at {onScreen.X}, where a translation that never happened looks "
+                + "exactly like one that did.");
+        Assert.Equal(local.X, square.X - onScreen.X, 6);
+        Assert.Equal(local.Y, square.Y - onScreen.Y, 6);
+    }
+
     private static Rect Square(UsageMap map, DateOnly day, int row = 0)
     {
         Rect? square = map.CellBounds(row, day);

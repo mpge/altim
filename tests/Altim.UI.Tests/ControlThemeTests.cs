@@ -227,8 +227,36 @@ public sealed class ControlThemeTests
         Assert.Equal(12d, knobs.Bounds.Height, 6);
         Assert.Equal(12d, knobs.Bounds.Width, 6);
 
-        // The travel is one spacing step: 28 - 12 - 2 border - 2 inset = 12.
-        Assert.Equal(12d, track.Bounds.Width - knobs.Bounds.Width - 4d, 6);
+        // The travel is one spacing step, and it is measured rather than restated. Subtracting
+        // the knob's width and the chrome from the track's says only what the two pairs of
+        // lines above already said; where the knob actually stands, off and on, is the thing
+        // the travel is a property of.
+        var moved = new ToggleSwitch { Content = "Start with the system", IsChecked = true };
+
+        DesignSystem.AssertRenders(moved, width: 240d, height: 48d);
+
+        Border movedTrack = Assert.IsType<Border>(Part<Border>(moved, "PART_Track"));
+        Panel movedKnobs = Assert.IsType<Panel>(Part<Panel>(moved, "PART_MovingKnobs"));
+
+        double off = KnobOffset(knobs, track);
+        double on = KnobOffset(movedKnobs, movedTrack);
+
+        // A border and a hairline inset in from each end, so the knob starts 2 in and finishes
+        // 2 short of the far end: 28 - 2 - 12 = 14.
+        Assert.Equal(2d, off, 6);
+        Assert.Equal(14d, on, 6);
+        Assert.Equal(12d, on - off, 6);
+    }
+
+    /// <summary>How far into its track the knob stands.</summary>
+    /// <param name="knobs">The moving knob panel.</param>
+    /// <param name="track">The track it moves inside.</param>
+    /// <returns>The distance from the track's leading edge to the knob's.</returns>
+    private static double KnobOffset(Panel knobs, Border track)
+    {
+        Point? at = knobs.TranslatePoint(default, track);
+        Assert.True(at is not null, "The knob is not inside the track it belongs to.");
+        return at!.Value.X;
     }
 
     /// <summary>The toggle moves its knob across and colours the track when checked.</summary>

@@ -35,12 +35,24 @@ Altim.Platform.Windows     Shell_NotifyIcon host, AppNotification, Run key, powe
 Altim.Platform.MacOS       NSStatusItem interop, UNUserNotificationCenter, SMAppService
 Altim.Platform.Linux       StatusNotifierItem, org.freedesktop.Notifications, XDG autostart
 Altim.App                  composition root, DI, lifetime, tray wiring
-tests/Altim.Core.Tests     ...Storage.Tests, ...Providers.Tests, ...UI.Tests
+tests/Altim.Core.Tests     ...Storage.Tests, ...Providers.Tests, ...UI.Tests, ...Platform.Tests
 ```
 
 Dependency direction is one-way: `App → UI → Core`, `App → Platform.* → Core`,
 `App → Providers.* → Providers → Core`, `Storage → Core`. Nothing depends on `App`. `Core` depends
 on nothing but the BCL, which is what keeps the business logic testable.
+
+**No test project references `App`,** and that is a property rather than an omission: it keeps the
+composition root off the critical path of the suite, and it is why `dotnet test Altim.sln` still
+runs while Altim itself is running and holding a lock on that project's output.
+
+`Altim.Platform.Tests` is the one test project that is not plain `net10.0`. On a Windows host it
+takes `net10.0-windows10.0.19041.0`, because every type in `Altim.Platform.Windows` sits behind
+`#if WINDOWS` and a `net10.0` test project binds to a facade holding no types at all - adding the
+reference from one changes nothing. Off Windows it stays plain `net10.0` and the Windows half is
+not compiled, which is why the Linux seams it also covers - the autostart entry and the `/proc`
+walk, both of which take their directory as a constructor argument - live there too and run
+everywhere.
 
 Adding a provider means adding one project that implements `IUsageProvider` and registering it. No
 UI change: views render whatever metrics a provider reports.
