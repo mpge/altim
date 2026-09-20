@@ -13,7 +13,7 @@ No public tag exists yet.
 
 ## Before a first release
 
-- [ ] **No third-party notices anywhere.** Clear unmet obligations: SQLitePCLRaw (Apache-2.0
+- [x] **No third-party notices anywhere.** Clear unmet obligations: SQLitePCLRaw (Apache-2.0
       §4(a), §4(d)), Skia and ANGLE (BSD-3 §2), FreeType's FTL credit inside `libSkiaSharp`,
       Inter's OFL text. `/usr/share/doc/altim/copyright` currently carries Altim's 21-line MIT
       notice while the package contains the whole .NET runtime — a Debian Policy §12.5 violation.
@@ -41,14 +41,14 @@ No public tag exists yet.
 
 ## Tests that would catch real bugs
 
-- [ ] **`UsageTapePixelTests`** — every other drawn control has one. `UsageTapeSeries`'s own doc
+- [x] **`UsageTapePixelTests`** — every other drawn control has one. `UsageTapeSeries`'s own doc
       says "a null is a gap the line breaks across, never a zero", and the test claiming to guard
       it asserts only that the tape differs from an empty tape, which a tape drawing zeros also
       does. Add `DesignSystem.AssertRendersDifferently` to mirror `AssertRendersAlike` and apply
       per control. This is the same hole that, elsewhere, let a null-drawn-as-zero mutation turn
       exactly one test red out of 700.
 
-- [ ] **`TrayController.BuildTooltip`** — pure, public, static, zero tests, and it is the tray's
+- [x] **`TrayController.BuildTooltip`** — pure, public, static, zero tests, and it is the tray's
       whole enforcement of "unavailable is not zero". It re-implements percent formatting instead
       of using `UsageFormat.Percent`, and truncates at a hard `[..127]` that can cut mid-number.
       Move it to `Altim.Core` (it already takes everything it needs) rather than creating
@@ -63,7 +63,7 @@ No public tag exists yet.
       translation it exists to check; and a dial positive-control that is `Assert.True(true)` on
       two of three iterations — exactly the two colours needing it.
 
-- [ ] **`UsagePacing.Compare` with an expired carry-in.** Delete the `HoldsAt` guard — the class's
+- [x] **`UsagePacing.Compare` with an expired carry-in.** Delete the `HoldsAt` guard — the class's
       own stated priority — and Altim subtracts a level from two windows ago and prints it as this
       window's pacing. Suite stays green.
 
@@ -78,7 +78,7 @@ No public tag exists yet.
       with a temp directory. The autostart round-trip covers the rewrite-not-replace rule that
       currently has only string-level proof.
 
-- [ ] **Icon assets are never asserted to exist.** Tests check `FileName(light, 32)` returns
+- [x] **Icon assets are never asserted to exist.** Tests check `FileName(light, 32)` returns
       `"altim-white-32.png"` but nothing checks the file ships. A size added to an array with no
       PNG, or a PNG dropped from packaging, shows up only as a missing tray icon at run time.
 
@@ -91,6 +91,20 @@ No public tag exists yet.
 - [ ] **Make `PlatformStack.CreateLinux/CreateMacOS` internal.** `ForeignPlatformStackTests` says
       outright that it copies the sequence by hand and therefore cannot catch a service added to
       one stack and not the other.
+
+## Found while doing the above
+
+- **`UsageMapViewModelTests.ConstructionReadsNothingAndASlowStoreDoesNotBlockIt` is a
+  load-dependent flake.** It fails under a loaded machine and passes in isolation. Seen twice.
+- **`altim-white-512.png` and `altim-template-512.png` are 1024x1024.** Waste rather than a
+  broken promise — neither is installed into a size-named directory and the choosers round up
+  and downscale. Rename to `-1024` and add the size, or re-render at 512.
+- **`build-linux.sh`'s `chmod 0755` is a no-op on Git Bash over NTFS**, so cross-building the
+  `.deb` from Windows leaves `/usr/lib/altim/Altim` at 0664. The mitigation its own comment
+  describes only works on a real Linux host.
+- **`UsageFormat.Percent` and `TrayTooltip` format percentages independently**, as do
+  `UsageFormat.NoProviders` and `UsageAggregator.DescribeStatus`. They agree today. The
+  single-implementation fix is for the UI's formatter to delegate to the Core helper.
 
 ## Later
 
