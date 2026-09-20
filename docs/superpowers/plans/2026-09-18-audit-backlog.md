@@ -10,7 +10,7 @@ artefacts across three platforms, so `vpk pack`, `build-linux.sh`, the AppImage 
 the artifact round trip and `gh release create` are all observed to work. The draft is
 `v0.0.1-rc1`, unpublished, so no public tag exists.
 
-**State when this was written, 2026-09-18:**
+**State when this was written, 2026-09-18:** 1,610 tests green on Windows, Ubuntu and macOS. `main` was red —
 the `macOS app bundle` job fails on every push. Zero tags, zero releases, zero artefacts ever
 produced by CI.
 
