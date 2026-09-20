@@ -507,9 +507,9 @@ already said, in colours the palette does not hold, and would break the rule tha
 colour marks identity and nothing else. Drawn at three sizes from one path: 16 beside a label,
 20 in an activity row, 28 where a provider heads a card.
 
-**The path data is the vendors' own outlines, not a drawing of them.** All three come from the
-[Simple Icons](https://simpleicons.org) set, which is CC0 and traces each mark from the
-vendor's own published brand asset. Each was moved onto the 16px box by scale and translation
+**The path data is the vendors' own outlines, not a drawing of them.** All three were traced by
+the [Simple Icons](https://simpleicons.org) set from the vendor's own published brand asset.
+Each was moved onto the 16px box by scale and translation
 alone, so the outline is still the vendor's: the burst is one closed figure of 158 segments,
 the knot is a silhouette with seven counters cut out of it, the star is one closed figure of
 quadratic flanks and three circular arcs. A mark redrawn from memory is a different mark that
@@ -530,6 +530,8 @@ which is what tells it from them at 16px and what balances an `AccentOpenAI` tha
 nearly the ink colour itself; the burst and the star are told apart by everything else, the
 burst covering its box and the star running out along the two axes and tapering.
 
+Two of the three are in that set today and carry no per-icon licence of their own, so the project's CC0 waiver is what applies to them. **The OpenAI mark is not in the set any more.** It was added in July 2020 and removed in November 2025, in simple-icons#13944, because nobody obtained OpenAI's permission to keep it; the maintainers raised the removal in advance and asked contributors to seek permission, and none did. Altim's path was traced from it while it was there. That changes what can honestly be claimed about provenance and changes nothing about the legal footing, because the CC0 waiver never covered OpenAI's trademark in the first place - only Simple Icons' own tracing work. What Altim relies on is nominative use, which is the same thing it relies on for the vendors' names.
+
 All three paths declare `F1`, the non-zero fill rule, because that is the rule SVG applies when
 a file names none and therefore the rule the vendors' own files are drawn under. On this artwork
 it changes nothing — no two subpaths overlap, the knot's counters are nested rather than lapped,
@@ -540,10 +542,11 @@ error and no failing parse.
 
 **Trademarks.** The provider marks are the vendors' own and identify the vendors' own products,
 which is nominative use. Altim claims no endorsement by, or affiliation with, Anthropic, OpenAI
-or Google. No mark is restyled or recoloured beyond the single ink it is drawn in, none is
-combined with Altim's own mark, and none ever stands for Altim. Simple Icons' CC0 waiver
-covers the traced path data and nothing else: the vendors' trademark rights in the marks those
-paths depict are untouched by it. The full notice, including what the MIT licence does not
+or Google. No mark is restyled, none is combined with Altim's own mark, and none ever stands
+for Altim. Each **is** recoloured: the fill is a per-provider accent rather than the
+interface's foreground, and this document said the opposite until TRADEMARKS.md was corrected.
+Simple Icons' CC0 waiver covers the traced path data and nothing else: the vendors' trademark
+rights in the marks those paths depict are untouched by it. The full notice, including what the MIT licence does not
 grant a fork, is in [TRADEMARKS.md](../TRADEMARKS.md).
 
 **Geometry is never held by a view model.** A `Geometry` cannot be built before Avalonia's

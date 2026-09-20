@@ -140,9 +140,14 @@ built for the first time. No public tag exists yet, and nothing is signed.
   credential files unreadable would have proved nothing.
 - ~~Doc comments describing "25/50/75/100 rules" where `UsageTape.Levels` is `[0, 50, 100]`.~~
   Done; one occurrence was left, not three.
-- Verify the three Simple Icons per-icon licence fields; the project's own disclaimer says
-  project-level CC0 does not imply every icon is CC0, and the repo asserts flat CC0 in three
-  places.
+- ~~Verify the three Simple Icons per-icon licence fields.~~ Done, and it found something.
+  `Claude` and `Google Gemini` carry no per-icon `license` field, so the project CC0 waiver is
+  what applies to them — 223 of 3,461 icons carry an override and neither of those does.
+  **`OpenAI` is not in the set at all any more**: added July 2020, removed November 2025 in
+  simple-icons#13944 because nobody obtained OpenAI's permission to keep it. Altim's path was
+  traced from it while it was there. `ProviderIdentity.cs`, `docs/DESIGN.md` and `TRADEMARKS.md`
+  now say so. `docs/DESIGN.md` also still carried the "not recoloured" claim that TRADEMARKS.md
+  had already been corrected for; fixed in the same pass.
 
 ## Needs money or hardware
 

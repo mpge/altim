@@ -23,8 +23,12 @@ Altim does not recognise wears a neutral circle that is nobody's mark.
 
 - Each mark identifies that vendor's product and nothing else. None of them ever stands for Altim,
   and Altim's own mark is the only one used as Altim's identity.
-- The marks are the vendors' own outlines, taken from the [Simple Icons](https://simpleicons.org)
-  set, whose CC0 path data is traced from each vendor's published brand asset. That CC0 waiver
+- The marks are the vendors' own outlines, traced by the [Simple Icons](https://simpleicons.org)
+  set from each vendor's published brand asset. Two of the three are in that set today and carry
+  no per-icon licence of their own. **The OpenAI mark is not in the set any more** — it was added
+  in July 2020 and removed in November 2025, in simple-icons#13944, because nobody obtained
+  OpenAI's permission to keep it; Altim's path was traced from it while it was there. That CC0
+  waiver
   covers the path data and nothing else; it grants no rights in the trademarks the paths depict.
 - **Each mark is filled in one flat colour of Altim's choosing, and that colour is not the
   vendor's.** It is a single accent per provider, drawn from Altim's own palette so the mark sits

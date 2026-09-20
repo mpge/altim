@@ -17,19 +17,31 @@ namespace Altim.UI.Formatting;
 /// </para>
 /// <para>
 /// <strong>The path data is the vendors' own outlines, not a drawing of them.</strong> All
-/// three come from the Simple Icons set, which is CC0 and traces each mark from the vendor's
-/// own published brand asset, and all three were moved onto this box by scale and translation
-/// alone, so the outlines are still the vendors' to four decimal places. A mark drawn from
-/// memory is a different mark that resembles one - which is exactly what the first two
-/// replaced.
+/// three were traced by the Simple Icons set from the vendor's own published brand asset, and
+/// all three were moved onto this box by scale and translation alone, so the outlines are
+/// still the vendors' to four decimal places. A mark drawn from memory is a different mark
+/// that resembles one - which is exactly what the first two replaced.
+/// </para>
+/// <para>
+/// Two of the three are in that set today and carry no per-icon licence of their own, so the
+/// project's CC0 waiver is what applies to them. <strong>The OpenAI mark is not in the set any
+/// more.</strong> It was added in July 2020 and removed in November 2025, in
+/// simple-icons#13944, because nobody obtained OpenAI's permission to keep it: the maintainers
+/// raised the removal in advance and asked contributors to seek permission, and none did.
+/// Altim's path was traced from it while it was there. That changes what can honestly be
+/// claimed about provenance and changes nothing about the legal footing, because the CC0
+/// waiver never covered OpenAI's trademark - only Simple Icons' own tracing work. What Altim
+/// relies on is nominative use, the same thing it relies on for the vendors' names.
 /// </para>
 /// <para>
 /// These marks identify the vendors' own products, which is nominative use. Altim claims no
 /// endorsement by, or affiliation with, Anthropic, OpenAI or Google. No mark is restyled or
-/// combined with Altim's own, and none stands for Altim. Simple Icons' CC0 waiver covers
-/// the traced path data and nothing else: the vendors' trademark rights in the marks those
-/// paths depict are untouched by it. TRADEMARKS.md is the full notice, and says what the MIT
-/// licence does not grant a fork that keeps these paths.
+/// combined with Altim's own, and none stands for Altim. Each is filled in a per-provider
+/// accent rather than the interface's foreground, which is a recolour and is said plainly
+/// here because TRADEMARKS.md used to say otherwise. Simple Icons' CC0 waiver covers the
+/// traced path data and nothing else: the vendors' trademark rights in the marks those paths
+/// depict are untouched by it. TRADEMARKS.md is the full notice, and says what the MIT licence
+/// does not grant a fork that keeps these paths.
 /// </para>
 /// <para>
 /// <strong>Every path fills the 16x16 box exactly, on all four sides.</strong> A shape with
