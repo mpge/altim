@@ -38,9 +38,17 @@
     <ProjectReference Include="..\Altim.Core\Altim.Core.csproj" />
   </ItemGroup>
 
+  <!-- Foundation, not the Microsoft.WindowsAppSDK umbrella. Altim uses exactly one type
+       from the Windows App SDK — AppNotificationManager, plus its builder — and Foundation
+       is the feature package that carries it. The umbrella pulls nine more, and two of them
+       put onnxruntime.dll and DirectML.dll into every publish: 38.5MB of machine-learning
+       runtime in a tray utility that never calls it. Measured on win-x64, the shipped
+       payload goes from 92.1MB in 37 files to 70.6MB in 78, and the notification
+       registration result on a machine without a complete Windows App Runtime is byte for
+       byte the same message it was before. -->
   <ItemGroup Condition="$(TargetFramework.Contains('-windows'))">
     <PackageReference Include="Microsoft.Win32.SystemEvents" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" />
   </ItemGroup>
 
   <!-- Microsoft.WindowsAppSDK brings the MSIX build tooling with it, and its MRT Core
