@@ -7,8 +7,10 @@ signed with a paid certificate yet.
 | Platform | Download | Notes |
 |---|---|---|
 | Windows 10 1809 or later, x64 | `Altim-win-Setup.exe` | Installs per user, no administrator prompt. SmartScreen will warn that the publisher is unknown: choose **More info**, then **Run anyway**. |
+| Windows 11 on arm64 | `Altim-win-arm64-Setup.exe` | The same installer, built on arm64. Snapdragon X and other arm64 PCs. |
 | Windows, no installer | `Altim-win-Portable.zip` | Unpack and run `Altim.exe`. No updates, no Start menu entry. |
 | macOS 12 or later, Apple silicon | `Altim-<version>-arm64.dmg` | Ad-hoc signed, not notarised, so Gatekeeper refuses it on first open: **right-click the app, choose Open**, then Open again. |
+| macOS 12 or later, Intel | `Altim-<version>-x64.dmg` | The same, for pre-2020 Macs. |
 | Debian, Ubuntu | `altim_<version>_amd64.deb` | `sudo apt install ./altim_<version>_amd64.deb` |
 | Fedora, RHEL | `altim-<version>.x86_64.rpm` | `sudo dnf install ./altim-<version>.x86_64.rpm` |
 | Any Linux desktop | `Altim-<version>-x86_64.AppImage` | `chmod +x` it and run it. |
@@ -17,11 +19,27 @@ signed with a paid certificate yet.
 the overflow behind the chevron until you drag it out, so the first launch opens the dashboard once
 to show you where things are. After that it starts quietly unless you turn **Start minimised** off.
 
-Nothing here needs administrator rights, and Altim makes no network requests of its own — see
-[PRIVACY.md](../PRIVACY.md).
+Nothing here needs administrator rights.
 
-**Not yet available:** an Intel macOS build (it builds in CI but is not published yet), `win-arm64`,
-and automatic updates on any platform. Upgrading today means downloading the new release.
+## Updates
+
+Both Windows installers replace themselves. Altim asks GitHub once a day whether a newer release
+exists, downloads it, and installs it the next time it starts. The daily check is a switch on the
+settings page and the **Check now** button beside it works whether the switch is on or off; what
+the request carries, and what it does not, is set out in [PRIVACY.md](../PRIVACY.md).
+
+Every other way of installing Altim reports the newer version and stops there, because replacing
+those is not Altim's to do:
+
+| How you installed it | What happens |
+|---|---|
+| `Altim-win-Setup.exe`, either architecture | Downloads and installs it on the next start |
+| Windows portable zip | Tells you a newer version exists |
+| `.deb`, `.rpm` | Tells you; upgrade through `apt` or `dnf` when a repository exists, or reinstall the new package |
+| AppImage | Tells you; download the new one |
+| macOS DMG | Tells you; drag the new one into Applications |
+
+**Not yet available:** signed artefacts on any platform, and an APT or DNF repository.
 
 ## Platform behaviour
 
@@ -45,7 +63,7 @@ unverified. The same is true of Linux, for the same reason.
 
 | Platform | Artefacts | State |
 |---|---|---|
-| Windows | `Setup.exe`, portable zip, delta updates | built, installed, run and uninstalled on Windows 11 |
+| Windows | `Setup.exe`, portable zip, delta updates, x64 and arm64 | x64 built, installed, run and uninstalled on Windows 11; **arm64 never run** |
 | Linux | AppImage, `.deb`, `.rpm` | packages built and their metadata checked; **never installed or run** |
 | macOS | `.app` and DMG, one per architecture | **no artefact has ever been produced**: the bundle job failed every one of its first eleven runs at the code signature step |
 

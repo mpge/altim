@@ -86,7 +86,16 @@ file is Altim's own to delete.
 
 ## Network activity
 
-Altim itself makes no network requests for usage data.
+Altim itself makes no network requests for usage data, and never has.
+
+It makes exactly one request of its own, and it is not about usage. Once a day, and only while
+**Check for new versions of Altim** is on in Settings, Altim asks GitHub whether a newer release
+of Altim exists. That is an unauthenticated HTTPS GET for the newest release of a public
+repository. It carries an IP address and a user agent naming Altim and its version, which is what
+any HTTPS request carries, and nothing else: no identifier, no usage figure, no provider names, no
+machine details, nothing that could be traced back to the work you do. What comes back is a
+version string. The switch turns the daily check off; the **Check now** button beside it still
+works, because pressing it is you asking rather than Altim asking.
 
 The Gemini CLI integration makes none at all, of any kind: it reads files and looks for a running
 process, and that is the whole of it.
@@ -99,5 +108,9 @@ turn it off in Settings, in which case Altim falls back to reading local session
 
 ## Telemetry
 
-None. Altim has no analytics, no crash reporting service and no update ping beyond what you
-explicitly trigger.
+None. Altim has no analytics and no crash reporting service, and nothing about how you use it
+is measured, recorded off this machine, or sent anywhere.
+
+The daily update check described above is the only request Altim makes, and it is a version
+lookup rather than a ping: it reports nothing, so there is nothing on the other end that could
+count installations, sessions or usage from it. It is off the moment you switch it off.

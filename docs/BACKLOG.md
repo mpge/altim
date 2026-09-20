@@ -25,16 +25,16 @@ No public tag exists yet.
       defaults `true`, and the memory fallback is `AltimSettings.Default`, so a user who switched
       it **off** gets it **on** with no log line.
 
-- [ ] **No update mechanism on any platform.** Velopack is referenced for exactly one call —
+- [x] **No update mechanism on any platform.** Velopack is referenced for exactly one call —
       `VelopackApp.Build().Run()` — so installs happen and updates never do. `UpdateManager` is
       never constructed and no feed URL exists.
 
 - [ ] **`Microsoft.WindowsAppSDK` is proprietary, pulls ~42MB, and the feature does not work.**
       Decide whether to narrow it to the notifications package or drop it.
 
-- [ ] **Intel macOS build is not published.** It builds in CI; the release job does not attach it.
+- [x] **Intel macOS build is not published.** It builds in CI; the release job does not attach it.
 
-- [ ] **`win-arm64` is not built at all.**
+- [x] **`win-arm64` is not built at all.**
 
 ## Tests that would catch real bugs
 

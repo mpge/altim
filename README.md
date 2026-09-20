@@ -30,8 +30,9 @@ question: **what are my AI coding tools consuming right now?**
 
 <div align="center">
 
-[![Windows](https://img.shields.io/badge/Windows-Setup%20.exe-1D4ED8?style=for-the-badge&logo=windows&logoColor=white&labelColor=0A0A0A)](https://github.com/mpge/altim/releases/latest/download/Altim-win-Setup.exe)
-[![macOS](https://img.shields.io/badge/macOS-Apple%20silicon-1D4ED8?style=for-the-badge&logo=apple&logoColor=white&labelColor=0A0A0A)](https://github.com/mpge/altim/releases)
+[![Windows](https://img.shields.io/badge/Windows-x64%20installer-1D4ED8?style=for-the-badge&logo=windows&logoColor=white&labelColor=0A0A0A)](https://github.com/mpge/altim/releases/latest/download/Altim-win-Setup.exe)
+[![Windows arm64](https://img.shields.io/badge/Windows-arm64-1D4ED8?style=for-the-badge&logo=windows&logoColor=white&labelColor=0A0A0A)](https://github.com/mpge/altim/releases/latest/download/Altim-win-arm64-Setup.exe)
+[![macOS](https://img.shields.io/badge/macOS-Intel%20%26%20Apple-1D4ED8?style=for-the-badge&logo=apple&logoColor=white&labelColor=0A0A0A)](https://github.com/mpge/altim/releases)
 [![Ubuntu](https://img.shields.io/badge/Debian-.deb-1D4ED8?style=for-the-badge&logo=debian&logoColor=white&labelColor=0A0A0A)](https://github.com/mpge/altim/releases)
 [![Fedora](https://img.shields.io/badge/Fedora-.rpm-1D4ED8?style=for-the-badge&logo=fedora&logoColor=white&labelColor=0A0A0A)](https://github.com/mpge/altim/releases)
 [![AppImage](https://img.shields.io/badge/AppImage-x86__64-1D4ED8?style=for-the-badge&logo=linux&logoColor=white&labelColor=0A0A0A)](https://github.com/mpge/altim/releases)
@@ -40,8 +41,10 @@ question: **what are my AI coding tools consuming right now?**
 
 Nothing is signed with a paid certificate yet, so Windows shows a SmartScreen warning and macOS
 needs a right-click **Open** the first time. Every release carries a `SHA256SUMS.txt`.
-[INSTALL.md](docs/INSTALL.md) has the per-platform steps, the supported versions, and what is
-not built yet.
+[INSTALL.md](docs/INSTALL.md) has the per-platform steps and the supported versions.
+
+Both Windows installers update themselves. Every other way of installing Altim tells you a newer
+version exists and leaves the upgrade to you.
 
 **Altim lives in the tray**, not in a window. The first launch opens the dashboard once so you
 can find it; after that it starts quietly.
