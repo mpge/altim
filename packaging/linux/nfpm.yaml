@@ -63,9 +63,10 @@ version: @VERSION@
 release: "1"
 section: utils
 priority: optional
-maintainer: Altim <packaging@altim.dev>
+# Not @altim.dev: that domain is not ours, so mail to it would bounce.
+maintainer: mpge <noreply@github.com>
 vendor: Altim
-homepage: https://altim.dev
+homepage: https://github.com/mpge/altim
 license: MIT
 description: |
   AI usage, at a glance.

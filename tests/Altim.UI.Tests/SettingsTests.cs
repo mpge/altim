@@ -713,7 +713,7 @@ public sealed class SettingsTests
                 "Privacy",
                 "About",
                 "Clear usage history",
-                "altim.dev",
+                "github.com/mpge/altim",
                 "Claude Code",
                 "Add Altim's status line to Claude Code");
         }, width: 760d, height: WindowHeight);

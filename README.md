@@ -6,7 +6,7 @@
 
   **AI usage, at a glance.**
 
-  [altim.dev](https://altim.dev)
+  [github.com/mpge/altim](https://github.com/mpge/altim)
 </div>
 
 ---

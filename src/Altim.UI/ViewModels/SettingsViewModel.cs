@@ -278,8 +278,13 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
     /// <summary>The product name.</summary>
     public string AppName => "Altim";
 
-    /// <summary>The product site.</summary>
-    public string Website => "altim.dev";
+    /// <summary>Where the product lives.</summary>
+    /// <remarks>
+    /// The repository, not altim.dev. That domain is not ours: it resolves to a parking page
+    /// offering itself for sale, and sending somebody who clicked "About" to a domain listing
+    /// is worse than sending them nowhere. If it is ever bought, this is one line.
+    /// </remarks>
+    public string Website => "github.com/mpge/altim";
 
     /// <summary>Shown when a write to the settings store failed.</summary>
     public string SaveFailedText => "Settings could not be saved";
