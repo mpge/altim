@@ -54,7 +54,10 @@ local/
 Thumbs.db
 desktop.ini
 
-# Agent skill tooling, installed per machine (see AGENTS.md)
+# Per-machine agent tooling. Kept out of the repository because it is a property of
+# whoever's machine this is, not of Altim (see AGENTS.md).
 .agents/
 .claude/
+.codex/
+.cursor/
 skills-lock.json
