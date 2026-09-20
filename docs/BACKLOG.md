@@ -98,6 +98,36 @@ built for the first time. No public tag exists yet, and nothing is signed.
       a service in two branches and not the third — and kills that mutation where all three of the
       existing tests pass it.
 
+## Decisions taken
+
+Written down so they stop coming back as open questions. Each is reversible and says what would
+reverse it.
+
+- **Automatic update checks default to on.** One unauthenticated HTTPS GET a day for the newest
+  release of a public repository, carrying an IP address and Altim's version and nothing else. It
+  is the only socket Altim opens. The local-first rule is about data — prompts, source, usage,
+  filenames — and none of that is in the request or could be inferred from it. An unsigned desktop
+  application that silently stops receiving fixes is worse for its user than a documented daily
+  request they can switch off in one click, and nothing here ships signed yet. Named in the README
+  privacy section, set out exactly in `PRIVACY.md`, and a toggle beside its own explanation on the
+  settings page. **Reverse it** by changing one initialiser in `AltimSettings`; the three documents
+  have to change in the same commit.
+
+- **The draft releases: `v0.0.1-rc1` deleted, `v0.0.1-rc3` kept, neither published.** rc1 predated
+  the arm64 builder and the DMG fix and carried 12 assets that rc3's 20 supersede; no tag existed
+  for it and the workflow regenerates everything. rc3 stays as the evidence that the pipeline runs
+  end to end. **Publishing is deliberately not automatable**: `release.yml`'s own header says it
+  leaves a draft "for a human to read, check and publish" and that nothing in it publishes a
+  release or moves a tag. That gate is the design, not an unanswered question.
+
+- **The OpenAI glyph stays.** Simple Icons removed it in November 2025 for want of permission,
+  which was their decision about redistributing a mark as a general-purpose asset, not a takedown.
+  Altim's basis for all three marks is nominative use — the same basis as for the vendors' names —
+  and it never rested on the mark being in anyone's icon set. The reasoning is in `TRADEMARKS.md`
+  beside the removal remedy, so a reader meets both together. **Reverse it** the way that document
+  already describes: the marks are paths in one file and one design doc, and neutral geometry is a
+  small self-contained change.
+
 ## Found while doing the above
 
 - **`UsageMapViewModelTests.ConstructionReadsNothingAndASlowStoreDoesNotBlockIt` is a

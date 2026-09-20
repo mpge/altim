@@ -25,11 +25,19 @@ Altim does not recognise wears a neutral circle that is nobody's mark.
   and Altim's own mark is the only one used as Altim's identity.
 - The marks are the vendors' own outlines, traced by the [Simple Icons](https://simpleicons.org)
   set from each vendor's published brand asset. Two of the three are in that set today and carry
-  no per-icon licence of their own. **The OpenAI mark is not in the set any more** — it was added
-  in July 2020 and removed in November 2025, in simple-icons#13944, because nobody obtained
-  OpenAI's permission to keep it; Altim's path was traced from it while it was there. That CC0
-  waiver
-  covers the path data and nothing else; it grants no rights in the trademarks the paths depict.
+  no per-icon licence of their own, so that project's CC0 waiver is what applies to them. That
+  waiver covers the path data and nothing else; it grants no rights in the trademarks the paths
+  depict.
+- **The OpenAI mark is not in that set any more, and Altim keeps using it.** It was added in July
+  2020 and removed in November 2025, in simple-icons#13944, because nobody obtained OpenAI's
+  permission to keep it. Altim's path was traced from it while it was there. Removing it was
+  Simple Icons' decision about redistributing a mark as a general-purpose asset for anyone to
+  use for anything; it was not a takedown, and it is a different act from what Altim does, which
+  is to show a vendor's mark to label that vendor's own product inside a monitor the user is
+  running. The basis for all three marks here is nominative use — the same basis as for the
+  vendors' names, which no licence grants either — and that basis never rested on the mark being
+  in anyone's icon set. If OpenAI asks Altim to stop, Altim will, on the terms in **If you are
+  Anthropic, OpenAI or Google** below.
 - **Each mark is filled in one flat colour of Altim's choosing, and that colour is not the
   vendor's.** It is a single accent per provider, drawn from Altim's own palette so the mark sits
   legibly on both a light and a dark interface, and it therefore differs between the two. An

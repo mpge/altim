@@ -80,7 +80,12 @@ the memory of a running process, so Altim reports its tokens and no percentage a
 
 Local-first by default. Altim reads usage metadata only, stores it in a local SQLite database,
 and never transmits prompts, source code, repository contents, conversation contents, commands or
-filenames anywhere. See [PRIVACY.md](PRIVACY.md).
+filenames anywhere.
+
+Altim opens one socket of its own and it is not about your usage: once a day it asks GitHub
+whether a newer release exists. The request carries an IP address and Altim's version and nothing
+else, it is a switch on the settings page, and turning it off leaves the **Check now** button
+working. [PRIVACY.md](PRIVACY.md) sets out what is read, what is stored and what never leaves.
 
 ## Performance
 
