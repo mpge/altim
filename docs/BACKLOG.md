@@ -3,11 +3,11 @@
 Open work, in the order it matters. Everything here was demonstrated or read out of the code
 rather than inferred; where something is reported rather than verified it says so.
 
-**State, 2026-09-20.** 1,610 tests green on Windows, Ubuntu and macOS, every job green on all
-three including both macOS bundle jobs. The release pipeline has run end to end and produced a
-complete draft with twelve artefacts across three platforms, so `vpk pack`, `build-linux.sh`, the
-AppImage without FUSE, the artefact round trip and `gh release create` are all observed to work.
-No public tag exists yet.
+**State, 2026-09-20, evening.** 1,816 tests green locally, 0 warnings. The release pipeline has
+run end to end three times today and the last one produced a complete draft with **twenty**
+assets across five targets: Windows x64 and arm64 on separate Velopack channels, both macOS
+architectures, and the AppImage, `.deb` and `.rpm`. Windows arm64 and the Intel macOS DMG both
+built for the first time. No public tag exists yet, and nothing is signed.
 
 ---
 
@@ -55,7 +55,7 @@ No public tag exists yet.
       `Altim.App.Tests` — a test project referencing `Altim.App` makes that build mandatory and
       breaks "run the app while running the suite" with MSB3027.
 
-- [ ] **Fix 13 confirmed-vacuous tests.** Including `Assert.Equal(scale.LevelFor(7),
+- [x] **Fix 13 confirmed-vacuous tests.** Including `Assert.Equal(scale.LevelFor(7),
       scale.LevelFor(7))` (literally `x == x`, and the guard it names is covered by no test in the
       repo); a `SnapCentre` test that passes against an implementation ignoring its `thickness`
       argument entirely; a countdown test that greps `AltimRuntime.cs` as text and passes with the
@@ -68,12 +68,15 @@ No public tag exists yet.
       window's pacing. Suite stays green.
 
 - [ ] **Decide what `IsBestEffort` does on screen.** `MetricViewModel` computes and exposes it;
-      nothing consumes it. So a prose-scraped figure and a documented one are byte-identical on
-      screen — while `ClaudeUsageProvider` deliberately holds a stale summary on a failed `/usage`
-      run "labelled best-effort either way", republished with **no reset instant** so it can never
-      expire. Rule 2's only mitigation does not exist.
+      nothing consumes it, so a prose-scraped figure and a documented one are byte-identical on
+      screen. Rule 2's only mitigation still does not exist. The second half of this — the stale
+      summary that could never expire — is fixed: each summary figure now expires against the
+      window it measures, stamped from a successful parse rather than from the rate limiter.
+      What remains is the design call about the label itself. The existing precedent is
+      `ProviderViewModel.ShowsLocalOnlyNotice`: one line on the provider card rather than a mark
+      on every row.
 
-- [ ] **Two existing seams nobody used:** `LinuxAutoStartService` takes an autostart directory and
+- [x] **Two existing seams nobody used:** `LinuxAutoStartService` takes an autostart directory and
       `LinuxProcessMonitor` takes a `/proc` root — both injectable today, both testable on Windows
       with a temp directory. The autostart round-trip covers the rewrite-not-replace rule that
       currently has only string-level proof.
@@ -82,15 +85,20 @@ No public tag exists yet.
       `"altim-white-32.png"` but nothing checks the file ships. A size added to an array with no
       PNG, or a PNG dropped from packaging, shows up only as a missing tray icon at run time.
 
-- [ ] **A Windows test project at the Windows TFM.** Every file in `Altim.Platform.Windows` is
+- [x] **A Windows test project at the Windows TFM.** Every file in `Altim.Platform.Windows` is
       `#if WINDOWS`, and all four test projects are `net10.0`, so the facade they would bind to is
       a literally empty assembly — adding a reference changes nothing. With the right TFM,
       `WindowsAutoStartService.CommandLine` is immediately testable, and a broken quote there
       silently breaks startup for anyone with a space in their install path.
 
-- [ ] **Make `PlatformStack.CreateLinux/CreateMacOS` internal.** `ForeignPlatformStackTests` says
-      outright that it copies the sequence by hand and therefore cannot catch a service added to
-      one stack and not the other.
+- [x] **~~Make `PlatformStack.CreateLinux/CreateMacOS` internal.~~ Won't do, and the gap is closed
+      another way.** Internal would need a test project to reference `Altim.App`, which
+      `ARCHITECTURE.md` forbids and which is what lets the suite run while Altim is running. It
+      would also weaken the test: both methods catch constructor exceptions into a startup report,
+      so a throw and an unsupported service would stop being distinguishable, which is
+      `ForeignPlatformStackTests`' whole purpose. `PlatformStackParityTests` covers the real gap —
+      a service in two branches and not the third — and kills that mutation where all three of the
+      existing tests pass it.
 
 ## Found while doing the above
 
