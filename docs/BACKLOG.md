@@ -29,8 +29,11 @@ No public tag exists yet.
       `VelopackApp.Build().Run()` — so installs happen and updates never do. `UpdateManager` is
       never constructed and no feed URL exists.
 
-- [ ] **`Microsoft.WindowsAppSDK` is proprietary, pulls ~42MB, and the feature does not work.**
-      Decide whether to narrow it to the notifications package or drop it.
+- [x] **`Microsoft.WindowsAppSDK` is proprietary, pulls ~42MB, and the feature does not work.**
+      Narrowed to `Microsoft.WindowsAppSDK.Foundation`. The umbrella was putting
+      `onnxruntime.dll` and `DirectML.dll` into every publish — 38.5MB of inference runtime.
+      win-x64 shipped payload: 92.1MB in 37 files → 70.6MB in 78. Notification registration
+      logs the same line before and after on a machine with no complete Windows App Runtime.
 
 - [x] **Intel macOS build is not published.** It builds in CI; the release job does not attach it.
 

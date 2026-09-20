@@ -13,6 +13,18 @@ one. Those stores grow, so their size is stated beside the figures that depend o
 | **Idle private working set** | < 55MB | **42MB** | 48MB |
 | Idle working set | < 110MB | **98MB** | 147MB |
 | Database | < 5MB/year | **270KB** after 7.4 hours; see below | same file |
+| Installed payload, win-x64 | — | **70.6MB** in 78 files | not comparable |
+
+**The installed payload has no budget, and it had 38.5MB in it that nothing ever called.**
+The Windows notification path uses one type from the Windows App SDK, and the reference was the
+`Microsoft.WindowsAppSDK` umbrella, which pulls nine feature packages. Two of them put
+`onnxruntime.dll` and `DirectML.dll` into every publish — an inference runtime, in a program that
+reads files and draws a percentage. Narrowed to `Microsoft.WindowsAppSDK.Foundation`, which is
+the package notifications actually live in, the payload went from **92.1MB in 37 files to 70.6MB
+in 78**. The file count rises because Foundation brings runtime DLLs the umbrella did not, and
+the net is still 21.5MB smaller. Measured on the publish output with the `.pdb` files excluded,
+since those are not installed. There is no budget on this row yet because no figure here would be
+anything but invented; what there is instead is a number that can be watched.
 
 The memory rows and the cold-start figure were measured on **2026-09-18**, 150 seconds after
 launch with no window ever opened: six interleaved runs of the shipping build, one of the
