@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text;
 using Altim.App.Diagnostics;
 using Altim.Core.Abstractions;
 using Altim.Core.Models;
@@ -12,7 +10,6 @@ using Altim.Providers;
 using Altim.Providers.Claude;
 using Altim.Providers.Codex;
 using Altim.Providers.Gemini;
-using Altim.UI.Formatting;
 
 namespace Altim.App.Tray;
 
@@ -57,12 +54,9 @@ internal sealed class TrayController : IDisposable
     /// </remarks>
     public const string IconMissingIssue = "The tray icon could not be added";
 
-    /// <summary>The shell truncates a tooltip at 128 characters including the terminator.</summary>
-    private const int TooltipLimit = 127;
-
     private readonly ITrayHost _host;
     private readonly StartupReport _report;
-    private string _tooltip = "Altim";
+    private string _tooltip = TrayTooltip.Heading;
     private bool _disposed;
 
     /// <summary>Creates the controller over a tray host.</summary>
@@ -201,7 +195,7 @@ internal sealed class TrayController : IDisposable
         // is no event for it: the host re-adds the icon itself when Explorer restarts.
         SyncIconCondition();
 
-        string tooltip = BuildTooltip(readings);
+        string tooltip = TrayTooltip.Build(readings, DisplayNameFor);
         if (string.Equals(tooltip, _tooltip, StringComparison.Ordinal))
         {
             return;
@@ -233,76 +227,16 @@ internal sealed class TrayController : IDisposable
     }
 
     /// <summary>
-    /// The hover text: the application name, then one line per provider carrying the metric
-    /// closest to its limit.
+    /// The name to put on a provider's tooltip line.
     /// </summary>
-    /// <param name="readings">Every provider's current reading.</param>
+    /// <param name="providerId">The provider's stable identifier.</param>
+    /// <returns>The vendor's own mark, or the id when this build does not know it.</returns>
     /// <remarks>
-    /// <para>
-    /// Nothing is invented. A provider that reported no usable percentage says so, a failed
-    /// reading says it is unavailable, and neither is rendered as a zero.
-    /// </para>
-    /// <para>
-    /// Only the providers this machine has, on the same rule as the panel's rows - see
-    /// <see cref="ProviderVisibility"/>. This is the surface with least room for a line about
-    /// a tool the reader does not own: the shell truncates the whole tooltip at 127
-    /// characters, so a provider that is simply not installed costs one of the three lines
-    /// that fit. <b>A failed reading still takes its line</b>, and an uninstalled provider is
-    /// still reported by the tray's own menu, which carries a disabled line for every
-    /// degraded condition - so nothing is concealed by leaving it out here.
-    /// </para>
+    /// The one thing <see cref="TrayTooltip"/> cannot answer for itself: the marks live in the
+    /// provider projects, which <c>Altim.Core</c> does not reference and must not. It is
+    /// handed over as a lookup, which is the shape <see cref="UsageAggregator.Aggregate"/>
+    /// already takes for the same reason.
     /// </remarks>
-    public static string BuildTooltip(IReadOnlyList<ProviderUsage> readings)
-    {
-        ArgumentNullException.ThrowIfNull(readings);
-
-        if (readings.Count == 0)
-        {
-            return Truncate("Altim\nNo providers configured");
-        }
-
-        var text = new StringBuilder("Altim");
-        int listed = 0;
-
-        foreach (ProviderUsage reading in readings)
-        {
-            if (!ProviderVisibility.IsShown(reading.Status))
-            {
-                continue;
-            }
-
-            listed++;
-            string name = DisplayNameFor(reading.ProviderId);
-
-            if (reading.Status == ProviderStatus.Error)
-            {
-                _ = text.Append('\n').Append(name).Append(" unavailable");
-                continue;
-            }
-
-            UsageOverview overview = UsageAggregator.Aggregate([reading]);
-            if (overview.WorstMetric is { UsedPercent: { } percent } metric)
-            {
-                _ = text.Append('\n').Append(name).Append(' ')
-                    .Append(metric.Label).Append(' ')
-                    .Append(percent.ToString("0", CultureInfo.CurrentCulture)).Append('%');
-            }
-            else
-            {
-                _ = text.Append('\n').Append(name).Append(" not reported");
-            }
-        }
-
-        if (listed == 0)
-        {
-            // Registered but none of them here. The words are the panel's, so the tray and
-            // the panel cannot end up describing the same machine differently.
-            _ = text.Append('\n').Append(UsageFormat.NoProviders);
-        }
-
-        return Truncate(text.ToString());
-    }
-
     private static string DisplayNameFor(string providerId) => providerId switch
     {
         ProviderIds.Claude => ClaudeProviderInfo.DisplayName,
@@ -310,9 +244,6 @@ internal sealed class TrayController : IDisposable
         ProviderIds.Gemini => GeminiProviderInfo.DisplayName,
         _ => providerId,
     };
-
-    private static string Truncate(string text) =>
-        text.Length > TooltipLimit ? text[..TooltipLimit] : text;
 
     private void OnClicked(object? sender, TrayClickEventArgs e) => Activated?.Invoke(this, e);
 

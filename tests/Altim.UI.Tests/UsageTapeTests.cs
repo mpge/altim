@@ -101,25 +101,74 @@ public sealed class UsageTapeTests
     public void RendersATwoPointSeries() =>
         DrawsAPlot(() => new UsageTape { Series = [new UsageTapeSeries("Claude", [10d, 90d])] });
 
-    /// <summary>A gap breaks the line rather than dropping it to zero.</summary>
+    /// <summary>
+    /// A gap breaks the line rather than dropping it to zero.
+    /// </summary>
+    /// <remarks>
+    /// Held against the same run with zeros in the holes, rather than against an empty tape.
+    /// A tape that plotted every null at the foot of the scale is also unlike an empty tape,
+    /// so the comparison this replaced was satisfied by the one implementation it exists to
+    /// refuse. The two pictures are read apart pixel by pixel in
+    /// <see cref="UsageTapePixelTests.AGapIsNotDrawnAsAZero"/>; this is the structural half,
+    /// and the plot assertion is still here so that neither of them can be the empty state.
+    /// </remarks>
     [AvaloniaFact]
-    public void RendersASeriesWithGaps() =>
+    public void RendersASeriesWithGaps()
+    {
         DrawsAPlot(
             () => new UsageTape
             {
                 Series = [new UsageTapeSeries("Claude", [10d, null, 40d, null, null, 80d])],
             });
 
-    /// <summary>Sample counts on both sides of the dot limit draw a plot.</summary>
+        DrawsUnlike(
+            () => new UsageTape { Series = [Perforated(null)] },
+            () => new UsageTape { Series = [Perforated(0d)] });
+    }
+
+    /// <summary>
+    /// Sample dots are drawn below the dot limit and not at or above it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Marking the limit is the only thing the limit does, and it was the one thing these
+    /// five counts did not check. The polyline is drawn whatever the count, so "it drew a
+    /// plot" is true on both sides of the boundary: inverting the guard that suppresses the
+    /// dots passed all five rows, and so did deleting the dots altogether.
+    /// </para>
+    /// <para>
+    /// What is read instead is the one property that can reach nothing but a dot. Nothing
+    /// else in the tape is drawn at <see cref="UsageTape.DotDiameter"/>, so a tape as the
+    /// theme configures it and the same tape with fattened dots paint the same picture
+    /// exactly when no dot was drawn at all. Each count is still asserted to be a plot
+    /// rather than the empty sentence, which is what the rows used to say.
+    /// </para>
+    /// </remarks>
     /// <param name="count">The number of samples.</param>
+    /// <param name="dotted">Whether samples at this count are marked individually.</param>
     [AvaloniaTheory]
-    [InlineData(3)]
-    [InlineData(31)]
-    [InlineData(32)]
-    [InlineData(33)]
-    [InlineData(256)]
-    public void RendersAcrossTheDotLimit(int count) =>
-        DrawsAPlot(() => new UsageTape { Series = [Ramp("Claude", count)] });
+    [InlineData(3, true)]
+    [InlineData(31, true)]
+    [InlineData(32, false)]
+    [InlineData(33, false)]
+    [InlineData(256, false)]
+    public void SampleDotsStopAtTheDotLimit(int count, bool dotted)
+    {
+        DrawsAPlot(AsThemed);
+
+        if (dotted)
+        {
+            DrawsUnlike(AsThemed, Fattened);
+        }
+        else
+        {
+            DrawsAlike(AsThemed, Fattened);
+        }
+
+        UsageTape AsThemed() => new() { Series = [Ramp("Claude", count)] };
+
+        UsageTape Fattened() => new() { Series = [Ramp("Claude", count)], DotDiameter = 12d };
+    }
 
     /// <summary>Two providers, one primary and one secondary, named at the end of each line.</summary>
     [AvaloniaFact]
@@ -295,6 +344,33 @@ public sealed class UsageTapeTests
         Assert.Equal(0, frame.Count(lastColumn, colour => !Ink.Near(colour, Ink.Surface, 24)));
     }
 
+    /// <summary>
+    /// A rising run with every third sample punched out, longer than the dot limit.
+    /// </summary>
+    /// <param name="inHoles">
+    /// What stands at the holes: <see langword="null"/> for a sample the provider never
+    /// reported, or a level for the reading a tape must not invent in its place.
+    /// </param>
+    /// <returns>The series.</returns>
+    /// <remarks>
+    /// Longer than <see cref="UsageTape.DotSampleLimit"/> on purpose. Below the limit the
+    /// tape marks each reported sample with a dot, so a run with holes in it carries fewer
+    /// dots than the same run with levels in the holes, and the two pictures differ whatever
+    /// the line does. A tape reading every null as a zero passed the short version of this
+    /// comparison on the missing dots alone. Above the limit there are no dots and the line
+    /// is the only thing left that can differ.
+    /// </remarks>
+    private static UsageTapeSeries Perforated(double? inHoles)
+    {
+        var values = new double?[UsageTape.DotSampleLimit + 4];
+        for (int i = 0; i < values.Length; i++)
+        {
+            values[i] = i % 3 == 1 ? inHoles : 10d + (i * 2d);
+        }
+
+        return new UsageTapeSeries("Claude", values);
+    }
+
     private static UsageTapeSeries Ramp(string name, int count)
     {
         var values = new double?[count];
@@ -362,6 +438,35 @@ public sealed class UsageTapeTests
                 variant,
                 width: 360d,
                 height: 140d);
+        }
+    }
+
+    /// <summary>
+    /// Two tapes paint different pictures, in both variants.
+    /// </summary>
+    /// <param name="tape">Builds the tape the claim is about.</param>
+    /// <param name="other">Builds the tape it is claimed not to look like.</param>
+    /// <remarks>
+    /// The sharp form of <see cref="DrawsAPlot"/>: the thing on the other side is a tape
+    /// chosen to differ in one decision, rather than the empty tape, which differs in every
+    /// decision and therefore holds none of them.
+    /// </remarks>
+    private static void DrawsUnlike(Func<UsageTape> tape, Func<UsageTape> other)
+    {
+        foreach (ThemeVariant variant in new[] { ThemeVariant.Light, ThemeVariant.Dark })
+        {
+            DesignSystem.AssertRendersUnlike(tape(), other(), variant, width: 360d, height: 140d);
+        }
+    }
+
+    /// <summary>Two tapes paint the same picture, in both variants.</summary>
+    /// <param name="tape">Builds the tape the claim is about.</param>
+    /// <param name="other">Builds the tape it is claimed to look like.</param>
+    private static void DrawsAlike(Func<UsageTape> tape, Func<UsageTape> other)
+    {
+        foreach (ThemeVariant variant in new[] { ThemeVariant.Light, ThemeVariant.Dark })
+        {
+            DesignSystem.AssertRendersAlike(tape(), other(), variant, width: 360d, height: 140d);
         }
     }
 }

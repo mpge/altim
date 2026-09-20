@@ -114,6 +114,118 @@ public sealed class OverviewTests
     }
 
     /// <summary>
+    /// <b>A carry-in whose own window had already rolled over is not a comparison.</b>
+    /// </summary>
+    /// <param name="reportsAReset">
+    /// Whether the stored sample carries the instant its window resets, or only how long that
+    /// window was. Those are the two ways a sample can be found to have run out and they are
+    /// separate branches, so both are walked.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// History is written only when a value changes, so the most recent sample before an
+    /// instant can be from any distance in the past. The one here was taken eleven hours
+    /// before the present, of a five hour window, so by the instant being compared against -
+    /// five hours back - the window it measured had been over for an hour. Its level belongs
+    /// to a window two windows ago, and subtracting it would print the difference between
+    /// this window and one nobody is in any more as though it were this window's pacing.
+    /// </para>
+    /// <para>
+    /// <c>UsagePacing</c> names this as the failure that matters most, and the class had two
+    /// fixtures, neither of which reached it: deleting the two lines that refuse an expired
+    /// carry-in left the whole suite green and Altim printing "+12%" over a comparison it had
+    /// no right to make.
+    /// </para>
+    /// <para>
+    /// An em dash is also what a store holding nothing produces, so on its own this would be
+    /// the right answer for the wrong reason.
+    /// <see cref="ACarryInIsComparedRightUpToTheInstantItsWindowEnds"/> is the other half: it
+    /// moves nothing but the bound and gets a figure, which is what proves the sample here
+    /// was found, offered, and refused.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PacingIgnoresACarryInWhoseWindowHadAlreadyRolledOver(bool reportsAReset)
+    {
+        (double? delta, string text) = await PacingOver(Readings.Sample(
+            ProviderId,
+            "five_hour",
+            Readings.Now.AddHours(-11),
+            50d,
+            TimeSpan.FromHours(5),
+            reportsAReset ? Readings.Now.AddHours(-6) : null));
+
+        Assert.Null(delta);
+        Assert.Equal(UsageFormat.PacingUnknown, text);
+    }
+
+    /// <summary>
+    /// The bound is the end of the window, not the start of it: a level still standing at the
+    /// instant being compared against is the previous window's level, right up to the tick it
+    /// stops being.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two runs of one fixture, differing in one field. The sample is taken at the same
+    /// instant, of the same window, carrying the same level, and only the moment its window
+    /// ends moves - by a single tick, across the instant the comparison is made at. One run
+    /// is a figure and the other is an em dash.
+    /// </para>
+    /// <para>
+    /// That pair says three things no single run can. The store does hand this sample over,
+    /// so the em dash in
+    /// <see cref="PacingIgnoresACarryInWhoseWindowHadAlreadyRolledOver"/> is a refusal rather
+    /// than an empty store. The instant compared against is one window length back, because
+    /// nothing else would put the boundary here. And the test is at the boundary, so a rule
+    /// that admitted a window ending at exactly that instant - which is a window that has
+    /// already ended - would fail.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task ACarryInIsComparedRightUpToTheInstantItsWindowEnds()
+    {
+        DateTimeOffset comparedAgainst = Readings.Now.AddHours(-5);
+
+        (double? standing, string reads) = await PacingOver(Carry(comparedAgainst.AddTicks(1)));
+        Assert.Equal(12d, standing);
+        Assert.Equal("+12%", reads);
+
+        (double? ended, string dash) = await PacingOver(Carry(comparedAgainst));
+        Assert.Null(ended);
+        Assert.Equal(UsageFormat.PacingUnknown, dash);
+
+        static UsageSample Carry(DateTimeOffset resetsAt) => Readings.Sample(
+            ProviderId,
+            "five_hour",
+            Readings.Now.AddHours(-11),
+            50d,
+            TimeSpan.FromHours(5),
+            resetsAt);
+    }
+
+    /// <summary>
+    /// Loads Overview over a store holding one sample, and reports the pacing it settled on.
+    /// </summary>
+    /// <param name="carryIn">The only sample in the store.</param>
+    /// <returns>The row's pacing figure and the words it prints.</returns>
+    private static async Task<(double? Delta, string Text)> PacingOver(UsageSample carryIn)
+    {
+        var provider = new FakeUsageProvider(ProviderId, ProviderName);
+        var history = new FakeHistoryService();
+        history.Add(carryIn);
+
+        using ProviderViewModel row = Row(provider);
+        using var page = new OverviewViewModel([row], history, new TestClock(Readings.Now));
+
+        await page.LoadAsync(TestContext.Current.CancellationToken);
+        await page.FollowingReading;
+
+        return (row.PacingDelta, row.PacingText);
+    }
+
+    /// <summary>
     /// A provider with no history behind it is an em dash, and that is what the em dash is
     /// for. It is here so the test above cannot pass by never producing one.
     /// </summary>
