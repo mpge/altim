@@ -15,6 +15,31 @@ namespace Altim.UI.Formatting;
 /// </remarks>
 public static class UsageFormat
 {
+    /// <summary>
+    /// Said of a single figure Altim derived rather than read: the tooltip and the accessible
+    /// name on that row.
+    /// </summary>
+    /// <remarks>
+    /// Names the act, not the vendor. Every provider this applies to is a different vendor and
+    /// the sentence is the same one, and saying which vendor does not document something reads
+    /// as a complaint about them rather than a caveat about the number.
+    /// </remarks>
+    public const string BestEffortFigure =
+        "Altim worked this out from local files rather than reading it from a figure the " +
+        "vendor states, so it can change without notice.";
+
+    /// <summary>
+    /// Said once on a provider's card when any of its figures is derived rather than read.
+    /// </summary>
+    /// <remarks>
+    /// One line per card rather than a mark on every row, which is the shape
+    /// <c>ShowsLocalOnlyNotice</c> already set: a caption a reader meets once is read, and a
+    /// badge on half the rows is furniture.
+    /// </remarks>
+    public const string BestEffortOnThisCard =
+        "Some figures here are worked out from local files rather than read from a figure the " +
+        "vendor states. Those rows say so.";
+
     /// <summary>Shown in place of a metric the provider does not report.</summary>
     public const string MetricUnavailable = "Not reported by this provider";
 

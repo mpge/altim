@@ -86,6 +86,9 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
     private bool _showsLocalOnlyNotice;
 
     [ObservableProperty]
+    private bool _showsBestEffortNotice;
+
+    [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RetryCommand))]
     private bool _isBusy;
 
@@ -183,6 +186,9 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
 
     /// <summary>The sentence shown when a reading succeeds but carries no metric.</summary>
     public string NoMetricsText => UsageFormat.MetricUnavailable;
+
+    /// <summary>Shown once on the card when any figure on it was derived rather than read.</summary>
+    public string BestEffortText => UsageFormat.BestEffortOnThisCard;
 
     /// <summary>The sentence shown when a provider reports no live session.</summary>
     public string NoActivityText => UsageFormat.NoActivity;
@@ -535,6 +541,11 @@ public sealed partial class ProviderViewModel : ObservableObject, IDisposable
         }
 
         HasMetrics = Metrics.Count > 0;
+
+        // Once per card, whatever the row count. A reader who is told the same thing four
+        // times has been told it none.
+        ShowsBestEffortNotice = Metrics.Any(static m => m.IsBestEffort);
+
         RebuildHeadline();
         RebuildCompactMetrics();
         RebuildReset();

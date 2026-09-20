@@ -20,7 +20,19 @@
     <StyleInclude Source="avares://Altim.UI/Views/Shared.axaml" />
   </UserControl.Styles>
 
-  <StackPanel Spacing="{DynamicResource AltimSpace6}">
+  <!--
+    ToolTip and AutomationProperties.HelpText carry the same sentence, on the whole row rather
+    than on a glyph beside the figure. A row whose number Altim derived rather than read is
+    otherwise identical to one the vendor stated, and a mark small enough not to clutter is
+    small enough to miss; the card above says once that some of these rows are derived, and
+    this is where a reader finds out which.
+
+    Both are bound to a string that is null for a documented figure, so the tooltip does not
+    exist at all on those rows rather than being empty.
+  -->
+  <StackPanel Spacing="{DynamicResource AltimSpace6}"
+              ToolTip.Tip="{Binding ConfidenceNotice}"
+              AutomationProperties.HelpText="{Binding ConfidenceNotice}">
     <Grid ColumnDefinitions="*,Auto">
       <StackPanel Grid.Column="0"
                   Spacing="{DynamicResource AltimSpace2}"

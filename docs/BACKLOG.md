@@ -67,14 +67,12 @@ built for the first time. No public tag exists yet, and nothing is signed.
       own stated priority — and Altim subtracts a level from two windows ago and prints it as this
       window's pacing. Suite stays green.
 
-- [ ] **Decide what `IsBestEffort` does on screen.** `MetricViewModel` computes and exposes it;
-      nothing consumes it, so a prose-scraped figure and a documented one are byte-identical on
-      screen. Rule 2's only mitigation still does not exist. The second half of this — the stale
-      summary that could never expire — is fixed: each summary figure now expires against the
-      window it measures, stamped from a successful parse rather than from the rate limiter.
-      What remains is the design call about the label itself. The existing precedent is
-      `ProviderViewModel.ShowsLocalOnlyNotice`: one line on the provider card rather than a mark
-      on every row.
+- [x] **Decide what `IsBestEffort` does on screen.** One caption per provider card when any of
+      its figures was derived, and the row itself carries the longer sentence on hover and to a
+      screen reader. Same shape as `ShowsLocalOnlyNotice`. A badge on every derived row would be
+      furniture on a card where most rows are derived, which is the Claude case. The other half —
+      a stale summary that could never expire — is fixed separately: each figure now expires
+      against the window it measures.
 
 - [x] **Two existing seams nobody used:** `LinuxAutoStartService` takes an autostart directory and
       `LinuxProcessMonitor` takes a `/proc` root — both injectable today, both testable on Windows

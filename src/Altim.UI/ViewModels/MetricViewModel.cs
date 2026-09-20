@@ -141,6 +141,24 @@ public sealed class MetricViewModel : ObservableObject
     public bool IsBestEffort { get; }
 
     /// <summary>
+    /// Where this figure came from, when that is worth saying, and null when it is not.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is rule 2's mitigation and for a long time it did not exist:
+    /// <see cref="IsBestEffort"/> was computed, exposed, and read by nothing, so a figure
+    /// Altim had worked out of prose and one the vendor stated were byte for byte the same on
+    /// screen. A reader cannot weigh a number they have not been told the provenance of.
+    /// </para>
+    /// <para>
+    /// Null for a documented figure rather than a reassuring sentence. Most rows are
+    /// documented, and a caption under every one of them would be noise that teaches a reader
+    /// to stop looking — which would cost exactly the rows this exists for.
+    /// </para>
+    /// </remarks>
+    public string? ConfidenceNotice => IsBestEffort ? UsageFormat.BestEffortFigure : null;
+
+    /// <summary>
     /// Re-measures the reported reset instant against the clock.
     /// </summary>
     /// <returns>

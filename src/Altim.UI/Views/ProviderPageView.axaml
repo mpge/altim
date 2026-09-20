@@ -169,6 +169,16 @@
                    Theme="{DynamicResource AltimCaptionText}"
                    TextWrapping="Wrap"
                    Text="{Binding Provider.LocalOnlyText}" />
+
+        <!--
+          Rule 2's mitigation, said once rather than per row. A figure Altim derived and one
+          the vendor states look identical otherwise, and the rows themselves carry the
+          longer sentence on hover and to a screen reader.
+        -->
+        <TextBlock IsVisible="{Binding Provider.ShowsBestEffortNotice}"
+                   Theme="{DynamicResource AltimCaptionText}"
+                   TextWrapping="Wrap"
+                   Text="{Binding Provider.BestEffortText}" />
       </StackPanel>
 
     </StackPanel>
