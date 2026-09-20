@@ -30,6 +30,12 @@
     A Windows runtime identifier: win-x64 (default) or win-arm64. Native AOT cannot
     cross-compile, so win-arm64 has to be built on an arm64 host.
 
+.PARAMETER Channel
+    The Velopack release channel. Defaults to 'win' for win-x64 and 'win-arm64' for
+    win-arm64, which is what keeps the two architectures' artefacts from sharing
+    filenames and their update feeds from overwriting each other. vpk does NOT derive
+    this from -Runtime; it derives it from the host, so it has to be passed.
+
 .PARAMETER OutputDir
     Where the release lands, and where previous releases are read from for delta
     generation. Defaults to dist/windows at the repository root.
@@ -54,6 +60,7 @@ param(
     [string]$Version,
     [ValidateSet('win-x64', 'win-arm64')]
     [string]$Runtime = 'win-x64',
+    [string]$Channel,
     [string]$OutputDir,
     [string]$PublishDir,
     [string]$SignParams,
@@ -71,6 +78,7 @@ $repoRoot = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
 $project = Join-Path $repoRoot 'src/Altim.App/Altim.App.csproj'
 $icon = Join-Path $repoRoot 'assets/icons/altim.ico'
 
+if (-not $Channel) { $Channel = if ($Runtime -eq 'win-x64') { 'win' } else { $Runtime } }
 if (-not $OutputDir) { $OutputDir = Join-Path $repoRoot "dist/windows/$Runtime" }
 if (-not $PublishDir) { $PublishDir = Join-Path $repoRoot "dist/.publish/$Runtime" }
 
@@ -137,6 +145,32 @@ if (Test-Path (Join-Path $PublishDir 'Altim.dll')) {
 }
 
 # ---------------------------------------------------------------------------
+# Notices
+# ---------------------------------------------------------------------------
+# vpk packs whatever is in -packDir, so the licence and the third-party notices
+# have to be in the publish directory before it runs. They then land in the install
+# directory beside Altim.exe and inside Altim-win-Portable.zip.
+#
+# This matters more on Windows than anywhere else. The publish is Native AOT: the
+# .NET 10 runtime, Avalonia, SQLitePCLRaw, SkiaSharp's managed half and the Inter
+# typeface are all inside Altim.exe, and there is nothing in that file a recipient
+# can open to discover it. THIRD-PARTY-NOTICES.md is the only thing in the package
+# that says what is in there.
+#
+# Missing is fatal rather than a warning. A release that ships without it is one
+# that breaches Apache-2.0 section 4, BSD-3-Clause clause 2 and about twenty MIT
+# notices at once, and it is not worth a quiet build.
+$notices = Join-Path $repoRoot 'THIRD-PARTY-NOTICES.md'
+if (-not (Test-Path $notices)) {
+    throw ("No THIRD-PARTY-NOTICES.md at $repoRoot. Generate it with " +
+           "packaging/notices/build-notices.py; see packaging/README.md, " +
+           "'Third-party notices'.")
+}
+Write-Step 'Copying LICENSE and THIRD-PARTY-NOTICES.md in beside Altim.exe'
+Copy-Item (Join-Path $repoRoot 'LICENSE') (Join-Path $PublishDir 'LICENSE') -Force
+Copy-Item $notices (Join-Path $PublishDir 'THIRD-PARTY-NOTICES.md') -Force
+
+# ---------------------------------------------------------------------------
 # Pack
 # ---------------------------------------------------------------------------
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
@@ -159,6 +193,15 @@ $packArgs = @(
     '--icon', $icon
     '--outputDir', $OutputDir
     '--runtime', $Runtime
+    # Stated rather than inferred, and this is not cosmetic. vpk derives the channel from
+    # the host it runs on, not from -Runtime, so packing win-arm64 on an arm64 runner
+    # produced a release in channel 'win': the same Altim-win-Setup.exe, the same
+    # releases.win.json and the same Altim-<version>-full.nupkg as the x64 build, every
+    # filename identical. Attaching both to one release means one architecture's payload
+    # is served under the other's name to every installed copy on that channel. The
+    # release workflow's collect step refuses a duplicate filename, which is how this was
+    # found; naming the channel is what stops it happening.
+    '--channel', $Channel
     # Altim lives in the tray and starts at login. A Start menu entry is how you
     # find it the first time; a desktop icon for a process with no main window is
     # clutter, so the Velopack default of Desktop,StartMenuRoot is narrowed.

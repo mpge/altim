@@ -128,6 +128,11 @@ Tests here are expected to *discriminate*, not merely pass.
 - The repository is public and MIT licensed. The vendor marks in
   `src/Altim.UI/Formatting/ProviderIdentity.cs` are the vendors' trademarks, used nominatively;
   `TRADEMARKS.md` is the notice and the MIT grant does not extend to them.
+- **`THIRD-PARTY-NOTICES.md` is generated and ships inside every artefact.** Never hand-edit it;
+  the next regeneration discards the edit. Adding, removing or bumping a distributed package
+  changes what a recipient is handed, so rerun `packaging/notices/build-notices.py` in the same
+  commit. It fails rather than guessing if a file turns up in a publish that nothing accounts for.
+  `packaging/README.md`, "Third-party notices", has the procedure.
 - No em dashes in product copy.
 
 ## When a plan or a brief is wrong

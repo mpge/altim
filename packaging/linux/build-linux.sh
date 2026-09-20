@@ -46,6 +46,16 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 PROJECT="src/Altim.App/Altim.App.csproj"
+NOTICES="THIRD-PARTY-NOTICES.md"
+
+# Checked before anything is built. Every artefact this script produces has to
+# carry the notices, so finding them missing after a ninety second publish and a
+# package build helps nobody.
+if [ ! -f "$NOTICES" ]; then
+    echo "no $NOTICES at the repository root." >&2
+    echo "Generate it with packaging/notices/build-notices.py; see packaging/README.md." >&2
+    exit 1
+fi
 
 if [ -z "$VERSION" ]; then
     VERSION="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$PROJECT" | head -n 1)"
@@ -121,6 +131,17 @@ if [ "$SKIP_APPIMAGE" -eq 0 ]; then
     install -m 0644 packaging/linux/altim.desktop "$APPDIR/altim.desktop"
     install -m 0644 packaging/linux/altim.desktop "$APPDIR/usr/share/applications/altim.desktop"
 
+    # An AppImage has no package manager behind it and no /usr/share/doc to read,
+    # so the licence and the notices go at the root of the image where mounting or
+    # extracting it puts them in front of you. The same two files also go under
+    # usr/share/doc/altim, so the path is the one the .deb and .rpm use and a
+    # script does not have to know which artefact it is looking at.
+    install -m 0644 LICENSE "$APPDIR/LICENSE"
+    install -m 0644 "$NOTICES" "$APPDIR/$NOTICES"
+    mkdir -p "$APPDIR/usr/share/doc/altim"
+    install -m 0644 LICENSE "$APPDIR/usr/share/doc/altim/LICENSE"
+    install -m 0644 "$NOTICES" "$APPDIR/usr/share/doc/altim/$NOTICES"
+
     for size in 16 24 32 48 64 128 256 512; do
         mkdir -p "$APPDIR/usr/share/icons/hicolor/${size}x${size}/apps"
         install -m 0644 "assets/icons/altim-${size}.png" \
@@ -158,6 +179,64 @@ fi
 # .deb and .rpm
 # ---------------------------------------------------------------------------
 if [ "$SKIP_PACKAGES" -eq 0 ]; then
+    # -----------------------------------------------------------------------
+    # /usr/share/doc/altim/copyright
+    # -----------------------------------------------------------------------
+    # Debian Policy 12.5 wants a verbatim copy of the copyright information and
+    # the distribution licence of everything in the binary package. This package
+    # is mostly other people's software: the whole .NET 10 runtime, Avalonia,
+    # Skia, HarfBuzz, SQLite and the Inter typeface all install under
+    # /usr/lib/altim. Shipping Altim's own MIT notice as the whole answer, which
+    # is what a bare `src: LICENSE` did, was not one.
+    #
+    # Assembled here rather than committed, so there is one source of truth for
+    # the notices and this file cannot drift from it.
+    COPYRIGHT="$REPO_ROOT/dist/.copyright"
+    step "Assembling $(basename "$COPYRIGHT")"
+    {
+        cat <<'HEADER'
+Altim
+Upstream-Name: Altim
+Source: https://github.com/mpge/altim
+
+This package contains a self-contained build of Altim, which means Altim's own code
+is a small part of what it installs. The whole .NET 10 runtime, Avalonia, Skia,
+HarfBuzz, SQLite through SQLitePCLRaw and the Inter typeface are all under
+/usr/lib/altim, as their own files or compiled into somebody else's.
+
+Everything below is therefore here: Altim's own MIT grant first, then a
+component-by-component account of the rest with the full text of every licence and
+every upstream notice file reproduced unchanged.
+
+This is plain text and not the machine-readable format at
+https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/. That format wants
+one Files paragraph with one Copyright and one License short name for each path, and
+several paths here are one binary carrying a dozen licences: /usr/lib/altim/libSkiaSharp.so
+by itself is Skia, FreeType, libpng, zlib, expat, libjpeg-turbo and libwebp. Reducing
+that to a single short name would assert something untrue, and the format offers no
+honest way to write "and fifteen others, named below". These stanzas are accurate;
+they are simply not parseable.
+
+The common licences are copied out in full rather than referenced from
+/usr/share/common-licenses. This package is built with nfpm and installed outside the
+Debian archive, so nothing guarantees that directory exists on the machine it lands on.
+
+================================================================================
+Altim itself
+================================================================================
+
+HEADER
+        cat LICENSE
+        cat <<'SEPARATOR'
+
+================================================================================
+Everything else in this package
+================================================================================
+
+SEPARATOR
+        cat "$NOTICES"
+    } > "$COPYRIGHT"
+
     NFPM="$TOOLS/nfpm-${NFPM_TOOL_VERSION}/nfpm"
     if [ ! -x "$NFPM" ]; then
         step "Fetching nfpm $NFPM_TOOL_VERSION"

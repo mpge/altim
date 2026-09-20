@@ -27,8 +27,12 @@ a local run and a CI run produce the same thing.
 | macOS: `build-macos.sh`, the `.app` and the DMG | **has never completed once.** The `macos-bundle` job failed all eleven times it ran, every one of them at the `codesign` bundle seal, so no `.app`, no DMG and no artefact has ever existed, and `verify-bundle.sh` has never read a bundle back. See "The bundle seal" below. |
 | macOS: installing, launching or signing anything | **never executed** — no Apple Developer account, and a runner has no menu bar |
 | `release.yml`, `build.yml` | `actionlint` clean as of the last run that had it. The macOS changes of 2026-09-19 have not been through it; they do parse as YAML. |
+| `THIRD-PARTY-NOTICES.md` reaching the Windows artefacts | **verified on Windows 11 26200** - generated from all three publishes, packed with `vpk` 1.2.0, and read back out of `Altim-win-Portable.zip` (`current/`) and `Altim-0.1.0-full.nupkg` (`lib/app/`), 644,168 bytes and SHA-256 identical to the copy in the repository. |
+| `/usr/share/doc/altim/copyright` reaching the `.deb` | **verified** - `build-linux.sh` assembled `dist/.copyright`, nfpm 2.47.0 built the package, and the `data.tar.xz` was read back: one entry at `./usr/share/doc/altim/copyright`, 647,049 bytes, mode 0644, carrying the OFL, Apache-2.0, the FTL, Skia's BSD-3, SQLite's dedication and Altim's own MIT. The `.rpm` was built from the same configuration and not opened. |
+| The AppImage and macOS copies | **never executed**, like everything else in those two rows. They are wired the same way and `bash -n` passes. |
 | `build-linux.sh` | `shellcheck --severity=style` clean |
 | `build-macos.sh`, `verify-bundle.sh` | `bash -n` only. shellcheck was not installed on the machine they were last changed on, so the row above does not cover them. |
+| The notices changes of 2026-09-20, in all three scripts | `bash -n` only. shellcheck is still not installed here, so the `build-linux.sh` row above does **not** extend to them. |
 
 Lint-clean is not the same as correct. The macOS rows used to say a bundle was
 produced on every push and read back; that was never true, and it is corrected
@@ -284,42 +288,70 @@ that have a complete runtime, and have first-run onboarding say that notificatio
 need the Windows App Runtime and where to get it. The first of those is written up
 under "Known gaps"; the other two are product decisions.
 
+That decision survived the package narrowing below, but only because the narrowing
+kept `Microsoft.WindowsAppSDK.Runtime`. Referencing `.Foundation` on its own turns
+`WindowsAppSDKSelfContained` on, which puts the whole runtime in the payload — the
+opposite of what this section decided, arrived at by leaving a package out rather than
+by anybody choosing it. See "Package size".
+
 ---
 
 
 ## Package size
 
-The Windows payload is **89.5MB** (`Altim.exe` alone is 28.25MB of Native AOT), and
-the installer is **44.4MB** compressed.
+Measured on the `win-x64` publish output with the `.pdb` files excluded, since those are
+not installed. `vpk pack` then drops them for you and adds `Update.exe`.
 
-**40.3MB of that payload is Windows App SDK machinery Altim never touches**:
+| | Payload | Files |
+|---|---|---|
+| With the `Microsoft.WindowsAppSDK` umbrella | 92.1MB | 37 |
+| With the three feature packages, as now | **51.7MB** | **32** |
 
-| File | Size | Comes from |
+**40.4MB of the old payload was Windows App SDK machinery Altim never touches**, and it
+arrived because `Directory.Packages.props` pinned the **metapackage**, which depends on
+`.ML`, `.AI`, `.WinUI`, `.Widgets` and `.Search`:
+
+| File | Size | Came from |
 |---|---|---|
 | `onnxruntime.dll` | 20.66MB | `Microsoft.Windows.AI.MachineLearning`, via `Microsoft.WindowsAppSDK.ML` |
 | `DirectML.dll` | 17.83MB | as above |
 | `Microsoft.Windows.AI.MachineLearning.dll` | 0.86MB | as above |
 | `Microsoft.Web.WebView2.Core.dll`, `WebView2Loader.dll` | 0.91MB | `Microsoft.Web.WebView2`, via `Microsoft.WindowsAppSDK.WinUI` |
 
-They arrive because `Directory.Packages.props` pins the `Microsoft.WindowsAppSDK`
-**metapackage**, which depends on `.ML`, `.AI`, `.WinUI`, `.Widgets` and `.Search`.
 Altim uses one namespace from one of those components,
-`Microsoft.Windows.AppNotifications`, which lives in `.Foundation`.
+`Microsoft.Windows.AppNotifications`, which lives in `.Foundation`. The references are now:
 
-Packaging deliberately does **not** strip these with an exclude rule: what
-`dotnet publish` produces and what the installer contains should be the same set of
-files, or a bug that only reproduces from the installer becomes possible. The fix
-belongs one level up, in the package references:
-
-```diff
-- <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
-+ <PackageVersion Include="Microsoft.WindowsAppSDK.Foundation" Version="2.3.9" />
-+ <PackageVersion Include="Microsoft.WindowsAppSDK.Runtime" Version="2.4.0" />
+```xml
+<PackageReference Include="Microsoft.WindowsAppSDK.Foundation" />
+<PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" />
+<PackageReference Include="Microsoft.WindowsAppSDK.Runtime" />
 ```
 
-with the matching change in `src/Altim.Platform.Windows/Altim.Platform.Windows.csproj`.
-Neither `.Foundation` nor `.Runtime` depends on `.ML`, `.AI` or `.WinUI`, so the
-40.3MB goes away. Verify with a publish and a file listing before believing it.
+**All three are load-bearing, and finding out cost two publishes.** `.Foundation` alone
+does remove the 40MB, but it also defaults to `WindowsAppSDKSelfContained`: the payload
+comes back to 70.6MB in **78** files as the whole Windows App Runtime is binplaced into
+the output, and a RID-less `dotnet build Altim.sln` — the documented build command —
+fails outright with *"WindowsAppSDKSelfContained requires a supported Windows
+architecture"*. `.Runtime` is what makes the build framework-dependent again, which is
+the decision recorded under "The Windows App Runtime, and why the package does not carry
+it" above. `.InteractiveExperiences` is pinned to 2.1.6 because `.Foundation` 2.3.9 asks
+for 2.1.3 and `.Runtime` 2.4.0 refuses to build against anything older; the umbrella had
+been resolving that conflict silently.
+
+Packaging deliberately does **not** strip anything with an exclude rule: what
+`dotnet publish` produces and what the installer contains should be the same set of
+files, or a bug that only reproduces from the installer becomes possible. The fix belongs
+one level up, in the package references, and that is where it is.
+
+**Notification behaviour is unchanged, and this was checked rather than assumed.** The
+verification machine has the 2.4.0 framework package and no 2.x Main package, so
+registration fails there and always has. The umbrella build and the narrowed build were
+each run on it and each logged the same line:
+
+```
+[notifications] AppNotificationManager.Register failed: The notification platform is
+                unavailable, so usage alerts are off (COMException).
+```
 
 ---
 
@@ -760,6 +792,137 @@ check on offer.
 `appimagetool --sign` can embed a GPG signature in an AppImage; it is not wired up
 because a signature nobody can check against a published key is theatre. Publishing
 a key first, then wiring it, is the order to do that in.
+
+---
+
+## Third-party notices
+
+`THIRD-PARTY-NOTICES.md` at the repository root is the notice for everything Altim
+redistributes. All three artefacts carry a copy:
+
+| Artefact | Where it lands |
+|---|---|
+| Windows installer, portable zip | beside `Altim.exe` in the install directory. `build-windows.ps1` copies it into the publish directory before `vpk pack`, because `vpk` packs whatever is in `--packDir`. |
+| AppImage | the AppDir root, and `usr/share/doc/altim/` inside the image |
+| `.deb`, `.rpm` | `/usr/share/doc/altim/copyright`, which `build-linux.sh` assembles from `LICENSE` plus the notices |
+| macOS `.app`, DMG | `Contents/Resources/`, where the bundle seal covers it |
+
+All three scripts stop before building anything if the file is not there, because
+finding out after a Native AOT compile helps nobody.
+
+### Why
+
+Altim is MIT and public and ships a great deal of other people's code. Until this
+was wired there was no notices file anywhere in the repository and not one of the
+three scripts copied a licence into an artefact. Unmet, and now met:
+
+- **SQLitePCLRaw** is Apache-2.0. Section 4(a) wants the licence copy and 4(d) wants
+  the project's `NOTICE`. Neither is inside any of the four packages, so both are
+  committed under `packaging/notices/texts/`, taken from the `v2.1.12` tag the
+  shipped build came from.
+- **Skia**, and the **ANGLE** in `av_libglesv2.dll`, are BSD-3-Clause, whose clause 2
+  wants reproduction in the materials accompanying a binary distribution.
+- **FreeType** wants the FTL credit. Which artefacts owe it was measured rather than
+  assumed: `libSkiaSharp.so` carries the `FT_` symbols and every FreeType module
+  name, `libSkiaSharp.dll` carries none of them and resolves `DWriteCreateFactory`
+  instead, and `libSkiaSharp.dylib` uses CoreText. **It is a Linux-only obligation**,
+  and the notices file says so rather than claiming all three.
+- **Inter** ships embedded in `Avalonia.Fonts.Inter.dll` under the SIL OFL 1.1. Its
+  copyright line is in the font's own `name` table, so that half was already met; the
+  terms were nowhere. The committed copy is the one from the `v3.19` tag, which is
+  the `Version 3.019` the shipped font reports.
+- Around twenty MIT notices, which the same file cures.
+
+`/usr/share/doc/altim/copyright` was separately a Debian Policy 12.5 problem: it held
+Altim's own 21-line MIT notice, `src: LICENSE` in `nfpm.yaml`, while the package
+installs the whole .NET 10 runtime, Skia, HarfBuzz, SQLite and Inter under
+`/usr/lib/altim`.
+
+Windows is where it matters most. That publish is Native AOT, so the runtime,
+Avalonia, the SQLite provider and the typeface are all inside one `Altim.exe`, and a
+recipient of that file has no mechanism at all for finding out what is in it.
+
+### Regenerating
+
+Do not edit `THIRD-PARTY-NOTICES.md`; the next regeneration discards the edit.
+
+```
+dotnet publish src/Altim.App -c Release -r win-x64   --self-contained -o dist/.publish/win-x64
+dotnet publish src/Altim.App -c Release -r linux-x64 --self-contained -p:AltimPortableBuild=true -p:DebugType=none --artifacts-path dist/.art/linux -o dist/.publish/linux-x64
+dotnet publish src/Altim.App -c Release -r osx-arm64 --self-contained -p:AltimPortableBuild=true -p:DebugType=none --artifacts-path dist/.art/osx -o dist/.publish/osx-arm64
+
+python packaging/notices/build-notices.py
+```
+
+Regenerate after any dependency change. The output is a pure function of the three
+publishes, the NuGet cache and the script, so regenerating without changing anything
+produces identical bytes; `--check` compares instead of writing and exits 1 when the
+file is stale, which is enough to make it a CI step.
+
+The Windows publish has to run on Windows. Native AOT does not cross-compile, and it
+is the Windows target framework that decides which packages are in the graph at all:
+that is why the Windows list is the long one and Linux and macOS resolve the same 29.
+
+### Why the list comes from a publish
+
+From `Altim.deps.json`, not from the project files, because the two sets differ.
+`Directory.Packages.props` names test-only packages, `Avalonia.BuildServices` and
+`Microsoft.NET.ILLink.Tasks` are build tooling, and `AvaloniaUI.DiagnosticsSupport` is
+`IncludeAssets=none` outside Debug. None of them reach an artefact, so none of them
+belong in a notice.
+
+Each publish directory is then read back file by file and matched against that graph.
+**A file nothing accounts for fails the run**, which is what stops a new native payload
+turning up in an artefact with no notice. It has already earned its keep: it caught the
+move from the `Microsoft.WindowsAppSDK` umbrella to `.Foundation` within minutes of that
+change landing, because the publish it was reading no longer matched the graph.
+
+Two kinds of file need help to pass it. A few are placed by MSBuild targets inside their
+own packages and have no `deps.json` entry at all, so `UNDECLARED_PAYLOAD` names them
+with the package that placed them. The Windows App Runtime is the other kind: running the
+SDK self-contained copies about fifty DLLs, WinMDs and `.pri` files out of
+`runtimes-framework/` trees, and listing those by name would be a list that rots the
+first time Microsoft moves a file. `FRAMEWORK_PAYLOAD_PACKAGES` names the packages
+instead, and a file is attributed when it is literally inside one of them at the version
+the publish resolved.
+
+### Why the `.nuspec` and not `nuget-license`
+
+`nuget-license` 4.0.17 was installed and run, and it agrees with the generator on
+every package that declares an SPDX expression. It is not what the generator uses,
+for one specific reason. For `Avalonia.Angle.Windows.Natives` and
+`Microsoft.Web.WebView2` it reports `License: BSD-3-Clause`; neither package declares
+that. Both declare `<license type="file">`, and the tool inferred an identifier from a
+deprecated `licenseUrl`. Both texts are BSD-3-Clause in substance, so the guess is a
+good one, but a notices file that prints an SPDX identifier nobody asserted is doing
+the exact thing it exists to avoid. The generator reads the `.nuspec`, reports a file
+licence as a file licence, and reproduces the file.
+
+### Why `copyright` is plain text and not DEP-5
+
+The machine-readable format wants a `Files` paragraph with one `Copyright` and one
+`License` short name per path. Several paths here are one binary carrying a dozen
+licences: `/usr/lib/altim/libSkiaSharp.so` by itself is Skia, FreeType, libpng, zlib,
+expat, libjpeg-turbo and libwebp. Reducing that to a single short name would assert
+something untrue, and the format offers no honest way to write "and fifteen others,
+named below". The stanzas are accurate; they are simply not parseable.
+
+### It is 644KB, and most of that is three files
+
+The Windows App SDK notice is 335KB, SkiaSharp's is 140KB and the .NET runtime's is
+77KB, all reproduced whole. That is deliberate: they are upstream's statements about
+the binaries Altim redistributes, and editing one down to the sections that look
+relevant would mean guessing on somebody else's behalf. SkiaSharp's, for instance,
+names SDL, Dear ImGui and libmicrohttpd, which a shipped Skia is unlikely to contain;
+the file says as much under "What this file does not establish" rather than quietly
+cutting them.
+
+Sections appear only when the component ships. Moving from the `Microsoft.WindowsAppSDK`
+umbrella to `.Foundation` took `Microsoft.Windows.AI.MachineLearning` and
+`Microsoft.Web.WebView2` out of the Windows publish, and their licences and the 325KB
+Windows ML notice left this file on the next regeneration without anybody editing it.
+Reproducing the Windows ML terms after that payload had gone would have asserted that
+Altim carries an inference runtime it does not.
 
 ---
 

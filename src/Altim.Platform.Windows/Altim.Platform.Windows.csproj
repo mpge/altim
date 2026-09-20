@@ -38,17 +38,32 @@
     <ProjectReference Include="..\Altim.Core\Altim.Core.csproj" />
   </ItemGroup>
 
-  <!-- Foundation, not the Microsoft.WindowsAppSDK umbrella. Altim uses exactly one type
-       from the Windows App SDK — AppNotificationManager, plus its builder — and Foundation
-       is the feature package that carries it. The umbrella pulls nine more, and two of them
-       put onnxruntime.dll and DirectML.dll into every publish: 38.5MB of machine-learning
-       runtime in a tray utility that never calls it. Measured on win-x64, the shipped
-       payload goes from 92.1MB in 37 files to 70.6MB in 78, and the notification
-       registration result on a machine without a complete Windows App Runtime is byte for
-       byte the same message it was before. -->
+  <!-- Three feature packages, not the Microsoft.WindowsAppSDK umbrella. Altim uses exactly
+       one type from the Windows App SDK — AppNotificationManager, plus its builder — and
+       Foundation is the package that carries it. The umbrella pulls nine more, and two of
+       them put onnxruntime.dll and DirectML.dll into every publish: 38.5MB of inference
+       runtime in a program that reads files and draws a percentage.
+
+       The other two references are not optional decoration:
+
+         .Runtime is what makes this framework-dependent, which is the decision
+         packaging/README.md already recorded. Foundation on its own defaults to
+         WindowsAppSDKSelfContained, which binplaces 46 runtime files into the output and
+         makes a RID-less `dotnet build Altim.sln` fail outright with "requires a supported
+         Windows architecture" — the documented build command.
+
+         .InteractiveExperiences is pinned to 2.1.6 because Foundation 2.3.9 asks for 2.1.3
+         and .Runtime 2.4.0 refuses to build against anything older than 2.1.6. The umbrella
+         was resolving that conflict; without it the pin has to be here.
+
+       Measured on win-x64, shipped payload excluding .pdb: 92.1MB in 37 files with the
+       umbrella, 51.7MB in 32 without it. The notification registration line on a machine
+       with no complete Windows App Runtime is byte for byte the same before and after. -->
   <ItemGroup Condition="$(TargetFramework.Contains('-windows'))">
     <PackageReference Include="Microsoft.Win32.SystemEvents" />
     <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" />
   </ItemGroup>
 
   <!-- Microsoft.WindowsAppSDK brings the MSIX build tooling with it, and its MRT Core

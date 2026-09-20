@@ -155,6 +155,7 @@ jobs:
           $params = @{
             Version   = $env:VERSION
             Runtime   = '${{ matrix.runtime }}'
+            Channel   = '${{ matrix.channel }}'
             OutputDir = 'dist/windows/${{ matrix.runtime }}'
           }
           if ($env:WINDOWS_SIGN_PARAMS) { $params.SignParams = $env:WINDOWS_SIGN_PARAMS }

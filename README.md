@@ -122,7 +122,13 @@ the repository layout and how to add a provider.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). That covers Altim's own code.
+
+Every build also carries a great deal of other people's software: the whole .NET 10 runtime,
+Avalonia, Skia, HarfBuzz, SQLite and the Inter typeface, and on Windows all of it is compiled
+into the same `Altim.exe`. [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) is the notice for
+all of it, and a copy ships inside every artefact. It is generated; `packaging/README.md`,
+"Third-party notices", says from what and how to regenerate it.
 
 ## Trademarks
 

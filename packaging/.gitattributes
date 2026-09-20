@@ -7,3 +7,9 @@ AppRun      text eol=lf
 *.yaml      text eol=lf
 *.plist     text eol=lf
 *.ps1       text eol=crlf
+*.py        text eol=lf
+
+# Verbatim upstream licence and notice texts. Never normalised: they are
+# reproduced byte for byte in THIRD-PARTY-NOTICES.md and in the Debian copyright
+# file, and a licence is not a file to reformat on the way past.
+notices/texts/** -text

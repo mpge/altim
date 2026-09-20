@@ -182,6 +182,18 @@ fi
 # ---------------------------------------------------------------------------
 step "Resources"
 
+# The bundle is the only copy a recipient gets: a DMG carries no package metadata
+# and there is no /usr/share/doc on this platform. If these two are not in it, the
+# notices for the .NET runtime, Skia, HarfBuzz, SQLite and the Inter typeface did
+# not reach anybody.
+for doc in LICENSE THIRD-PARTY-NOTICES.md; do
+    if [ -s "$APP/Contents/Resources/$doc" ]; then
+        ok "Contents/Resources/$doc is present and not empty"
+    else
+        bad "Contents/Resources/$doc is missing or empty"
+    fi
+done
+
 if [ -f "$APP/Contents/Resources/Altim.icns" ]; then
     case "$(file -b "$APP/Contents/Resources/Altim.icns")" in
         *icon*) ok "Altim.icns is an icon file" ;;

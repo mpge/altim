@@ -53,6 +53,7 @@
 #
 # To run nfpm by hand against this file:
 #   sed -e 's|@ARCH@|amd64|' -e 's|@VERSION@|0.1.0|' -e "s|@PAYLOAD@|$PWD/dist/.publish/linux-x64|" packaging/linux/nfpm.yaml > /tmp/nfpm.yaml
+#   cat LICENSE THIRD-PARTY-NOTICES.md > dist/.copyright   # build-linux.sh writes a proper header
 #   nfpm package --config /tmp/nfpm.yaml --packager deb --target dist/linux
 # ---------------------------------------------------------------------------
 
@@ -172,7 +173,19 @@ contents:
     file_info:
       mode: 0644
 
-  - src: LICENSE
+  # Not LICENSE. Debian Policy 12.5 asks for the copyright information and the
+  # distribution licence of everything in the binary package, and this package is
+  # mostly other people's software: the .NET 10 runtime, Skia, HarfBuzz, SQLite and
+  # the Inter typeface are all inside /usr/lib/altim. Altim's own MIT notice on its
+  # own described about a twentieth of what installs.
+  #
+  # build-linux.sh assembles dist/.copyright from LICENSE and THIRD-PARTY-NOTICES.md
+  # immediately before nfpm runs, so this file does not exist in a clean checkout and
+  # the by-hand invocation above has to build it first. It is large, a megabyte or so,
+  # because it carries every upstream notice file whole; both packagers compress it.
+  #
+  # THIRD-PARTY-NOTICES.md is not installed separately: all of it is in here.
+  - src: dist/.copyright
     dst: /usr/share/doc/altim/copyright
     file_info:
       mode: 0644

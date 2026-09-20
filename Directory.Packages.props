@@ -33,6 +33,8 @@
   <ItemGroup>
     <PackageVersion Include="Microsoft.Win32.SystemEvents" Version="10.0.12" />
     <PackageVersion Include="Microsoft.WindowsAppSDK.Foundation" Version="2.3.9" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.6" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK.Runtime" Version="2.4.0" />
   </ItemGroup>
 
   <!-- Linux only: notifications, logind sleep/wake, appearance portal.

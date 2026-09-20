@@ -47,6 +47,15 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 PROJECT="src/Altim.App/Altim.App.csproj"
+NOTICES="THIRD-PARTY-NOTICES.md"
+
+# Checked before the publish rather than after it. A bundle that assembles without
+# the notices is one that has to be built again.
+if [ ! -f "$NOTICES" ]; then
+    echo "no $NOTICES at the repository root." >&2
+    echo "Generate it with packaging/notices/build-notices.py; see packaging/README.md." >&2
+    exit 1
+fi
 
 if [ -z "$VERSION" ]; then
     VERSION="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$PROJECT" | head -n 1)"
@@ -164,6 +173,15 @@ if [ -d "$MACOS_DIR/assets" ]; then
     rm -rf "$RESOURCES_DIR/assets"
     mv "$MACOS_DIR/assets" "$RESOURCES_DIR/assets"
 fi
+
+# Contents/Resources, for the same reason the assets are there: anything in
+# Contents/MacOS is nested code under the default resource rules and a text file
+# cannot be sealed. Resources is where a bundle's documentation belongs anyway, and
+# it is covered by _CodeSignature/CodeResources once the bundle is sealed, so the
+# notices are tamper-evident along with everything else.
+step "Copying LICENSE and $NOTICES into Contents/Resources"
+install -m 0644 LICENSE "$RESOURCES_DIR/LICENSE"
+install -m 0644 "$NOTICES" "$RESOURCES_DIR/$NOTICES"
 
 # Whether the bundle can be sealed at all is decided here, before codesign is
 # reached: every file in Contents/MacOS other than the main executable is nested
