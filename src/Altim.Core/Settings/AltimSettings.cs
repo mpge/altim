@@ -162,6 +162,33 @@ public sealed record AltimSettings
     /// </remarks>
     public bool ClaudeStatusLineEnabled { get; init; }
 
+    /// <summary>
+    /// Whether Altim may ask GitHub, once a day, whether a newer release exists. Defaults
+    /// to true.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the only request Altim makes to a server of its own, and it is worth being
+    /// exact about what it is: an unauthenticated HTTPS GET for the newest release of a
+    /// public repository. It carries no identifier, no usage figure and no machine detail
+    /// beyond what any HTTPS request carries — an IP address and a user agent naming Altim
+    /// and its version. Nothing about which providers are installed, how much has been
+    /// used, or what is on this machine is in it or could be inferred from it.
+    /// </para>
+    /// <para>
+    /// It defaults on because a desktop application that silently stops receiving fixes is
+    /// worse for the user than a daily request they can see documented and switch off, and
+    /// nothing here ships signed yet, so the ability to replace a bad build matters more
+    /// than usual. <c>PRIVACY.md</c> states it in the same terms; the settings page offers
+    /// the switch beside the explanation rather than behind it.
+    /// </para>
+    /// <para>
+    /// Switching it off stops the automatic check and nothing else. A "check now" button
+    /// is still a check the user explicitly triggered, which is a different act.
+    /// </para>
+    /// </remarks>
+    public bool AutomaticUpdateChecks { get; init; } = true;
+
     private static int Clamp(int percent) =>
         Math.Clamp(percent, MinimumThresholdPercent, MaximumThresholdPercent);
 }

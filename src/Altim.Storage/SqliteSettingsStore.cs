@@ -78,6 +78,9 @@ public sealed class SqliteSettingsStore
 
         /// <summary>Key for <see cref="AltimSettings.ClaudeStatusLineEnabled"/>.</summary>
         public const string ClaudeStatusLine = "providers.claude_status_line";
+
+        /// <summary>Key for <see cref="AltimSettings.AutomaticUpdateChecks"/>.</summary>
+        public const string AutomaticUpdateChecks = "updates.automatic_checks";
     }
 
     /// <summary>
@@ -118,6 +121,8 @@ public sealed class SqliteSettingsStore
             AllowNetworkCalls = ReadBool(values, Keys.AllowNetworkCalls, defaults.AllowNetworkCalls),
             ClaudeStatusLineEnabled = ReadBool(values, Keys.ClaudeStatusLine,
                                                defaults.ClaudeStatusLineEnabled),
+            AutomaticUpdateChecks = ReadBool(values, Keys.AutomaticUpdateChecks,
+                                             defaults.AutomaticUpdateChecks),
         };
     }
 
@@ -165,6 +170,8 @@ public sealed class SqliteSettingsStore
             .ConfigureAwait(false);
         await Write(connection, Keys.ClaudeStatusLine, Format(settings.ClaudeStatusLineEnabled), ct)
             .ConfigureAwait(false);
+        await Write(connection, Keys.AutomaticUpdateChecks,
+                    Format(settings.AutomaticUpdateChecks), ct).ConfigureAwait(false);
 
         transaction.Commit();
     }

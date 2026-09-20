@@ -31,6 +31,10 @@ public sealed class AltimSettingsTests
         // Off, and it stays off until somebody asks: turning it on writes to Claude Code's
         // own settings file.
         Assert.False(settings.ClaudeStatusLineEnabled);
+
+        // On, and stated here rather than assumed: it is the only request Altim makes to a
+        // server of its own, so a change to the default has to be a change to this line.
+        Assert.True(settings.AutomaticUpdateChecks);
     }
 
     [Fact]

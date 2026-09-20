@@ -10,6 +10,7 @@ using Altim.Core.Abstractions;
 using Altim.Core.Models;
 using Altim.Core.Monitoring;
 using Altim.Core.Settings;
+using Altim.Core.Updates;
 using Altim.Storage;
 using Altim.UI.Accessibility;
 using Altim.UI.ViewModels;
@@ -108,6 +109,7 @@ internal sealed class AltimRuntime : IAsyncDisposable
     private PopupHost? _popup;
     private DashboardHost? _dashboard;
     private DispatcherTimer? _countdowns;
+    private UpdateService? _updates;
     private IReadOnlyList<IUsageProvider> _providers = [];
 
     /// <summary>
@@ -115,6 +117,12 @@ internal sealed class AltimRuntime : IAsyncDisposable
     /// run yet. Only ever touched from the maintenance loop, which is one task.
     /// </summary>
     private DateOnly? _lastRolledUpDay;
+
+    /// <summary>
+    /// When this process last asked whether a newer release exists, or null when it has
+    /// not. Only ever touched from the maintenance loop, which is one task.
+    /// </summary>
+    private DateTimeOffset? _lastUpdateCheck;
 
     private AltimSettings _current = AltimSettings.Default;
 
@@ -298,6 +306,7 @@ internal sealed class AltimRuntime : IAsyncDisposable
         // own window is still alive, which is what stops a ghost icon being left behind.
         _platform?.Dispose();
         _storage?.Dispose();
+        _updates?.Dispose();
 
         if (_instance is not null)
         {
@@ -405,6 +414,11 @@ internal sealed class AltimRuntime : IAsyncDisposable
             AltimSettings loaded = await _settings.GetAsync(ct).ConfigureAwait(false);
             _current = loaded;
             _networkPolicy.Set(loaded.AllowNetworkCalls);
+
+            // Constructed here rather than in the container because nothing in the
+            // graph depends on it: it is driven by the maintenance loop and read by the
+            // settings page, and it owns a socket that has to be closed on the way out.
+            _updates = new UpdateService();
 
             _services = ServiceRegistration.Build(
                 _report, _platform!, _storage, _settings, loaded, _networkGate, _networkPolicy);
@@ -673,6 +687,10 @@ internal sealed class AltimRuntime : IAsyncDisposable
 
     private async Task MaintainOnceAsync(CancellationToken ct)
     {
+        // Before the storage guard, because whether a newer Altim exists has nothing to
+        // do with whether this machine's database opened.
+        await CheckForUpdatesIfDueAsync(ct).ConfigureAwait(false);
+
         StorageStack? storage = _storage;
         if (storage is null)
         {
@@ -729,6 +747,56 @@ internal sealed class AltimRuntime : IAsyncDisposable
         {
             // Housekeeping. Failing it costs disk, never a reading.
             AltimLog.Write("storage", "Maintenance pass failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Asks whether a newer release exists, if the user allows it and a day has passed.
+    /// </summary>
+    /// <param name="ct">Cancelled at shutdown.</param>
+    /// <remarks>
+    /// <para>
+    /// Folded into the maintenance pass rather than given a timer, for the same reason the
+    /// usage map's writers are: Altim has one wake source outside the scheduler and its idle
+    /// cost is a published number. <see cref="UpdateSchedule"/> holds the cadence, so how
+    /// often Altim reaches the internet is a rule somebody can read and test rather than a
+    /// timer buried in a service.
+    /// </para>
+    /// <para>
+    /// The clock is stamped whether the check succeeded or failed. A laptop that is offline
+    /// all day would otherwise retry every five minutes, which is both worse and more
+    /// conspicuous on somebody else's network.
+    /// </para>
+    /// </remarks>
+    private async Task CheckForUpdatesIfDueAsync(CancellationToken ct)
+    {
+        UpdateService? updates = _updates;
+        if (updates is null)
+        {
+            return;
+        }
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (!UpdateSchedule.IsDue(_current.AutomaticUpdateChecks, _processStarted, _lastUpdateCheck, now))
+        {
+            return;
+        }
+
+        _lastUpdateCheck = now;
+
+        try
+        {
+            await updates.CheckAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown.
+        }
+        catch (Exception ex)
+        {
+            // CheckAsync reports its own ordinary failures, so anything reaching here is
+            // unexpected and still must not take the maintenance pass down with it.
+            AltimLog.Write("updates", "The update check threw", ex);
         }
     }
 
