@@ -25,7 +25,7 @@ internal sealed class SettingsGateway : ISettingsStore
 {
     private readonly ISettingsBackend _backend;
     private readonly Lock _gate = new();
-    private AltimSettings _current = AltimSettings.Default;
+    private AltimSettings _current = AltimSettings.FailClosed;
 
     /// <summary>Creates the gateway over a backend.</summary>
     /// <param name="backend">Where settings are read from and written to.</param>
@@ -41,7 +41,10 @@ internal sealed class SettingsGateway : ISettingsStore
     /// </summary>
     public event EventHandler<AltimSettings>? Changed;
 
-    /// <summary>The last settings read or written. <c>AltimSettings.Default</c> until the first read.</summary>
+    /// <summary>
+    /// The last settings read or written. <see cref="AltimSettings.FailClosed"/> until the
+    /// first read, so that a caller arriving before it is not told the user said yes.
+    /// </summary>
     public AltimSettings Current
     {
         get

@@ -21,7 +21,7 @@ No public tag exists yet.
       recipient has no way to discover what is inside. Generate with `nuget-license`, hand-add the
       four, wire into all three packaging paths.
 
-- [ ] **Network permission silently inverts when the database will not open.** `AllowNetworkCalls`
+- [x] **Network permission silently inverts when the database will not open.** `AllowNetworkCalls`
       defaults `true`, and the memory fallback is `AltimSettings.Default`, so a user who switched
       it **off** gets it **on** with no log line.
 

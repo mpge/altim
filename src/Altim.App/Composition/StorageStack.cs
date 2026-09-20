@@ -102,7 +102,9 @@ internal sealed class StorageStack : IDisposable
         }
         catch (Exception ex)
         {
-            report.Add("Usage history is unavailable; settings will not survive a restart");
+            report.Add(
+                "Usage history is unavailable, settings will not survive a restart, and "
+                + "live quota checks and update checks are off until they can be read");
             AltimLog.Write("storage", "Opening the database failed", ex);
 
             return new StorageStack(null, new NullUsageHistoryService(), new MemorySettingsBackend());

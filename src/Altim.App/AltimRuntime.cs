@@ -124,7 +124,13 @@ internal sealed class AltimRuntime : IAsyncDisposable
     /// </summary>
     private DateTimeOffset? _lastUpdateCheck;
 
-    private AltimSettings _current = AltimSettings.Default;
+    /// <summary>
+    /// The settings in force. <see cref="AltimSettings.FailClosed"/> rather than
+    /// <see cref="AltimSettings.Default"/> until the first read returns, because before
+    /// that Altim does not know what this user chose and the defaults say yes to both of
+    /// the switches that decide what leaves the machine.
+    /// </summary>
+    private AltimSettings _current = AltimSettings.FailClosed;
 
     /// <summary>
     /// Whether a window is on screen, as anything off the dispatcher thread may read it.

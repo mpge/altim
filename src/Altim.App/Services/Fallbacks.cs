@@ -8,14 +8,22 @@ namespace Altim.App.Services;
 /// Settings kept for the life of the process because the database could not be opened.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The user can still change anything; the change simply does not survive a restart, and the
 /// tray menu says so. Refusing to start instead would be the wrong trade for a utility whose
 /// whole job is to sit in the tray.
+/// </para>
+/// <para>
+/// It starts from <see cref="AltimSettings.FailClosed"/> rather than
+/// <see cref="AltimSettings.Default"/>, because the defaults say yes to both of the switches
+/// that decide what leaves the machine and this is exactly the case where nobody can be
+/// asked.
+/// </para>
 /// </remarks>
 internal sealed class MemorySettingsBackend : ISettingsBackend
 {
     private readonly Lock _gate = new();
-    private AltimSettings _settings = AltimSettings.Default;
+    private AltimSettings _settings = AltimSettings.FailClosed;
 
     /// <inheritdoc />
     public ValueTask<AltimSettings> GetAsync(CancellationToken ct)

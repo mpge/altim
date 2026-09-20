@@ -20,10 +20,17 @@ namespace Altim.App.Services;
 /// it on the tick that is about to make the call, and a change that lands a microsecond
 /// after that read is honoured by the next tick a second later.
 /// </para>
+/// <para>
+/// It starts <b>false</b>, which is not the default setting: until the stored settings have
+/// been read, Altim does not know whether this user allowed the call, and "not yet known" and
+/// "yes" are not the same answer. The runtime sets it from the loaded settings before any
+/// provider exists, so the closed window costs nothing and the open one would have been a
+/// permission granted by initialisation order.
+/// </para>
 /// </remarks>
 internal sealed class LiveNetworkPolicy : INetworkPolicy
 {
-    private volatile bool _allowed = true;
+    private volatile bool _allowed;
 
     /// <inheritdoc />
     public bool AllowsNetworkCalls => _allowed;

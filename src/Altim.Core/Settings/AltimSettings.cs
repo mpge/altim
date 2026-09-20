@@ -31,6 +31,32 @@ public sealed record AltimSettings
     /// <summary>The settings a fresh install starts from.</summary>
     public static AltimSettings Default { get; } = new();
 
+    /// <summary>
+    /// What to run with when the stored settings cannot be read at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Not <see cref="Default"/>, and the difference is the whole point.</b> An
+    /// unreadable database used to fall back to the defaults, which say yes to both of the
+    /// switches that decide what leaves the machine. So a user who had deliberately turned
+    /// <see cref="AllowNetworkCalls"/> off got it back on, silently, the first time their
+    /// database would not open — the one setting whose accidental inversion the user would
+    /// never see and could not consent to.
+    /// </para>
+    /// <para>
+    /// Everything else stays at its default, because a theme or a threshold that reverts is
+    /// a visible annoyance rather than a decision made on somebody's behalf. Only the two
+    /// permissions fail closed: the wrong answer costs a figure that reads as unavailable
+    /// and a check that does not run, both of which are states Altim already renders and
+    /// explains.
+    /// </para>
+    /// </remarks>
+    public static AltimSettings FailClosed { get; } = new()
+    {
+        AllowNetworkCalls = false,
+        AutomaticUpdateChecks = false,
+    };
+
     /// <summary>Which theme to render in. Defaults to following the system.</summary>
     public ThemePreference Theme { get; init; } = ThemePreference.System;
 

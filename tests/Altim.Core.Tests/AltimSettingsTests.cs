@@ -41,6 +41,42 @@ public sealed class AltimSettingsTests
     public void ANewInstanceMatchesTheSharedDefault() =>
         Assert.Equal(AltimSettings.Default, new AltimSettings());
 
+    /// <summary>
+    /// The defect this covers: an unreadable database silently granting a permission the
+    /// user had taken away. The memory fallback used to start from the defaults, which say
+    /// yes to both switches that decide what leaves the machine, so somebody who had turned
+    /// live quota checks <em>off</em> got them <em>on</em> the first time their database
+    /// would not open — with nothing on screen and nothing in the log to say so.
+    /// </summary>
+    [Fact]
+    public void TheFallbackForUnreadableSettingsSaysNoToBothPermissions()
+    {
+        Assert.False(AltimSettings.FailClosed.AllowNetworkCalls);
+        Assert.False(AltimSettings.FailClosed.AutomaticUpdateChecks);
+
+        // And the defaults it is standing in for say yes to both, which is the whole reason
+        // it cannot be them.
+        Assert.True(AltimSettings.Default.AllowNetworkCalls);
+        Assert.True(AltimSettings.Default.AutomaticUpdateChecks);
+    }
+
+    /// <summary>
+    /// Only the permissions differ. A theme or a threshold that reverts is a visible
+    /// annoyance; a permission that reverts is a decision made on somebody's behalf, and
+    /// widening this fallback past the two would be turning the first into the second.
+    /// </summary>
+    [Fact]
+    public void TheFallbackDiffersFromTheDefaultsInNothingElse()
+    {
+        AltimSettings widened = AltimSettings.FailClosed with
+        {
+            AllowNetworkCalls = true,
+            AutomaticUpdateChecks = true,
+        };
+
+        Assert.Equal(AltimSettings.Default, widened);
+    }
+
     [Fact]
     public void ChangingOneSettingLeavesTheRestAlone()
     {
