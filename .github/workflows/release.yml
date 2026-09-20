@@ -75,8 +75,21 @@ jobs:
         include:
           - name: Windows (x64)
             platform: windows
+            runtime: win-x64
+            channel: win
             runs-on: windows-latest
             artifact: windows-x64
+          # Native AOT cannot cross-compile, so this row needs an arm64 host
+          # rather than an extra -r on the x64 one. GitHub's windows-11-arm
+          # image is that host. Velopack keys its update feed on the channel,
+          # so the two Windows rows never read or overwrite each other's
+          # releases.win*.json.
+          - name: Windows (arm64)
+            platform: windows
+            runtime: win-arm64
+            channel: win-arm64
+            runs-on: windows-11-arm
+            artifact: windows-arm64
           - name: Linux (x64)
             platform: linux
             runs-on: ubuntu-latest
@@ -132,7 +145,8 @@ jobs:
           vpk download github
           --repoUrl https://github.com/${{ github.repository }}
           --token ${{ secrets.GITHUB_TOKEN }}
-          --outputDir dist/windows/win-x64
+          --channel ${{ matrix.channel }}
+          --outputDir dist/windows/${{ matrix.runtime }}
 
       - name: Build the Windows installer
         if: matrix.platform == 'windows'
@@ -140,8 +154,8 @@ jobs:
         run: |
           $params = @{
             Version   = $env:VERSION
-            Runtime   = 'win-x64'
-            OutputDir = 'dist/windows/win-x64'
+            Runtime   = '${{ matrix.runtime }}'
+            OutputDir = 'dist/windows/${{ matrix.runtime }}'
           }
           if ($env:WINDOWS_SIGN_PARAMS) { $params.SignParams = $env:WINDOWS_SIGN_PARAMS }
           ./packaging/windows/build-windows.ps1 @params
@@ -263,6 +277,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p upload
+          # Two Windows channels and two macOS architectures all land here, so a
+          # name appearing twice is a real risk, and silently keeping the first
+          # copy would ship one architecture's update feed under both names. The
+          # loop below refuses instead: a wrong RELEASES file is worse than none.
+          #
           # .nupkg, RELEASES, releases.win.json and assets.win.json are Velopack's
           # update feed. They are attached deliberately: the updater reads them
           # straight off the release, and a release without them is one that no
@@ -274,7 +293,15 @@ jobs:
                -o -name 'RELEASES*' -o -name 'releases*.json' -o -name 'assets*.json' \
                -o -name '*.AppImage' -o -name '*.deb' \
                -o -name '*.rpm' -o -name '*.dmg' \) \
-            -exec cp -n {} upload/ \;
+            -print0 |
+          while IFS= read -r -d '' file; do
+            name="$(basename "$file")"
+            if [ -e "upload/$name" ]; then
+              echo "::error::Two builders produced a file called $name."
+              exit 1
+            fi
+            cp "$file" "upload/$name"
+          done
           ( cd upload && sha256sum * > SHA256SUMS.txt )
           ls -lh upload
           echo "count=$(find upload -type f | wc -l)" >> "$GITHUB_OUTPUT"
@@ -294,15 +321,36 @@ jobs:
             echo
             echo "| Platform | File | What it is |"
             echo "|---|---|---|"
-            echo "| Windows | \`Altim-win-Setup.exe\` | Installer. Installs per user, no administrator prompt. |"
-            echo "| Windows | \`Altim-win-Portable.zip\` | Unzip and run. No installer, no updates. |"
-            echo "| Linux | \`Altim-*-x86_64.AppImage\` | \`chmod +x\` and run. Works on any glibc desktop with X11. |"
-            echo "| Linux | \`altim_*_amd64.deb\` | Debian and Ubuntu. |"
-            echo "| Linux | \`altim-*.x86_64.rpm\` | Fedora and RHEL. |"
-            echo "| macOS | \`Altim-*-arm64.dmg\` | Apple silicon: M1 and later. |"
-            echo "| macOS | \`Altim-*-x64.dmg\` | Intel Macs. |"
+            # Rows come from what is actually in upload/, not from a list written
+            # in advance. A builder that failed then shows up as a line under
+            # "Not in this release" rather than as a row pointing at nothing.
+            missing=""
+            row() {
+              local found
+              found="$(cd upload && ls -1 $1 2>/dev/null | head -1 || true)"
+              if [ -n "$found" ]; then
+                echo "| $2 | \`$found\` | $3 |"
+              else
+                missing="$missing- **$2** — $3"$'\n'
+              fi
+            }
+            row 'Altim-win-Setup.exe'          'Windows x64'   'Installer. Installs per user, no administrator prompt.'
+            row 'Altim-win-Portable.zip'       'Windows x64'   'Unzip and run. No installer, no updates.'
+            row 'Altim-win-arm64-Setup.exe'    'Windows arm64' 'Installer for Snapdragon and other arm64 PCs.'
+            row 'Altim-win-arm64-Portable.zip' 'Windows arm64' 'Unzip and run.'
+            row '*-x86_64.AppImage'            'Linux x64'     '`chmod +x` and run. Works on any glibc desktop with X11.'
+            row '*_amd64.deb'                  'Linux x64'     'Debian and Ubuntu.'
+            row '*.x86_64.rpm'                 'Linux x64'     'Fedora and RHEL.'
+            row '*-arm64.dmg'                  'macOS arm64'   'Apple silicon: M1 and later.'
+            row '*-x64.dmg'                    'macOS x64'     'Intel Macs.'
             echo
-            echo "\`.nupkg\` and \`RELEASES\` are the Velopack update feed for installed Windows copies. You do not need to download them."
+            if [ -n "$missing" ]; then
+              echo "**Not in this release** — the builder for these did not finish:"
+              echo
+              printf '%s' "$missing"
+              echo
+            fi
+            echo "\`.nupkg\`, \`RELEASES\` and \`releases.win*.json\` are the Velopack update feed for installed Windows copies. You do not need to download them."
             echo
             echo "### Code signing"
             echo
