@@ -242,6 +242,35 @@
         <TextBlock Theme="{DynamicResource AltimBodyText}" Text="{Binding AppName}" />
         <TextBlock Theme="{DynamicResource AltimCaptionMetricText}" Text="{Binding VersionText}" />
         <TextBlock Theme="{DynamicResource AltimCaptionText}" Text="{Binding Website}" />
+
+        <!--
+          The only request Altim makes to a server of its own, so the switch sits beside the
+          sentence that says what the request carries rather than behind a word like
+          "telemetry". The button is not gated on the switch: pressing it is somebody asking
+          once, which is a different act from Altim asking daily.
+        -->
+        <StackPanel Margin="0,12,0,0"
+                    IsEnabled="{Binding CanEditSettings}"
+                    Spacing="{DynamicResource AltimSpace4}">
+          <ToggleSwitch Content="{Binding AutomaticUpdateChecksLabel}"
+                        IsChecked="{Binding AutomaticUpdateChecks}" />
+          <TextBlock Theme="{DynamicResource AltimCaptionText}"
+                     Foreground="{DynamicResource AltimTextSecondaryBrush}"
+                     TextWrapping="Wrap"
+                     Text="{Binding AutomaticUpdateChecksDescription}" />
+        </StackPanel>
+
+        <StackPanel Margin="0,8,0,0"
+                    Orientation="Horizontal"
+                    Spacing="{DynamicResource AltimSpace12}">
+          <Button Content="{Binding CheckForUpdatesLabel}"
+                  IsEnabled="{Binding CanCheckForUpdates}"
+                  Command="{Binding CheckForUpdatesCommand}" />
+          <TextBlock VerticalAlignment="Center"
+                     Theme="{DynamicResource AltimCaptionText}"
+                     TextWrapping="Wrap"
+                     Text="{Binding UpdateStatusText}" />
+        </StackPanel>
       </StackPanel>
 
     </StackPanel>

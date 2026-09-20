@@ -84,12 +84,8 @@ internal sealed class UpdateService : IUpdateService, IDisposable
     /// <inheritdoc />
     public Uri ReleasesPage { get; } = new("https://github.com/" + Repository + "/releases");
 
-    /// <summary>
-    /// Whether this installation can replace itself. False for every shape but a Velopack
-    /// install, which is what makes the settings page able to say so rather than offering
-    /// a button that would do nothing.
-    /// </summary>
-    public bool CanFetch => TryOpenManager(out UpdateManager? manager) && manager!.IsInstalled;
+    /// <inheritdoc />
+    public bool CanApplyUpdates => TryOpenManager(out UpdateManager? manager) && manager!.IsInstalled;
 
     /// <inheritdoc />
     public async ValueTask<UpdateStatus> CheckAsync(CancellationToken ct)

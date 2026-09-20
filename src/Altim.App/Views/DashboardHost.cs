@@ -24,6 +24,7 @@ internal sealed class DashboardHost : IDisposable
     private readonly ISettingsStore _settings;
     private readonly IStatusLineService _statusLine;
     private readonly TimeProvider _time;
+    private readonly IUpdateService? _updates;
 
     private DashboardWindow? _window;
     private DashboardViewModel? _viewModel;
@@ -35,12 +36,17 @@ internal sealed class DashboardHost : IDisposable
     /// <param name="settings">The seam the settings page round-trips through.</param>
     /// <param name="statusLine">The seam the settings page installs the status line through.</param>
     /// <param name="timeProvider">The clock every time on screen is measured against.</param>
+    /// <param name="updates">
+    /// What the settings page asks whether a newer Altim exists, or null on a build that
+    /// has no way to find out.
+    /// </param>
     public DashboardHost(
         IReadOnlyList<IUsageProvider> providers,
         IUsageHistoryService history,
         ISettingsStore settings,
         IStatusLineService statusLine,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IUpdateService? updates = null)
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(history);
@@ -53,6 +59,7 @@ internal sealed class DashboardHost : IDisposable
         _settings = settings;
         _statusLine = statusLine;
         _time = timeProvider;
+        _updates = updates;
     }
 
     /// <summary>Raised after the window has been shown.</summary>
@@ -89,7 +96,8 @@ internal sealed class DashboardHost : IDisposable
         {
             if (_window is null)
             {
-                _viewModel = new DashboardViewModel(_providers, _history, _settings, _statusLine, _time);
+                _viewModel = new DashboardViewModel(
+                    _providers, _history, _settings, _statusLine, _time, _updates);
                 _window = new DashboardWindow(_viewModel);
                 _window.Closed += OnClosed;
                 _window.Show();

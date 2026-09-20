@@ -38,6 +38,17 @@ public interface IUpdateService
     Uri ReleasesPage { get; }
 
     /// <summary>
+    /// Whether this installation can replace itself, which decides what the settings page
+    /// offers rather than what it says.
+    /// </summary>
+    /// <remarks>
+    /// True only for a Velopack install. A portable unzip, a <c>.deb</c>, an AppImage and a
+    /// DMG dragged into Applications are all somebody else's to replace, and a button that
+    /// silently did nothing on those is worse than one that is not there.
+    /// </remarks>
+    bool CanApplyUpdates { get; }
+
+    /// <summary>
     /// Asks whether a newer release exists.
     /// </summary>
     /// <param name="ct">Cancels the check.</param>

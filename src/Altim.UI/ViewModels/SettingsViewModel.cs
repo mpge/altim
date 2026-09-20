@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Altim.Core.Abstractions;
 using Altim.Core.Settings;
+using Altim.Core.Updates;
 using Altim.UI.Formatting;
 using Altim.UI.Services;
 using Altim.UI.Threading;
@@ -38,11 +39,13 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
         nameof(ResetAlertsEnabled),
         nameof(AllowNetworkCalls),
         nameof(ClaudeStatusLineEnabled),
+        nameof(AutomaticUpdateChecks),
     ];
 
     private readonly ISettingsStore _store;
     private readonly IUsageHistoryService _history;
     private readonly IStatusLineService _statusLine;
+    private readonly IUpdateService? _updates;
     private readonly List<ProviderViewModel> _providers;
     private readonly Lock _saveLock = new();
     private AltimSettings _current = AltimSettings.Default;
@@ -92,6 +95,12 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
     private bool _claudeStatusLineEnabled;
 
     [ObservableProperty]
+    private bool _automaticUpdateChecks = AltimSettings.Default.AutomaticUpdateChecks;
+
+    [ObservableProperty]
+    private bool _isCheckingForUpdates;
+
+    [ObservableProperty]
     private bool _saveFailed;
 
     [ObservableProperty]
@@ -110,7 +119,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
         ISettingsStore store,
         IUsageHistoryService history,
         IStatusLineService statusLine,
-        IEnumerable<ProviderViewModel> providers)
+        IEnumerable<ProviderViewModel> providers,
+        IUpdateService? updates = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(history);
@@ -121,6 +131,12 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
         _history = history;
         _statusLine = statusLine;
         _providers = [.. providers];
+        _updates = updates;
+
+        if (_updates is not null)
+        {
+            _updates.Changed += OnUpdateStatusChanged;
+        }
 
         foreach (RefreshOption option in RefreshOption.Standard)
         {
@@ -321,6 +337,127 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
         "Version ",
         typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.0.0");
 
+    /// <summary>The label on the automatic-update switch.</summary>
+    public string AutomaticUpdateChecksLabel => "Check for new versions of Altim";
+
+    /// <summary>
+    /// What the automatic-update switch does, in terms of what actually leaves the machine.
+    /// </summary>
+    /// <remarks>
+    /// The one setting whose description has to survive being read by somebody who chose
+    /// Altim because it is local-first. So it says what the request is, what it carries and
+    /// what it does not, rather than "check for updates automatically" — which tells a
+    /// reader nothing they could act on.
+    /// </remarks>
+    public string AutomaticUpdateChecksDescription =>
+        "Once a day, Altim asks GitHub whether a newer release exists. The request carries "
+        + "nothing but your IP address and Altim's version, and no usage figures, provider "
+        + "names or machine details are in it. Turning this off stops the daily check; the "
+        + "button below still works whenever you press it.";
+
+    /// <summary>
+    /// What the last check found, in a sentence. Never a version on its own: "0.3.0" beside
+    /// "Version 0.2.0" leaves the reader to work out which is which.
+    /// </summary>
+    public string UpdateStatusText
+    {
+        get
+        {
+            if (_updates is null)
+            {
+                return "This build cannot check for updates.";
+            }
+
+            UpdateStatus status = _updates.Current;
+            return status.State switch
+            {
+                UpdateState.Available when status.Available is { } available =>
+                    "Version " + available.Text + " is available. " + WhereToGetIt,
+                UpdateState.Ready when status.Available is { } ready =>
+                    "Version " + ready.Text + " has been downloaded and installs the next "
+                    + "time Altim starts.",
+                UpdateState.UpToDate => "Altim is up to date.",
+                UpdateState.Unsupported => "This build cannot check for updates.",
+                UpdateState.Failed => "The last check did not get an answer. Altim will try again.",
+                _ => "Altim has not checked yet.",
+            };
+        }
+    }
+
+    /// <summary>
+    /// Where the download is, worded for the installation shape in hand.
+    /// </summary>
+    /// <remarks>
+    /// A Velopack install replaces itself and everything else does not, and saying so is the
+    /// difference between a button that works and one that appears to do nothing. A
+    /// <c>.deb</c>, an AppImage, a portable unzip and a DMG dragged into Applications are all
+    /// somebody else's to replace, and Altim rewriting files it did not install is not a
+    /// thing a tray utility should start doing.
+    /// </remarks>
+    private string WhereToGetIt =>
+        CanFetchUpdate
+            ? "Altim will download it and install it the next time it starts."
+            : "Download it from the releases page; this copy cannot replace itself.";
+
+    /// <summary>Whether this installation can replace itself.</summary>
+    public bool CanFetchUpdate => _updates?.CanApplyUpdates ?? false;
+
+    /// <summary>Whether the check button does anything.</summary>
+    public bool CanCheckForUpdates => _updates is not null;
+
+    /// <summary>The releases page, for the reader who would rather go and look.</summary>
+    public string ReleasesPageText =>
+        _updates is null ? string.Empty : _updates.ReleasesPage.Host + _updates.ReleasesPage.AbsolutePath;
+
+    /// <summary>The label on the check button.</summary>
+    public string CheckForUpdatesLabel => "Check now";
+
+    /// <summary>
+    /// Asks now, whatever the setting says.
+    /// </summary>
+    /// <param name="ct">Cancels the check.</param>
+    /// <remarks>
+    /// Deliberately not gated on <see cref="AutomaticUpdateChecks"/>. Somebody who switched
+    /// the daily check off and then pressed this has explicitly asked once, which is a
+    /// different act from Altim asking on its own, and the privacy note says so in those
+    /// terms.
+    /// </remarks>
+    [RelayCommand]
+    private async Task CheckForUpdatesAsync(CancellationToken ct)
+    {
+        if (_updates is null)
+        {
+            return;
+        }
+
+        IsCheckingForUpdates = true;
+
+        try
+        {
+            await _updates.CheckAsync(ct).ConfigureAwait(true);
+
+            if (_updates.Current.State == UpdateState.Available && CanFetchUpdate)
+            {
+                await _updates.FetchAsync(ct).ConfigureAwait(true);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The page closed while the request was out.
+        }
+        finally
+        {
+            IsCheckingForUpdates = false;
+            OnPropertyChanged(nameof(UpdateStatusText));
+        }
+    }
+
+    private void OnUpdateStatusChanged(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(UpdateStatusText));
+        OnPropertyChanged(nameof(CanFetchUpdate));
+    }
+
     /// <inheritdoc />
     public async Task LoadAsync(CancellationToken ct)
     {
@@ -411,6 +548,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
             NotifyOnWindowReset = ResetAlertsEnabled,
             AllowNetworkCalls = AllowNetworkCalls,
             ClaudeStatusLineEnabled = ClaudeStatusLineEnabled,
+            AutomaticUpdateChecks = AutomaticUpdateChecks,
         };
 
         _current = next;
@@ -611,6 +749,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDashboardPage
             ResetAlertsEnabled = settings.NotifyOnWindowReset;
             AllowNetworkCalls = settings.AllowNetworkCalls;
             ClaudeStatusLineEnabled = settings.ClaudeStatusLineEnabled;
+            AutomaticUpdateChecks = settings.AutomaticUpdateChecks;
         }
         finally
         {

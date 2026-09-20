@@ -41,7 +41,8 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
         IUsageHistoryService history,
         ISettingsStore settings,
         IStatusLineService statusLine,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IUpdateService? updates = null)
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(history);
@@ -56,7 +57,7 @@ public sealed partial class DashboardViewModel : ObservableObject, IDisposable
 
         Overview = new OverviewViewModel(_providers, history, timeProvider);
         History = new HistoryViewModel(_providers, history, timeProvider);
-        Settings = new SettingsViewModel(settings, history, statusLine, _providers);
+        Settings = new SettingsViewModel(settings, history, statusLine, _providers, updates);
         Settings.HistoryCleared += OnHistoryCleared;
 
         Sections.Add(new NavigationItemViewModel(Overview, NavigationIcon.Overview));

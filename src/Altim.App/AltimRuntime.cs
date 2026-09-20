@@ -515,7 +515,8 @@ internal sealed class AltimRuntime : IAsyncDisposable
             _storage!.History,
             _settings!,
             new ClaudeStatusLineService(),
-            TimeProvider.System);
+            TimeProvider.System,
+            _updates);
         _dashboard.Opened += OnWindowVisibilityChanged;
         _dashboard.Closed += OnWindowVisibilityChanged;
 
