@@ -39,6 +39,9 @@ question: **what are my AI coding tools consuming right now?**
 
 </div>
 
+> **No release is published yet, so those buttons have nothing to download.** The pipeline builds
+> all five targets and the artefacts exist as a draft; this line goes when the first one is out.
+
 Nothing is signed with a paid certificate yet, so Windows shows a SmartScreen warning and macOS
 needs a right-click **Open** the first time. Every release carries a `SHA256SUMS.txt`.
 [INSTALL.md](docs/INSTALL.md) has the per-platform steps and the supported versions.
