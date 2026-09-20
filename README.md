@@ -15,8 +15,36 @@ Altim is a lightweight, local-first desktop monitor for AI coding agent usage. I
 your system tray (Windows), menu bar (macOS) or status area (Linux) and answers one
 question: **what are my AI coding tools consuming right now?**
 
-> **Status: early development.** The architecture and provider data sources are being
-> established first — see [ARCHITECTURE.md](ARCHITECTURE.md) and [PROVIDERS.md](PROVIDERS.md).
+> **Status: pre-release.** It builds and passes its tests on Windows, Ubuntu and macOS, and it
+> runs daily on Windows. **Nobody has yet run it on a Mac or a Linux desktop**, so the tray icon,
+> notifications and start-at-login are unverified there — see the platform matrix in
+> [ARCHITECTURE.md](ARCHITECTURE.md). What each provider can and cannot report is traced in
+> [PROVIDERS.md](PROVIDERS.md).
+
+## Install
+
+Downloads are on the [releases page](https://github.com/mpge/altim/releases). Every release
+carries a `SHA256SUMS.txt`; checking against it is worthwhile because none of these artefacts is
+signed with a paid certificate yet.
+
+| Platform | Download | Notes |
+|---|---|---|
+| Windows 10 1809 or later, x64 | `Altim-win-Setup.exe` | Installs per user, no administrator prompt. SmartScreen will warn that the publisher is unknown: choose **More info**, then **Run anyway**. |
+| Windows, no installer | `Altim-win-Portable.zip` | Unpack and run `Altim.exe`. No updates, no Start menu entry. |
+| macOS 12 or later, Apple silicon | `Altim-<version>-arm64.dmg` | Ad-hoc signed, not notarised, so Gatekeeper refuses it on first open: **right-click the app, choose Open**, then Open again. |
+| Debian, Ubuntu | `altim_<version>_amd64.deb` | `sudo apt install ./altim_<version>_amd64.deb` |
+| Fedora, RHEL | `altim-<version>.x86_64.rpm` | `sudo dnf install ./altim-<version>.x86_64.rpm` |
+| Any Linux desktop | `Altim-<version>-x86_64.AppImage` | `chmod +x` it and run it. |
+
+**Altim lives in the tray**, not in a window. On Windows 11 a newly installed tray icon goes into
+the overflow behind the chevron until you drag it out, so the first launch opens the dashboard once
+to show you where things are. After that it starts quietly unless you turn **Start minimised** off.
+
+Nothing here needs administrator rights, and Altim makes no network requests of its own — see
+[Privacy](#privacy).
+
+**Not yet available:** an Intel macOS build (it builds in CI but is not published yet), `win-arm64`,
+and automatic updates on any platform. Upgrading today means downloading the new release.
 
 ## What it shows
 
