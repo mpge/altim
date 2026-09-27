@@ -11,8 +11,8 @@ signed with a paid certificate yet.
 | Windows, no installer | `Altim-win-Portable.zip` | Unpack and run `Altim.exe`. No updates, no Start menu entry. |
 | macOS 12 or later, Apple silicon | `Altim-<version>-arm64.dmg` | Ad-hoc signed, not notarised, so Gatekeeper refuses it on first open: **right-click the app, choose Open**, then Open again. |
 | macOS 12 or later, Intel | `Altim-<version>-x64.dmg` | The same, for pre-2020 Macs. |
-| Debian, Ubuntu | `altim_<version>_amd64.deb` | `sudo apt install ./altim_<version>_amd64.deb` |
-| Fedora, RHEL | `altim-<version>.x86_64.rpm` | `sudo dnf install ./altim-<version>.x86_64.rpm` |
+| Debian, Ubuntu | `altim_<version>-1_amd64.deb` | `sudo apt install ./altim_<version>-1_amd64.deb` |
+| Fedora, RHEL | `altim-<version>-1.x86_64.rpm` | `sudo dnf install ./altim-<version>-1.x86_64.rpm` |
 | Any Linux desktop | `Altim-<version>-x86_64.AppImage` | `chmod +x` it and run it. |
 
 **Altim lives in the tray**, not in a window. On Windows 11 a newly installed tray icon goes into
