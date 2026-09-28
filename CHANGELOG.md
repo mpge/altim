@@ -6,7 +6,7 @@ so anything may still move.
 Each release's page carries the downloads, their checksums, and a plain statement of what is and
 is not signed.
 
-## 0.1.0 — 2026-09-26
+## 0.1.0 — unreleased
 
 The first published release. Everything below already existed and was tested; what is new is that
 you can install it.
