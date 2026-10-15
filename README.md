@@ -112,6 +112,14 @@ dotnet test Altim.sln -c Release
 dotnet run --project src/Altim.App
 ```
 
+If Altim is already running, exit it from the tray before building the full solution: the
+Windows process locks the app output and can cause `MSB3027`. To keep monitoring while working
+on a library, build that project on its own. The solution's test command does not build
+`Altim.App`, so it can run while the app stays open.
+
+The tests use Microsoft.Testing.Platform; omit `--nologo`, which it does not support.
+For portable builds and a separate artifacts directory, follow [packaging/README.md](packaging/README.md).
+
 CI compiles and tests on Windows, Linux and macOS. See [DEVELOPING.md](docs/DEVELOPING.md) for
 the repository layout and how to add a provider.
 
